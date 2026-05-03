@@ -162,7 +162,7 @@ def test_phase7_runtime_guides_routes_round_trip(monkeypatch, tmp_path, git_avai
     assert summary_payload["reviews"]["count"] == 1
     assert summary_payload["reviews"]["latest"]["summary"] == "Toolbar overlaps the main heading."
     assert summary_payload["capabilities"]["gatherReports"]["available"] is True
-    assert summary_payload["capabilities"]["play"]["available"] is False
+    assert summary_payload["capabilities"]["play"]["available"] is True
 
     latest_review = _FakeHandler()
     assert handle_get(

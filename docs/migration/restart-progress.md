@@ -11,7 +11,7 @@ Last updated: 2026-05-03
 - Phase 4: Complete
 - Phase 5: Complete
 - Phase 6: Complete
-- Phase 7: Next
+- Phase 7: In progress
 - Phase 8 and later: Not started
 
 ## Phase 0 deliverables
@@ -28,9 +28,9 @@ Last updated: 2026-05-03
 - Branch: `upstream-restart/20260503-phase0`
 - Base ref: `upstream/master`
 - Base commit: `9e31a2ac65c3fa7c26a733e213a308aa4a04f992`
-- Current slice: Phase 6 workflow inbox notifications
+- Current slice: Phase 7 runtime evidence guides checkpoint
 - Current guardrail result: `ready`
-- Current hotspot churn: `0` committed hotspot files, `4` working-tree hotspot files
+- Current hotspot churn: `4` committed hotspot files, `0` working-tree hotspot files
 - Current hotspot detail: `api/routes.py` `+12 / -0` (`12` lines, within budget); `static/boot.js` `+4 / -1` (`5` lines, within budget); `static/index.html` `+3 / -0` (`3` lines, within budget); `static/messages.js` `+1 / -0` (`1` line, within budget)
 
 ## Minimal upstream-owned edits in Phase 0
@@ -345,6 +345,48 @@ Result:
 - `static/messages.js`
   No additional Phase 6 churn was added. The existing readable-output refresh hook remained unchanged.
 
+## Phase 7 checkpoint deliverables
+
+- [x] Add fork-owned runtime gather/report storage in `api/ops_guides.py`
+- [x] Add fork-owned runtime summary helpers in `api/ops_runtime_tools.py`
+- [x] Add fork-owned runtime evidence routes in `api/routes_ops_runtime.py`
+- [x] Mount a lightweight fork-owned runtime evidence panel in `static/ops-runtime.js`
+- [x] Wire the selected-project `/ops` UI to the new runtime summary endpoint without editing upstream-owned files
+- [x] Run focused verification and a merge rehearsal for this checkpoint
+
+## Phase 7 checkpoint verification
+
+- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase5_readable_output.py tests/test_upstream_restart_phase6_notifications.py tests/test_upstream_restart_phase7_runtime_guides.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
+- `python -m py_compile upstream_restart_guardrails.py api/routes_ops_shell.py api/routes_ops.py api/routes_ops_projects.py api/routes_ops_sessions.py api/routes_ops_notifications.py api/routes_ops_runtime.py api/ops_projects.py api/ops_sessions.py api/ops_notifications.py api/ops_guides.py api/ops_runtime_tools.py api/session_sidecars.py api/session_readable_output.py`
+- `python upstream_restart_guardrails.py`
+- `git diff --check`
+
+Result:
+
+- `36` tests passed
+- guardrail script stayed `ready`
+- Phase 7 checkpoint work stayed entirely in fork-owned files; hotspot churn remained the same four committed files from earlier completed slices
+- the `/ops` UI now shows recent runtime gather reports and review requests for the selected project from fork-owned storage and routes
+- no whitespace or patch-format issues were reported
+
+## Phase 7 checkpoint merge rehearsal
+
+- Rehearsal worktree: `/tmp/hermes-webui-upstream-restart-rehearse-phase7-runtime-guides`
+- Rehearsal branch: `tmp/rehearse-upstream-restart-phase7-runtime-guides`
+- Snapshot commit: `43a36de`
+- Command: `git merge --no-edit upstream/master`
+- Result: `Already up to date.`
+- Conflict files: `0`
+- Conflict count: `0`
+- Mechanical resolution required: no
+- Hotspot files touched during rehearsal: `api/routes.py`, `static/boot.js`, `static/index.html`, `static/messages.js` only
+- Hotspot budget result during rehearsal: within budget
+
+## Minimal upstream-owned edits in Phase 7 checkpoint
+
+- None.
+  This checkpoint kept all new runtime evidence logic in fork-owned backend and frontend modules. No new upstream-owned files were touched beyond the hotspot surface already established in earlier completed slices.
+
 ## Next concrete step
 
-Start Phase 7 on this clean branch: port runtime inspect, gather/review, and Play surfaces as fork-owned product features.
+Continue Phase 7 on this clean branch: port Play config/status/start/stop/log/proxy and then add runtime snapshot, screenshot, and action flows through fork APIs.

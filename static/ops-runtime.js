@@ -79,6 +79,84 @@
     }).join('');
   }
 
+  function playStatus(summary){
+    const play=summary && summary.play ? summary.play : {};
+    return play && typeof play === 'object' ? play : {};
+  }
+
+  function playButtons(play,state){
+    const busy=String(state && state.playBusyAction || '').trim();
+    const running=play.running===true || ['queued','building','starting','ready'].includes(String(play.status||'').toLowerCase());
+    const ready=play.ready===true;
+    const configured=play.configExists===true && play.valid===true;
+    const buttons=[
+      '<button class="ops-shell-link" type="button" data-ops-action="refresh-play">Refresh Play</button>',
+      '<button class="ops-shell-link" type="button" data-ops-action="show-play-config">Configure</button>'
+    ];
+    buttons.push('<button class="ops-shell-link'+(configured&&!running?' primary':'')+'" type="button" data-ops-action="start-play"'+(configured&&!running&&!busy?'':' disabled')+'>'+(busy==='start'?'Starting…':'Start')+'</button>');
+    buttons.push('<button class="ops-shell-link" type="button" data-ops-action="restart-play"'+(configured&&!busy?'':' disabled')+'>'+(busy==='restart'?'Restarting…':'Restart')+'</button>');
+    buttons.push('<button class="ops-shell-link" type="button" data-ops-action="stop-play"'+(running&&!busy?'':' disabled')+'>'+(busy==='stop'?'Stopping…':'Stop')+'</button>');
+    buttons.push('<button class="ops-shell-link" type="button" data-ops-action="show-play-logs">Logs</button>');
+    buttons.push('<button class="ops-shell-link" type="button" data-ops-action="open-play"'+(ready&&play.inspectUrl?'':' disabled')+'>Open</button>');
+    return buttons.join('');
+  }
+
+  function playMeta(play){
+    const bits=[];
+    if(play.configPath)bits.push('Config: '+String(play.configPath));
+    if(play.inspectUrl)bits.push('Inspect: '+String(play.inspectUrl));
+    if(play.allocatedPort)bits.push('Port: '+String(play.allocatedPort));
+    return bits.length ? '<p class="ops-runtime-note">'+escapeHtml(bits.join(' | '))+'</p>' : '';
+  }
+
+  function playConfigPanel(state){
+    if(!(state && state.showPlayConfig))return '';
+    const doc=state.playConfigDoc||{};
+    const info=doc.info||{};
+    const target=String(doc.targetPath||doc.path||info.path||'');
+    const content=String(doc.content||'');
+    return [
+      '<form class="ops-runtime-config-form" data-ops-form="play-config">',
+      '<div class="ops-runtime-inline-header"><strong>Play config</strong><button class="ops-shell-link" type="button" data-ops-action="close-play-config">Close</button></div>',
+      target?'<p class="ops-runtime-note">'+escapeHtml(target)+'</p>':'',
+      '<textarea name="content" rows="14"'+((state.loadingPlayConfig||state.savingPlayConfig)?' disabled':'')+'>'+escapeHtml(content)+'</textarea>',
+      '<div class="ops-runtime-actions">',
+      '<button class="ops-shell-link primary" type="submit"'+((state.loadingPlayConfig||state.savingPlayConfig)?' disabled':'')+'>'+(state.savingPlayConfig?'Saving…':'Save Play config')+'</button>',
+      '<button class="ops-shell-link" type="button" data-ops-action="reload-play-config"'+(state.loadingPlayConfig?' disabled':'')+'>Reload</button>',
+      '</div>',
+      '</form>'
+    ].join('');
+  }
+
+  function playLogsPanel(state){
+    if(!(state && state.showPlayLogs))return '';
+    const logs=state.playLogs||{};
+    const text=String(logs.text||'No Play logs yet.');
+    return [
+      '<div class="ops-runtime-logs-panel">',
+      '<div class="ops-runtime-inline-header"><strong>Play logs</strong><button class="ops-shell-link" type="button" data-ops-action="close-play-logs">Close</button></div>',
+      '<pre class="ops-runtime-logs">'+escapeHtml(text)+'</pre>',
+      '</div>'
+    ].join('');
+  }
+
+  function playSection(summary,state){
+    const play=playStatus(summary);
+    const summaryText=String(play.statusSummary||play.failureSummary||'Play status unavailable.');
+    const label=String(play.status||'idle');
+    return [
+      '<section class="ops-runtime-play-panel">',
+      '<div class="ops-epic-header"><h3>Play workflow</h3><span>'+escapeHtml(label)+'</span></div>',
+      state && state.playError ? '<p class="ops-shell-error">'+escapeHtml(state.playError)+'</p>' : '',
+      '<div class="ops-runtime-play-status"><span class="ops-runtime-pill">'+escapeHtml(statusLabel(label))+'</span><p>'+escapeHtml(summaryText)+'</p></div>',
+      playMeta(play),
+      '<div class="ops-runtime-actions">'+playButtons(play,state)+'</div>',
+      playConfigPanel(state),
+      playLogsPanel(state),
+      '</section>'
+    ].join('');
+  }
+
   function renderSection(state){
     const selectedProject=state && state.selectedProject ? state.selectedProject : null;
     if(!selectedProject){
@@ -118,6 +196,7 @@
       '<span><strong>Gather reports</strong>'+escapeHtml(String(gatherCount||0))+'</span>',
       '<span><strong>Review requests</strong>'+escapeHtml(String(reviewCount||0))+'</span>',
       '</div>',
+      playSection(summary,state),
       '<div class="ops-runtime-capabilities">'+capabilityCards(summary)+'</div>',
       '<div class="ops-runtime-grid">',
       '<section class="ops-runtime-column"><div class="ops-epic-header"><h3>Recent gather reports</h3><span>'+escapeHtml(String(gatherCount||0)+' total')+'</span></div>'+reportItems(summary)+'</section>',

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from api import ops_guides, ops_projects
+from api import ops_guides, ops_projects, play_pipeline
 
 
 def runtime_capabilities() -> dict:
@@ -25,9 +25,9 @@ def runtime_capabilities() -> dict:
             "reason": "Runtime action endpoints are not ported on the clean branch yet.",
         },
         "play": {
-            "available": False,
+            "available": True,
             "label": "Play workflow",
-            "reason": "Play pipeline and proxy endpoints are still pending in Phase 7.",
+            "reason": "Play config, status, logs, start, stop, restart, and proxy endpoints are available on the clean branch.",
         },
     }
 
@@ -36,6 +36,7 @@ def get_runtime_summary(project_id: str) -> dict:
     project = ops_projects.get_ops_project(project_id)
     gather = ops_guides.list_gather_reports(project["id"], {"limit": 3})
     reviews = ops_guides.list_review_requests(project["id"], {"limit": 3})
+    play_status = play_pipeline.build_project_play_status(project["id"])
     return {
         "projectId": project["id"],
         "capabilities": runtime_capabilities(),
@@ -49,4 +50,5 @@ def get_runtime_summary(project_id: str) -> dict:
             "reviews": reviews["reviews"],
             "latest": reviews["reviews"][0] if reviews["reviews"] else None,
         },
+        "play": play_status,
     }

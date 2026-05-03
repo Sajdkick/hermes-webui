@@ -28,6 +28,15 @@
       loadingRuntimeSummary:false,
       runtimeSummary:null,
       runtimeError:'',
+      loadingPlayConfig:false,
+      playConfigDoc:null,
+      savingPlayConfig:false,
+      playLogs:null,
+      loadingPlayLogs:false,
+      playError:'',
+      playBusyAction:'',
+      showPlayConfig:false,
+      showPlayLogs:false,
       loadingNotifications:false,
       notifications:[],
       notificationsError:'',
@@ -46,6 +55,11 @@
       }
       if(kind==='select-project'){
         state.selectedProjectId=action.getAttribute('data-project-id')||'';
+        state.playConfigDoc=null;
+        state.playLogs=null;
+        state.playError='';
+        state.showPlayConfig=false;
+        state.showPlayLogs=false;
         loadTasks(root,state);
         loadRuntimeSummary(root,state);
         return;
@@ -60,6 +74,40 @@
       }
       if(kind==='refresh-runtime'){
         loadRuntimeSummary(root,state);
+        return;
+      }
+      if(kind==='refresh-play'){
+        loadRuntimeSummary(root,state);
+        return;
+      }
+      if(kind==='show-play-config'){
+        loadPlayConfig(root,state,true);
+        return;
+      }
+      if(kind==='close-play-config'){
+        state.showPlayConfig=false;
+        render(root,state);
+        return;
+      }
+      if(kind==='reload-play-config'){
+        loadPlayConfig(root,state,true);
+        return;
+      }
+      if(kind==='show-play-logs'){
+        loadPlayLogs(root,state,true);
+        return;
+      }
+      if(kind==='close-play-logs'){
+        state.showPlayLogs=false;
+        render(root,state);
+        return;
+      }
+      if(kind==='start-play' || kind==='restart-play' || kind==='stop-play'){
+        runPlayAction(root,state,kind.replace('-play',''));
+        return;
+      }
+      if(kind==='open-play'){
+        openPlay(root,state);
         return;
       }
       if(kind==='launch-task-session'){
@@ -111,6 +159,11 @@
           sessionId:formData.get('sessionId'),
           response:formData.get('response'),
         });
+        return;
+      }
+      if(form.matches('[data-ops-form="play-config"]')){
+        event.preventDefault();
+        savePlayConfig(root,state,new FormData(form));
       }
     });
 
@@ -208,12 +261,110 @@
     render(root,state);
     try{
       state.runtimeSummary=await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/runtime/summary');
+      state.playError='';
     }catch(error){
       state.runtimeSummary=null;
       state.runtimeError=error && error.message ? error.message : 'Could not load runtime evidence.';
     }finally{
       state.loadingRuntimeSummary=false;
       render(root,state);
+    }
+  }
+
+  async function loadPlayConfig(root,state,showPanel){
+    if(!state.selectedProjectId)return;
+    state.loadingPlayConfig=true;
+    if(showPanel)state.showPlayConfig=true;
+    state.playError='';
+    render(root,state);
+    try{
+      state.playConfigDoc=await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/play/config');
+    }catch(error){
+      state.playError=error && error.message ? error.message : 'Could not load Play config.';
+    }finally{
+      state.loadingPlayConfig=false;
+      render(root,state);
+    }
+  }
+
+  async function savePlayConfig(root,state,formData){
+    if(!state.selectedProjectId)return;
+    state.savingPlayConfig=true;
+    state.playError='';
+    render(root,state);
+    try{
+      const payload=await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/play/config',{
+        method:'POST',
+        body:{content:formData.get('content')},
+      });
+      if(payload){
+        state.playConfigDoc={
+          ...(state.playConfigDoc||{}),
+          ...payload,
+          content:String(formData.get('content')||''),
+        };
+      }
+      await loadRuntimeSummary(root,state);
+    }catch(error){
+      state.playError=error && error.message ? error.message : 'Could not save Play config.';
+      state.savingPlayConfig=false;
+      render(root,state);
+      return;
+    }
+    state.savingPlayConfig=false;
+    render(root,state);
+  }
+
+  async function loadPlayLogs(root,state,showPanel){
+    if(!state.selectedProjectId)return;
+    state.loadingPlayLogs=true;
+    if(showPanel)state.showPlayLogs=true;
+    state.playError='';
+    render(root,state);
+    try{
+      state.playLogs=await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/play/logs?limit=200');
+    }catch(error){
+      state.playError=error && error.message ? error.message : 'Could not load Play logs.';
+    }finally{
+      state.loadingPlayLogs=false;
+      render(root,state);
+    }
+  }
+
+  async function runPlayAction(root,state,action){
+    if(!state.selectedProjectId)return;
+    state.playBusyAction=String(action||'');
+    state.playError='';
+    render(root,state);
+    try{
+      await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/play/'+encodeURIComponent(action),{
+        method:'POST',
+        body:{},
+      });
+      await loadRuntimeSummary(root,state);
+      if(state.showPlayLogs && action!=='stop'){
+        loadPlayLogs(root,state,false);
+      }
+    }catch(error){
+      state.playError=error && error.message ? error.message : 'Could not update Play state.';
+      state.playBusyAction='';
+      render(root,state);
+      return;
+    }
+    state.playBusyAction='';
+    render(root,state);
+  }
+
+  function openPlay(root,state){
+    const summary=state.runtimeSummary && state.runtimeSummary.play ? state.runtimeSummary.play : null;
+    const target=summary && summary.inspectUrl ? String(summary.inspectUrl) : '';
+    if(!target)return;
+    if(typeof window!=='undefined' && window.location){
+      if(typeof window.location.assign==='function'){
+        window.location.assign(target);
+        return;
+      }
+      window.location.href=target;
     }
   }
 
@@ -501,6 +652,15 @@
         loadingRuntimeSummary:state.loadingRuntimeSummary,
         runtimeSummary:state.runtimeSummary,
         runtimeError:state.runtimeError,
+        loadingPlayConfig:state.loadingPlayConfig,
+        playConfigDoc:state.playConfigDoc,
+        savingPlayConfig:state.savingPlayConfig,
+        playLogs:state.playLogs,
+        loadingPlayLogs:state.loadingPlayLogs,
+        playError:state.playError,
+        playBusyAction:state.playBusyAction,
+        showPlayConfig:state.showPlayConfig,
+        showPlayLogs:state.showPlayLogs,
       });
     }
     return '';

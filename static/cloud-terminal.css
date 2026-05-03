@@ -374,6 +374,58 @@
   color: rgba(255, 255, 255, 0.54);
 }
 
+.ops-runtime-play-panel,
+.ops-runtime-config-form,
+.ops-runtime-logs-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.36);
+}
+
+.ops-runtime-play-status {
+  display: grid;
+  gap: 10px;
+}
+
+.ops-runtime-play-status p {
+  margin: 0;
+}
+
+.ops-runtime-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ops-runtime-inline-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.ops-runtime-config-form textarea,
+.ops-runtime-logs {
+  width: 100%;
+  min-height: 220px;
+  margin: 0;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 23, 42, 0.82);
+  color: inherit;
+  font: inherit;
+}
+
+.ops-runtime-logs {
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .ops-task-toggle {
   display: flex;
   align-items: flex-start;

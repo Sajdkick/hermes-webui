@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from api import (
     routes_ops_notifications,
+    routes_ops_play,
     routes_ops_projects,
     routes_ops_runtime,
     routes_ops_sessions,
@@ -16,6 +17,8 @@ def handle_get(handler, parsed) -> bool:
         return True
     if routes_ops_notifications.handle_get(handler, parsed):
         return True
+    if routes_ops_play.handle_get(handler, parsed):
+        return True
     if routes_ops_runtime.handle_get(handler, parsed):
         return True
     if routes_ops_sessions.handle_get(handler, parsed):
@@ -27,6 +30,8 @@ def handle_get(handler, parsed) -> bool:
 
 def handle_post(handler, parsed, body: dict) -> bool:
     if routes_ops_notifications.handle_post(handler, parsed, body):
+        return True
+    if routes_ops_play.handle_post(handler, parsed, body):
         return True
     if routes_ops_runtime.handle_post(handler, parsed, body):
         return True

@@ -1234,7 +1234,7 @@ def handle_get(handler, parsed) -> bool:
             },
         )
 
-    if parsed.path in ("/ops", "/ops/") or parsed.path.startswith("/api/ops/"):
+    if parsed.path in ("/ops", "/ops/") or parsed.path.startswith("/api/ops/") or parsed.path.startswith("/play-project/"):
         from api.routes_ops import handle_get as handle_ops_get
 
         if handle_ops_get(handler, parsed):
@@ -1831,7 +1831,7 @@ def handle_post(handler, parsed) -> bool:
 
     body = read_body(handler)
 
-    if parsed.path.startswith("/api/ops/"):
+    if parsed.path.startswith("/api/ops/") or parsed.path.startswith("/play-project/"):
         from api.routes_ops import handle_post as handle_ops_post
 
         if handle_ops_post(handler, parsed, body):
