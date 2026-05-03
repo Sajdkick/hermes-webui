@@ -375,6 +375,7 @@
 }
 
 .ops-runtime-play-panel,
+.ops-runtime-inspect-panel,
 .ops-runtime-config-form,
 .ops-runtime-logs-panel {
   display: grid;
@@ -398,6 +399,68 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.ops-runtime-tool-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.ops-runtime-tool,
+.ops-runtime-tool-form,
+.ops-runtime-tool-output {
+  display: grid;
+  gap: 12px;
+}
+
+.ops-runtime-tool {
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.36);
+}
+
+.ops-runtime-tool p,
+.ops-runtime-tool-form label span,
+.ops-runtime-checkbox {
+  margin: 0;
+}
+
+.ops-runtime-tool-form {
+  align-content: start;
+}
+
+.ops-runtime-tool-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.ops-runtime-tool-form input,
+.ops-runtime-tool-form textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 23, 42, 0.82);
+  color: inherit;
+  font: inherit;
+}
+
+.ops-runtime-tool-form textarea {
+  min-height: 180px;
+  resize: vertical;
+}
+
+.ops-runtime-checkbox {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.ops-runtime-tool-output {
+  padding-top: 4px;
 }
 
 .ops-runtime-inline-header {

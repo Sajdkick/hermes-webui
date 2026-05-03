@@ -28,6 +28,8 @@
       loadingRuntimeSummary:false,
       runtimeSummary:null,
       runtimeError:'',
+      inspectError:'',
+      inspectBusyAction:'',
       loadingPlayConfig:false,
       playConfigDoc:null,
       savingPlayConfig:false,
@@ -58,6 +60,8 @@
         state.playConfigDoc=null;
         state.playLogs=null;
         state.playError='';
+        state.inspectError='';
+        state.inspectBusyAction='';
         state.showPlayConfig=false;
         state.showPlayLogs=false;
         loadTasks(root,state);
@@ -74,6 +78,14 @@
       }
       if(kind==='refresh-runtime'){
         loadRuntimeSummary(root,state);
+        return;
+      }
+      if(kind==='run-inspect-url'){
+        runInspectSnapshot(root,state,false);
+        return;
+      }
+      if(kind==='reset-inspect-state'){
+        runInspectSnapshot(root,state,true);
         return;
       }
       if(kind==='refresh-play'){
@@ -164,6 +176,16 @@
       if(form.matches('[data-ops-form="play-config"]')){
         event.preventDefault();
         savePlayConfig(root,state,new FormData(form));
+        return;
+      }
+      if(form.matches('[data-ops-form="runtime-screenshot"]')){
+        event.preventDefault();
+        runInspectScreenshot(root,state,new FormData(form));
+        return;
+      }
+      if(form.matches('[data-ops-form="runtime-action"]')){
+        event.preventDefault();
+        runInspectAction(root,state,new FormData(form));
       }
     });
 
@@ -262,6 +284,7 @@
     try{
       state.runtimeSummary=await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/runtime/summary');
       state.playError='';
+      state.inspectError='';
     }catch(error){
       state.runtimeSummary=null;
       state.runtimeError=error && error.message ? error.message : 'Could not load runtime evidence.';
@@ -329,6 +352,78 @@
       state.loadingPlayLogs=false;
       render(root,state);
     }
+  }
+
+  async function runInspectSnapshot(root,state,resetState){
+    if(!state.selectedProjectId)return;
+    state.inspectBusyAction=resetState ? 'reset-state' : 'inspect-url';
+    state.inspectError='';
+    render(root,state);
+    try{
+      await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/runtime/inspect/snapshot',{
+        method:'POST',
+        body:resetState ? {resetState:true} : {},
+      });
+      await loadRuntimeSummary(root,state);
+    }catch(error){
+      state.inspectError=error && error.message ? error.message : 'Could not resolve the inspect runtime state.';
+      state.inspectBusyAction='';
+      render(root,state);
+      return;
+    }
+    state.inspectBusyAction='';
+    render(root,state);
+  }
+
+  async function runInspectScreenshot(root,state,formData){
+    if(!state.selectedProjectId)return;
+    state.inspectBusyAction='screenshot';
+    state.inspectError='';
+    render(root,state);
+    try{
+      await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/runtime/inspect/screenshot',{
+        method:'POST',
+        body:{
+          url:formData.get('url'),
+          selector:formData.get('selector'),
+          fileName:formData.get('fileName'),
+        },
+      });
+      await loadRuntimeSummary(root,state);
+    }catch(error){
+      state.inspectError=error && error.message ? error.message : 'Could not capture a runtime screenshot.';
+      state.inspectBusyAction='';
+      render(root,state);
+      return;
+    }
+    state.inspectBusyAction='';
+    render(root,state);
+  }
+
+  async function runInspectAction(root,state,formData){
+    if(!state.selectedProjectId)return;
+    state.inspectBusyAction='action';
+    state.inspectError='';
+    render(root,state);
+    try{
+      await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/runtime/inspect/action',{
+        method:'POST',
+        body:{
+          url:formData.get('url'),
+          fileName:formData.get('fileName'),
+          captureScreenshot:Boolean(formData.get('captureScreenshot')),
+          script:formData.get('script'),
+        },
+      });
+      await loadRuntimeSummary(root,state);
+    }catch(error){
+      state.inspectError=error && error.message ? error.message : 'Could not run runtime inspect actions.';
+      state.inspectBusyAction='';
+      render(root,state);
+      return;
+    }
+    state.inspectBusyAction='';
+    render(root,state);
   }
 
   async function runPlayAction(root,state,action){
@@ -652,6 +747,8 @@
         loadingRuntimeSummary:state.loadingRuntimeSummary,
         runtimeSummary:state.runtimeSummary,
         runtimeError:state.runtimeError,
+        inspectError:state.inspectError,
+        inspectBusyAction:state.inspectBusyAction,
         loadingPlayConfig:state.loadingPlayConfig,
         playConfigDoc:state.playConfigDoc,
         savingPlayConfig:state.savingPlayConfig,

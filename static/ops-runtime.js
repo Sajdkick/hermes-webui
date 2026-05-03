@@ -157,6 +157,107 @@
     ].join('');
   }
 
+  function inspectRecordMeta(parts){
+    const filtered=(parts||[]).filter(function(item){return item;});
+    return filtered.length ? '<p class="ops-runtime-note">'+escapeHtml(filtered.join(' | '))+'</p>' : '';
+  }
+
+  function inspectSnapshotSection(summary,state){
+    const snapshot=summary && summary.snapshot ? summary.snapshot : {};
+    const busy=String(state && state.inspectBusyAction || '').trim();
+    const summaryText=String(snapshot.summary||'Resolve the current inspect target or reset the seeded debug state before capturing evidence.');
+    return [
+      '<article class="ops-runtime-tool">',
+      '<div class="ops-epic-header"><h3>Runtime snapshot</h3><span>'+escapeHtml(snapshot.kind||'snapshot')+'</span></div>',
+      '<p>'+escapeHtml(summaryText)+'</p>',
+      inspectRecordMeta([
+        snapshot.inspectUrl ? 'Inspect: '+String(snapshot.inspectUrl) : '',
+        snapshot.browserUrl ? 'Browser: '+String(snapshot.browserUrl) : '',
+        snapshot.sessionId ? 'Session: '+String(snapshot.sessionId) : '',
+        snapshot.updatedAt ? 'Updated: '+String(snapshot.updatedAt) : ''
+      ]),
+      '<div class="ops-runtime-actions">',
+      '<button class="ops-shell-link" type="button" data-ops-action="run-inspect-url"'+(busy?' disabled':'')+'>'+(busy==='inspect-url'?'Resolving…':'Inspect URL')+'</button>',
+      '<button class="ops-shell-link" type="button" data-ops-action="reset-inspect-state"'+(busy?' disabled':'')+'>'+(busy==='reset-state'?'Resetting…':'Reset state')+'</button>',
+      '</div>',
+      '</article>'
+    ].join('');
+  }
+
+  function inspectScreenshotSection(summary,state){
+    const screenshot=summary && summary.screenshot ? summary.screenshot : {};
+    const busy=String(state && state.inspectBusyAction || '').trim();
+    return [
+      '<article class="ops-runtime-tool">',
+      '<div class="ops-epic-header"><h3>Runtime screenshot</h3><span>'+escapeHtml(screenshot.kind||'capture')+'</span></div>',
+      '<form class="ops-runtime-tool-form" data-ops-form="runtime-screenshot">',
+      '<label><span>URL</span><input name="url" type="text" placeholder="/app/runtime-preview"></label>',
+      '<label><span>Selector</span><input name="selector" type="text" placeholder="figure.preview"></label>',
+      '<label><span>File name</span><input name="fileName" type="text" placeholder="runtime-check"></label>',
+      '<div class="ops-runtime-actions">',
+      '<button class="ops-shell-link primary" type="submit"'+(busy?' disabled':'')+'>'+(busy==='screenshot'?'Capturing…':'Capture screenshot')+'</button>',
+      '</div>',
+      '</form>',
+      '<div class="ops-runtime-tool-output">',
+      '<p>'+escapeHtml(String(screenshot.summary||'Capture a full-page or element-targeted screenshot through ct-runtime.'))+'</p>',
+      inspectRecordMeta([
+        screenshot.absolutePath ? 'File: '+String(screenshot.absolutePath) : '',
+        screenshot.inspectUrl ? 'Inspect: '+String(screenshot.inspectUrl) : '',
+        screenshot.updatedAt ? 'Updated: '+String(screenshot.updatedAt) : ''
+      ]),
+      '</div>',
+      '</article>'
+    ].join('');
+  }
+
+  function inspectActionSection(summary,state){
+    const action=summary && summary.actions ? summary.actions : {};
+    const actionSummary=action && action.actions ? action.actions : {};
+    const busy=String(state && state.inspectBusyAction || '').trim();
+    const scriptText=[
+      '[',
+      '  { "type": "waitForSelectorVisible", "selector": "body" },',
+      '  { "type": "captureElementScreenshot", "selector": "body", "label": "runtime-check" }',
+      ']'
+    ].join('\\n');
+    return [
+      '<article class="ops-runtime-tool">',
+      '<div class="ops-epic-header"><h3>Runtime actions</h3><span>'+escapeHtml(String(actionSummary.executedCount||0)+'/'+String(actionSummary.requestedCount||0))+'</span></div>',
+      '<form class="ops-runtime-tool-form" data-ops-form="runtime-action">',
+      '<label><span>URL</span><input name="url" type="text" placeholder="/app/editor"></label>',
+      '<label><span>File name</span><input name="fileName" type="text" placeholder="runtime-action"></label>',
+      '<label class="ops-runtime-checkbox"><input name="captureScreenshot" type="checkbox" checked>Capture screenshot</label>',
+      '<label><span>Action script</span><textarea name="script" rows="10">'+escapeHtml(scriptText)+'</textarea></label>',
+      '<div class="ops-runtime-actions">',
+      '<button class="ops-shell-link primary" type="submit"'+(busy?' disabled':'')+'>'+(busy==='action'?'Running…':'Run actions')+'</button>',
+      '</div>',
+      '</form>',
+      '<div class="ops-runtime-tool-output">',
+      '<p>'+escapeHtml(String(action.summary||'Run scripted wait, click, drag, evaluate, assert, and capture steps through ct-runtime.'))+'</p>',
+      inspectRecordMeta([
+        action.capture && action.capture.absolutePath ? 'Capture: '+String(action.capture.absolutePath) : '',
+        action.artifacts && action.artifacts.manifest && action.artifacts.manifest.absolutePath ? 'Artifacts: '+String(action.artifacts.manifest.absolutePath) : '',
+        action.updatedAt ? 'Updated: '+String(action.updatedAt) : ''
+      ]),
+      '</div>',
+      '</article>'
+    ].join('');
+  }
+
+  function inspectToolkitSection(summary,state){
+    return [
+      '<section class="ops-runtime-inspect-panel">',
+      '<div class="ops-epic-header"><h3>Inspect toolkit</h3><span>ct-runtime</span></div>',
+      state && state.inspectError ? '<p class="ops-shell-error">'+escapeHtml(state.inspectError)+'</p>' : '',
+      '<div class="ops-runtime-tool-grid">',
+      inspectSnapshotSection(summary,state),
+      inspectScreenshotSection(summary,state),
+      inspectActionSection(summary,state),
+      '</div>',
+      '</section>'
+    ].join('');
+  }
+
   function renderSection(state){
     const selectedProject=state && state.selectedProject ? state.selectedProject : null;
     if(!selectedProject){
@@ -197,6 +298,7 @@
       '<span><strong>Review requests</strong>'+escapeHtml(String(reviewCount||0))+'</span>',
       '</div>',
       playSection(summary,state),
+      inspectToolkitSection(summary,state),
       '<div class="ops-runtime-capabilities">'+capabilityCards(summary)+'</div>',
       '<div class="ops-runtime-grid">',
       '<section class="ops-runtime-column"><div class="ops-epic-header"><h3>Recent gather reports</h3><span>'+escapeHtml(String(gatherCount||0)+' total')+'</span></div>'+reportItems(summary)+'</section>',

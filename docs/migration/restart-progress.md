@@ -28,7 +28,7 @@ Last updated: 2026-05-03
 - Branch: `upstream-restart/20260503-phase0`
 - Base ref: `upstream/master`
 - Base commit: `9e31a2ac65c3fa7c26a733e213a308aa4a04f992`
-- Current slice: Phase 7 runtime evidence guides checkpoint
+- Current slice: Phase 7 Play workflow checkpoint
 - Current guardrail result: `ready`
 - Current hotspot churn: `4` committed hotspot files, `0` working-tree hotspot files
 - Current hotspot detail: `api/routes.py` `+12 / -0` (`12` lines, within budget); `static/boot.js` `+4 / -1` (`5` lines, within budget); `static/index.html` `+3 / -0` (`3` lines, within budget); `static/messages.js` `+1 / -0` (`1` line, within budget)
@@ -345,7 +345,7 @@ Result:
 - `static/messages.js`
   No additional Phase 6 churn was added. The existing readable-output refresh hook remained unchanged.
 
-## Phase 7 checkpoint deliverables
+## Phase 7 runtime-guides checkpoint deliverables
 
 - [x] Add fork-owned runtime gather/report storage in `api/ops_guides.py`
 - [x] Add fork-owned runtime summary helpers in `api/ops_runtime_tools.py`
@@ -354,7 +354,7 @@ Result:
 - [x] Wire the selected-project `/ops` UI to the new runtime summary endpoint without editing upstream-owned files
 - [x] Run focused verification and a merge rehearsal for this checkpoint
 
-## Phase 7 checkpoint verification
+## Phase 7 runtime-guides checkpoint verification
 
 - `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase5_readable_output.py tests/test_upstream_restart_phase6_notifications.py tests/test_upstream_restart_phase7_runtime_guides.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
 - `python -m py_compile upstream_restart_guardrails.py api/routes_ops_shell.py api/routes_ops.py api/routes_ops_projects.py api/routes_ops_sessions.py api/routes_ops_notifications.py api/routes_ops_runtime.py api/ops_projects.py api/ops_sessions.py api/ops_notifications.py api/ops_guides.py api/ops_runtime_tools.py api/session_sidecars.py api/session_readable_output.py`
@@ -369,7 +369,7 @@ Result:
 - the `/ops` UI now shows recent runtime gather reports and review requests for the selected project from fork-owned storage and routes
 - no whitespace or patch-format issues were reported
 
-## Phase 7 checkpoint merge rehearsal
+## Phase 7 runtime-guides checkpoint merge rehearsal
 
 - Rehearsal worktree: `/tmp/hermes-webui-upstream-restart-rehearse-phase7-runtime-guides`
 - Rehearsal branch: `tmp/rehearse-upstream-restart-phase7-runtime-guides`
@@ -382,11 +382,53 @@ Result:
 - Hotspot files touched during rehearsal: `api/routes.py`, `static/boot.js`, `static/index.html`, `static/messages.js` only
 - Hotspot budget result during rehearsal: within budget
 
-## Minimal upstream-owned edits in Phase 7 checkpoint
+## Minimal upstream-owned edits in Phase 7 runtime-guides checkpoint
 
 - None.
   This checkpoint kept all new runtime evidence logic in fork-owned backend and frontend modules. No new upstream-owned files were touched beyond the hotspot surface already established in earlier completed slices.
 
+## Phase 7 Play checkpoint deliverables
+
+- [x] Add a fork-owned Play pipeline backend in `api/play_pipeline.py`
+- [x] Add fork-owned Play config, status, log, start, stop, restart, and proxy routes in `api/routes_ops_play.py`
+- [x] Add a fork-owned proxied Play compatibility bridge in `static/play-proxy-compat.js`
+- [x] Surface Play workflow controls in the fork-owned `/ops` runtime panel through `static/ops-runtime.js`, `static/ops-projects.js`, and `static/cloud-terminal.css`
+- [x] Keep new Play workflow logic out of Hermes session internals and limit upstream-owned edits to the narrow top-level dispatcher hook
+- [x] Run focused verification and a merge rehearsal for this checkpoint
+
+## Phase 7 Play checkpoint verification
+
+- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase5_readable_output.py tests/test_upstream_restart_phase6_notifications.py tests/test_upstream_restart_phase7_runtime_guides.py tests/test_upstream_restart_phase7_play.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
+- `python -m py_compile upstream_restart_guardrails.py api/routes_ops_shell.py api/routes_ops.py api/routes_ops_projects.py api/routes_ops_sessions.py api/routes_ops_notifications.py api/routes_ops_runtime.py api/routes_ops_play.py api/play_pipeline.py api/ops_projects.py api/ops_sessions.py api/ops_notifications.py api/ops_guides.py api/ops_runtime_tools.py api/session_sidecars.py api/session_readable_output.py`
+- `python upstream_restart_guardrails.py`
+- `git diff --check`
+
+Result:
+
+- `40` tests passed
+- guardrail script stayed `ready`
+- the `/ops` runtime panel now exposes Play config, status, logs, start, stop, restart, and proxy launch flows through fork-owned modules
+- hotspot churn stayed within budget: the committed hotspot surface did not expand, and the current worktree no longer carries any uncommitted hotspot changes
+- no whitespace or patch-format issues were reported
+
+## Phase 7 Play checkpoint merge rehearsal
+
+- Rehearsal worktree: `/tmp/hermes-webui-upstream-restart-rehearse-phase7-play`
+- Rehearsal branch: `tmp/rehearse-upstream-restart-phase7-play`
+- Snapshot commit: `aa4e131`
+- Command: `git merge --no-edit upstream/master`
+- Result: `Already up to date.`
+- Conflict files: `0`
+- Conflict count: `0`
+- Mechanical resolution required: no
+- Hotspot files touched during rehearsal: `api/routes.py`, `static/boot.js`, `static/index.html`, `static/messages.js` only
+- Hotspot budget result during rehearsal: within budget
+
+## Minimal upstream-owned edits in Phase 7 Play checkpoint
+
+- `api/routes.py`
+  Expanded the top-level fork dispatcher by four lines so `/play-project/*` GET and POST requests flow into the fork-owned Play route module without coupling the Play workflow to Hermes core modules.
+
 ## Next concrete step
 
-Continue Phase 7 on this clean branch: port Play config/status/start/stop/log/proxy and then add runtime snapshot, screenshot, and action flows through fork APIs.
+Continue Phase 7 on this clean branch: add runtime snapshot, screenshot, and action flows through fork APIs.

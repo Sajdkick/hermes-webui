@@ -6,7 +6,7 @@ import re
 from urllib.parse import parse_qs
 
 from api.helpers import j
-from api import ops_guides, ops_projects, ops_runtime_tools
+from api import ops_guides, ops_projects, ops_runtime_inspect, ops_runtime_tools
 
 
 _RUNTIME_SUMMARY_RE = re.compile(r"^/api/ops/projects/([^/]+)/runtime/summary/?$")
@@ -19,6 +19,12 @@ _REVIEWS_RE = re.compile(r"^/api/ops/projects/([^/]+)/runtime/inspect/reviews/?$
 _REVIEW_LATEST_RE = re.compile(r"^/api/ops/projects/([^/]+)/runtime/inspect/reviews/latest/?$")
 _REVIEW_RE = re.compile(r"^/api/ops/projects/([^/]+)/runtime/inspect/reviews/([^/]+)/?$")
 _REVIEW_COMPLETE_RE = re.compile(r"^/api/ops/projects/([^/]+)/runtime/inspect/reviews/([^/]+)/complete/?$")
+_SNAPSHOT_RE = re.compile(r"^/api/ops/projects/([^/]+)/runtime/inspect/snapshot/?$")
+_SNAPSHOT_LATEST_RE = re.compile(r"^/api/ops/projects/([^/]+)/runtime/inspect/snapshot/latest/?$")
+_SCREENSHOT_RE = re.compile(r"^/api/ops/projects/([^/]+)/runtime/inspect/screenshot/?$")
+_SCREENSHOT_LATEST_RE = re.compile(r"^/api/ops/projects/([^/]+)/runtime/inspect/screenshot/latest/?$")
+_ACTION_RE = re.compile(r"^/api/ops/projects/([^/]+)/runtime/inspect/action/?$")
+_ACTION_LATEST_RE = re.compile(r"^/api/ops/projects/([^/]+)/runtime/inspect/action/latest/?$")
 
 
 def _filters(parsed) -> dict:
@@ -68,8 +74,23 @@ def handle_get(handler, parsed) -> bool:
             j(handler, ops_guides.list_review_requests(match.group(1), _filters(parsed)))
             return True
 
+        match = _SNAPSHOT_LATEST_RE.match(parsed.path)
+        if match:
+            j(handler, ops_runtime_inspect.get_latest_snapshot(match.group(1)))
+            return True
+
+        match = _SCREENSHOT_LATEST_RE.match(parsed.path)
+        if match:
+            j(handler, ops_runtime_inspect.get_latest_screenshot(match.group(1)))
+            return True
+
+        match = _ACTION_LATEST_RE.match(parsed.path)
+        if match:
+            j(handler, ops_runtime_inspect.get_latest_action(match.group(1)))
+            return True
+
         return False
-    except (ops_guides.OpsGuideError, ops_projects.OpsProjectError) as exc:
+    except (ops_guides.OpsGuideError, ops_runtime_inspect.OpsRuntimeInspectError, ops_projects.OpsProjectError) as exc:
         j(handler, {"error": str(exc)}, status=exc.status)
         return True
 
@@ -96,7 +117,22 @@ def handle_post(handler, parsed, body: dict) -> bool:
             j(handler, ops_guides.complete_review_request(match.group(1), match.group(2), body))
             return True
 
+        match = _SNAPSHOT_RE.match(parsed.path)
+        if match:
+            j(handler, ops_runtime_inspect.capture_snapshot(match.group(1), body), status=201)
+            return True
+
+        match = _SCREENSHOT_RE.match(parsed.path)
+        if match:
+            j(handler, ops_runtime_inspect.capture_screenshot(match.group(1), body), status=201)
+            return True
+
+        match = _ACTION_RE.match(parsed.path)
+        if match:
+            j(handler, ops_runtime_inspect.run_action(match.group(1), body), status=201)
+            return True
+
         return False
-    except (ops_guides.OpsGuideError, ops_projects.OpsProjectError) as exc:
+    except (ops_guides.OpsGuideError, ops_runtime_inspect.OpsRuntimeInspectError, ops_projects.OpsProjectError) as exc:
         j(handler, {"error": str(exc)}, status=exc.status)
         return True
