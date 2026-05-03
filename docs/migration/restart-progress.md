@@ -325,14 +325,14 @@ Result:
 
 - Rehearsal worktree: `/tmp/hermes-webui-upstream-restart-rehearse-phase6`
 - Rehearsal branch: `tmp/rehearse-upstream-restart-phase6`
-- Snapshot commit: `pending`
+- Snapshot commit: `38bb0de`
 - Command: `git merge --no-edit upstream/master`
-- Result: `pending`
-- Conflict files: `pending`
-- Conflict count: `pending`
-- Mechanical resolution required: pending
-- Hotspot files touched during rehearsal: `pending`
-- Hotspot budget result during rehearsal: pending
+- Result: `Already up to date.`
+- Conflict files: `0`
+- Conflict count: `0`
+- Mechanical resolution required: no
+- Hotspot files touched during rehearsal: `api/routes.py`, `static/boot.js`, `static/index.html`, `static/messages.js`
+- Hotspot budget result during rehearsal: within budget
 
 ## Minimal upstream-owned edits in Phase 6
 

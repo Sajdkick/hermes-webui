@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
-from api import routes_ops_notifications, routes_ops_projects, routes_ops_sessions, routes_ops_shell
+from api import (
+    routes_ops_notifications,
+    routes_ops_projects,
+    routes_ops_runtime,
+    routes_ops_sessions,
+    routes_ops_shell,
+)
 
 
 def handle_get(handler, parsed) -> bool:
     if routes_ops_shell.handle_get(handler, parsed):
         return True
     if routes_ops_notifications.handle_get(handler, parsed):
+        return True
+    if routes_ops_runtime.handle_get(handler, parsed):
         return True
     if routes_ops_sessions.handle_get(handler, parsed):
         return True
@@ -19,6 +27,8 @@ def handle_get(handler, parsed) -> bool:
 
 def handle_post(handler, parsed, body: dict) -> bool:
     if routes_ops_notifications.handle_post(handler, parsed, body):
+        return True
+    if routes_ops_runtime.handle_post(handler, parsed, body):
         return True
     if routes_ops_projects.handle_post(handler, parsed, body):
         return True

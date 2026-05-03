@@ -263,6 +263,117 @@
   gap: 4px;
 }
 
+.ops-runtime-panel {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.ops-runtime-overview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ops-runtime-overview span,
+.ops-runtime-record footer span {
+  display: grid;
+  gap: 4px;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.ops-runtime-overview strong,
+.ops-runtime-capability strong,
+.ops-runtime-record header strong {
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ops-runtime-capabilities,
+.ops-runtime-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.ops-runtime-capabilities {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.ops-runtime-capability,
+.ops-runtime-column,
+.ops-runtime-record {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.36);
+}
+
+.ops-runtime-capability {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.ops-runtime-capability.ready {
+  border-color: rgba(34, 197, 94, 0.26);
+}
+
+.ops-runtime-capability.deferred {
+  border-color: rgba(245, 197, 66, 0.26);
+}
+
+.ops-runtime-capability span,
+.ops-runtime-capability p,
+.ops-runtime-record p,
+.ops-runtime-empty {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.ops-runtime-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ops-runtime-column {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.ops-runtime-record {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.ops-runtime-record header,
+.ops-runtime-record footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.ops-runtime-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(96, 165, 250, 0.16);
+  color: #dbeafe;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ops-runtime-note {
+  color: rgba(255, 255, 255, 0.54);
+}
+
 .ops-task-toggle {
   display: flex;
   align-items: flex-start;
@@ -475,6 +586,10 @@
   .ops-inline-form.quick-task-form,
   .ops-inline-form.filters,
   .ops-inline-form.compact.notification {
+    grid-template-columns: 1fr;
+  }
+
+  .ops-runtime-grid {
     grid-template-columns: 1fr;
   }
 }

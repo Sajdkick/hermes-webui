@@ -25,6 +25,9 @@
       filterStatus:'all',
       filterGrade:'all',
       launchingTaskId:'',
+      loadingRuntimeSummary:false,
+      runtimeSummary:null,
+      runtimeError:'',
       loadingNotifications:false,
       notifications:[],
       notificationsError:'',
@@ -44,6 +47,7 @@
       if(kind==='select-project'){
         state.selectedProjectId=action.getAttribute('data-project-id')||'';
         loadTasks(root,state);
+        loadRuntimeSummary(root,state);
         return;
       }
       if(kind==='refresh-projects'){
@@ -52,6 +56,10 @@
       }
       if(kind==='refresh-notifications'){
         loadNotifications(root,state);
+        return;
+      }
+      if(kind==='refresh-runtime'){
+        loadRuntimeSummary(root,state);
         return;
       }
       if(kind==='launch-task-session'){
@@ -163,6 +171,7 @@
       render(root,state);
       if(state.selectedProjectId){
         loadTasks(root,state);
+        loadRuntimeSummary(root,state);
       }
     }catch(error){
       state.loadingProjects=false;
@@ -182,6 +191,28 @@
       state.error=error && error.message ? error.message : 'Could not load project tasks.';
     }finally{
       state.loadingTasks=false;
+      render(root,state);
+    }
+  }
+
+  async function loadRuntimeSummary(root,state){
+    if(!state.selectedProjectId){
+      state.runtimeSummary=null;
+      state.runtimeError='';
+      state.loadingRuntimeSummary=false;
+      render(root,state);
+      return;
+    }
+    state.loadingRuntimeSummary=true;
+    state.runtimeError='';
+    render(root,state);
+    try{
+      state.runtimeSummary=await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/runtime/summary');
+    }catch(error){
+      state.runtimeSummary=null;
+      state.runtimeError=error && error.message ? error.message : 'Could not load runtime evidence.';
+    }finally{
+      state.loadingRuntimeSummary=false;
       render(root,state);
     }
   }
@@ -370,9 +401,9 @@
     const notificationsSection=renderNotificationsSection(state);
     root.innerHTML=[
       '<div class="ops-shell-status">',
-      '<span class="ops-shell-status-badge">Ready for clean project, task, session, readable-output, and workflow inbox work</span>',
+      '<span class="ops-shell-status-badge">Ready for clean project, task, session, readable-output, workflow inbox, and runtime evidence work</span>',
       '<div class="ops-shell-grid">',
-      '<div class="ops-shell-card"><strong>Phase</strong><span>'+escapeHtml(state.shellPayload.phase||'phase-6')+'</span></div>',
+      '<div class="ops-shell-card"><strong>Phase</strong><span>'+escapeHtml(state.shellPayload.phase||'phase-7')+'</span></div>',
       '<div class="ops-shell-card"><strong>Route</strong><span>'+escapeHtml(state.shellPayload.route||'/ops')+'</span></div>',
       '<div class="ops-shell-card"><strong>API base</strong><span>'+escapeHtml(state.shellPayload.apiBase||'/api/ops')+'</span></div>',
       '<div class="ops-shell-card"><strong>Version</strong><span>'+escapeHtml(state.shellPayload.version||'')+'</span></div>',
@@ -451,6 +482,7 @@
       '<span><strong>Path</strong>'+escapeHtml(selectedProject.path||'')+'</span>',
       '<span><strong>Tasks file</strong>'+escapeHtml(selectedProject.tasksFilePath||'')+'</span>',
       '</div>',
+      renderRuntimeSection(state,selectedProject),
       renderQuickTaskForm(),
       renderFilterForm(state),
       '<form class="ops-inline-form compact" data-ops-form="create-epic">',
@@ -459,6 +491,19 @@
       '</form>',
       '<div class="ops-epic-list">'+epicRows+'</div>'
     ].join('');
+  }
+
+  function renderRuntimeSection(state,selectedProject){
+    if(window.HermesOpsRuntime && typeof window.HermesOpsRuntime.renderSection==='function'){
+      return window.HermesOpsRuntime.renderSection({
+        selectedProject:selectedProject,
+        selectedProjectId:state.selectedProjectId,
+        loadingRuntimeSummary:state.loadingRuntimeSummary,
+        runtimeSummary:state.runtimeSummary,
+        runtimeError:state.runtimeError,
+      });
+    }
+    return '';
   }
 
   function renderQuickTaskForm(){
