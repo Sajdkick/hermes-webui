@@ -374,6 +374,71 @@
   color: rgba(255, 255, 255, 0.54);
 }
 
+.ops-git-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.ops-git-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.ops-git-copy {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ops-git-status {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.ops-git-status.ready {
+  border-color: rgba(34, 197, 94, 0.26);
+  color: #dcfce7;
+  background: rgba(34, 197, 94, 0.16);
+}
+
+.ops-git-status.warning {
+  border-color: rgba(245, 197, 66, 0.28);
+  color: #fef3c7;
+  background: rgba(245, 197, 66, 0.14);
+}
+
+.ops-git-status.error {
+  border-color: rgba(248, 113, 113, 0.28);
+  color: #fee2e2;
+  background: rgba(248, 113, 113, 0.14);
+}
+
+.ops-git-status.missing,
+.ops-git-status.idle {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.ops-git-summary {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.76);
+}
+
 .ops-runtime-play-panel,
 .ops-runtime-inspect-panel,
 .ops-runtime-config-form,
@@ -706,5 +771,9 @@
 
   .ops-runtime-grid {
     grid-template-columns: 1fr;
+  }
+
+  .ops-git-header {
+    flex-direction: column;
   }
 }

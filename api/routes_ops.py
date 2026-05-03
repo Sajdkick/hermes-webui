@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from api import (
+    routes_ops_git,
     routes_ops_notifications,
     routes_ops_play,
     routes_ops_projects,
@@ -16,6 +17,8 @@ def handle_get(handler, parsed) -> bool:
     if routes_ops_shell.handle_get(handler, parsed):
         return True
     if routes_ops_notifications.handle_get(handler, parsed):
+        return True
+    if routes_ops_git.handle_get(handler, parsed):
         return True
     if routes_ops_play.handle_get(handler, parsed):
         return True

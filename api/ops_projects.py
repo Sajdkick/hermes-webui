@@ -137,6 +137,14 @@ def _normalize_project(project) -> tuple[dict | None, bool]:
     if normalized.get("profile") is not None:
         profile = str(normalized.get("profile") or "").strip()
         normalized["profile"] = profile or None
+    if normalized.get("defaultModel") is not None or normalized.get("default_model") is not None:
+        default_model = str(normalized.get("defaultModel") or normalized.get("default_model") or "").strip()
+        normalized["defaultModel"] = default_model or None
+    if normalized.get("defaultModelProvider") is not None or normalized.get("default_model_provider") is not None:
+        default_model_provider = str(
+            normalized.get("defaultModelProvider") or normalized.get("default_model_provider") or ""
+        ).strip().lower()
+        normalized["defaultModelProvider"] = default_model_provider or None
 
     if not str(normalized.get("createdAt") or "").strip():
         normalized["createdAt"] = _now_iso()
@@ -417,6 +425,19 @@ def _ensure_workspace(project_path: Path, name: str) -> None:
     save_workspaces(workspaces)
 
 
+def _validate_project_profile(profile: str | None) -> str | None:
+    value = str(profile or "").strip()
+    if not value or value == "default":
+        return value or None
+    try:
+        from api.profiles import get_hermes_home_for_profile
+    except ImportError:
+        return value
+    if not get_hermes_home_for_profile(value).exists():
+        raise OpsProjectError(f"Profile not found: {value}")
+    return value
+
+
 def create_ops_project(body: dict) -> dict:
     name = str((body or {}).get("name") or "").strip()[:128]
     if not name:
@@ -445,7 +466,9 @@ def create_ops_project(body: dict) -> dict:
         "coreBranch": core_branch,
         "createdAt": _now_iso(),
         "active": True,
-        "profile": str((body or {}).get("profile") or "").strip() or None,
+        "profile": _validate_project_profile((body or {}).get("profile")),
+        "defaultModel": str((body or {}).get("defaultModel") or "").strip() or None,
+        "defaultModelProvider": str((body or {}).get("defaultModelProvider") or "").strip().lower() or None,
     }
     clone_url = str((body or {}).get("cloneUrl") or "").strip()
     if clone_url:
@@ -456,6 +479,27 @@ def create_ops_project(body: dict) -> dict:
     _write_projects(projects)
     _ensure_workspace(project_path, name)
     return _serialize_project(project)
+
+
+def update_ops_project(project_id: str, body: dict | None) -> dict:
+    project = get_ops_project(project_id)
+    body = body if isinstance(body, dict) else {}
+    projects = _read_projects()
+    index = next((idx for idx, entry in enumerate(projects) if entry.get("id") == project["id"]), -1)
+    if index < 0:
+        raise OpsProjectError("Project not found.", 404)
+
+    updated = dict(projects[index])
+    if "profile" in body:
+        updated["profile"] = _validate_project_profile(body.get("profile"))
+    if "defaultModel" in body:
+        updated["defaultModel"] = str(body.get("defaultModel") or "").strip() or None
+    if "defaultModelProvider" in body:
+        updated["defaultModelProvider"] = str(body.get("defaultModelProvider") or "").strip().lower() or None
+
+    projects[index] = updated
+    _write_projects(projects)
+    return {"project": _serialize_project(updated)}
 
 
 def read_ops_project_tasks(project_id: str) -> dict:

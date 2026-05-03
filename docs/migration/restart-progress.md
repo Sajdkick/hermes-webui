@@ -11,8 +11,9 @@ Last updated: 2026-05-03
 - Phase 4: Complete
 - Phase 5: Complete
 - Phase 6: Complete
-- Phase 7: In progress
-- Phase 8 and later: Not started
+- Phase 7: Complete
+- Phase 8: Complete
+- Phase 9 and later: Not started
 
 ## Phase 0 deliverables
 
@@ -28,7 +29,7 @@ Last updated: 2026-05-03
 - Branch: `upstream-restart/20260503-phase0`
 - Base ref: `upstream/master`
 - Base commit: `9e31a2ac65c3fa7c26a733e213a308aa4a04f992`
-- Current slice: Phase 7 Play workflow checkpoint
+- Current slice: Phase 8 project defaults and git sync visibility
 - Current guardrail result: `ready`
 - Current hotspot churn: `4` committed hotspot files, `0` working-tree hotspot files
 - Current hotspot detail: `api/routes.py` `+12 / -0` (`12` lines, within budget); `static/boot.js` `+4 / -1` (`5` lines, within budget); `static/index.html` `+3 / -0` (`3` lines, within budget); `static/messages.js` `+1 / -0` (`1` line, within budget)
@@ -429,6 +430,91 @@ Result:
 - `api/routes.py`
   Expanded the top-level fork dispatcher by four lines so `/play-project/*` GET and POST requests flow into the fork-owned Play route module without coupling the Play workflow to Hermes core modules.
 
+## Phase 7 runtime inspect checkpoint deliverables
+
+- [x] Add a fork-owned `ct-runtime` wrapper in `api/ops_runtime_inspect.py`
+- [x] Extend `api/routes_ops_runtime.py` with snapshot, screenshot, and action run/latest endpoints
+- [x] Surface the latest snapshot, screenshot, and action records in `api/ops_runtime_tools.py`
+- [x] Add an inspect toolkit panel to the fork-owned `/ops` runtime UI through `static/ops-runtime.js`, `static/ops-projects.js`, and `static/cloud-terminal.css`
+- [x] Keep the runtime inspect slice entirely in fork-owned modules without expanding the upstream-owned hotspot surface
+- [x] Run focused verification and a merge rehearsal for this checkpoint
+
+## Phase 7 runtime inspect checkpoint verification
+
+- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase5_readable_output.py tests/test_upstream_restart_phase6_notifications.py tests/test_upstream_restart_phase7_runtime_guides.py tests/test_upstream_restart_phase7_play.py tests/test_upstream_restart_phase7_runtime_inspect.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
+- `python -m py_compile upstream_restart_guardrails.py api/ops_runtime_inspect.py api/ops_runtime_tools.py api/routes_ops_runtime.py api/play_pipeline.py api/routes_ops_play.py api/routes_ops_shell.py api/routes_ops.py api/routes_ops_projects.py api/routes_ops_sessions.py api/routes_ops_notifications.py api/ops_projects.py api/ops_sessions.py api/ops_notifications.py api/ops_guides.py api/session_sidecars.py api/session_readable_output.py`
+- `python upstream_restart_guardrails.py`
+- `git diff --check`
+
+Result:
+
+- `42` tests passed
+- guardrail script stayed `ready`
+- Phase 7 is now complete: runtime gather/review, Play workflow, and runtime inspect tools all live behind fork-owned backend and frontend modules
+- hotspot churn stayed within budget and unchanged from the earlier committed surface: `api/routes.py` `+12 / -0`, `static/boot.js` `+4 / -1`, `static/index.html` `+3 / -0`, `static/messages.js` `+1 / -0`
+- no whitespace or patch-format issues were reported
+
+## Phase 7 runtime inspect checkpoint merge rehearsal
+
+- Rehearsal worktree: `/tmp/hermes-webui-upstream-restart-rehearse-phase7-inspect`
+- Rehearsal branch: `tmp/rehearse-upstream-restart-phase7-inspect`
+- Snapshot commit: `c6812c4`
+- Command: `git merge --no-edit upstream/master`
+- Result: `Already up to date.`
+- Conflict files: `0`
+- Conflict count: `0`
+- Mechanical resolution required: no
+- Hotspot files touched during rehearsal: `api/routes.py`, `static/boot.js`, `static/index.html`, `static/messages.js` only
+- Hotspot budget result during rehearsal: within budget
+
+## Minimal upstream-owned edits in Phase 7 runtime inspect checkpoint
+
+- None.
+  This checkpoint kept runtime inspect execution, persistence, and UI controls in fork-owned modules. No additional upstream-owned files were touched beyond the hotspot surface established in earlier phases.
+
+## Phase 8 deliverables
+
+- [x] Add project-scoped launch defaults in `api/ops_projects.py`, `api/routes_ops_projects.py`, `api/ops_sessions.py`, and `static/ops-projects.js`
+- [x] Validate named launch profiles and resolve profile-local default model/provider values from the target Hermes profile config
+- [x] Add a fork-owned project git status helper in `api/ops_git.py` and a matching route bridge in `api/routes_ops_git.py`
+- [x] Compare branch drift against the project core branch and ignore fork-owned workflow metadata (`.hermes`, `project_tasks`, `project_tasks.json`) in the git status view
+- [x] Surface the new launch defaults and git status controls in the fork-owned `/ops` shell without widening Hermes hotspot churn
+- [x] Run focused verification and a merge rehearsal for the Phase 8 snapshot
+
+## Phase 8 verification
+
+- `python -m pytest tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase8_project_defaults.py tests/test_upstream_restart_phase8_git_status.py`
+- `python -m py_compile api/ops_git.py api/routes_ops_git.py api/routes_ops.py api/routes_ops_shell.py api/ops_projects.py api/ops_sessions.py`
+- `python upstream_restart_guardrails.py`
+- `git diff --check`
+
+Result:
+
+- `13` tests passed
+- guardrail script stayed `ready`
+- project launch sessions now inherit either explicit project defaults or the selected profile's own model/provider defaults without mutating Hermes profile hotspots
+- the `/ops` detail panel now shows core-branch drift and working-tree health through fork-owned modules while ignoring fork-owned workflow metadata
+- hotspot churn stayed unchanged from earlier phases: `api/routes.py` `+12 / -0`, `static/boot.js` `+4 / -1`, `static/index.html` `+3 / -0`, `static/messages.js` `+1 / -0`
+- no whitespace or patch-format issues were reported
+
+## Phase 8 merge rehearsal
+
+- Rehearsal worktree: pending
+- Rehearsal branch: pending
+- Snapshot commit: pending
+- Command: `git merge --no-edit upstream/master`
+- Result: pending
+- Conflict files: pending
+- Conflict count: pending
+- Mechanical resolution required: pending
+- Hotspot files touched during rehearsal: pending
+- Hotspot budget result during rehearsal: pending
+
+## Minimal upstream-owned edits in Phase 8
+
+- None.
+  Phase 8 kept launch-default persistence, profile resolution, project git status, and `/ops` UI status rendering in fork-owned modules. No additional upstream-owned files were touched beyond the hotspot surface established in earlier phases.
+
 ## Next concrete step
 
-Continue Phase 7 on this clean branch: add runtime snapshot, screenshot, and action flows through fork APIs.
+Start Phase 9 on this clean branch: compare the old fork, this clean restart branch, and latest upstream to decide what still needs to be ported, explicitly deferred, or dropped.

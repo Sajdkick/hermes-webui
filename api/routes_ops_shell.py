@@ -16,13 +16,14 @@ _OPS_SHELL_PATH = (_STATIC_DIR / "ops-shell.html").resolve()
 def _ops_shell_payload() -> dict:
     return {
         "app": "cloud-terminal",
-        "phase": "phase-7",
+        "phase": "phase-8",
         "status": "ready",
         "route": "/ops",
         "apiBase": "/api/ops",
         "assets": {
             "entryScript": "/static/cloud-terminal-entry.js",
             "entryStylesheet": "/static/cloud-terminal.css",
+            "gitScript": "/static/ops-git.js",
             "notificationsScript": "/static/ops-notifications.js",
             "runtimeScript": "/static/ops-runtime.js",
             "projectsScript": "/static/ops-projects.js",

@@ -16,6 +16,10 @@
       projectsOpen:false,
       loadingProjects:false,
       creatingProject:false,
+      loadingProfiles:false,
+      availableProfiles:[],
+      profilesError:'',
+      savingProjectDefaults:false,
       projects:[],
       error:'',
       selectedProjectId:'',
@@ -28,6 +32,9 @@
       loadingRuntimeSummary:false,
       runtimeSummary:null,
       runtimeError:'',
+      loadingGitStatus:false,
+      gitStatus:null,
+      gitError:'',
       inspectError:'',
       inspectBusyAction:'',
       loadingPlayConfig:false,
@@ -52,11 +59,16 @@
       if(kind==='toggle-projects'){
         state.projectsOpen=!state.projectsOpen;
         render(root,state);
-        if(state.projectsOpen && !state.projects.length)loadProjects(root,state);
+        if(state.projectsOpen){
+          if(!state.projects.length)loadProjects(root,state);
+          if(!state.availableProfiles.length && !state.loadingProfiles)loadProfiles(root,state);
+        }
         return;
       }
       if(kind==='select-project'){
         state.selectedProjectId=action.getAttribute('data-project-id')||'';
+        state.gitStatus=null;
+        state.gitError='';
         state.playConfigDoc=null;
         state.playLogs=null;
         state.playError='';
@@ -65,6 +77,7 @@
         state.showPlayConfig=false;
         state.showPlayLogs=false;
         loadTasks(root,state);
+        loadGitStatus(root,state);
         loadRuntimeSummary(root,state);
         return;
       }
@@ -78,6 +91,10 @@
       }
       if(kind==='refresh-runtime'){
         loadRuntimeSummary(root,state);
+        return;
+      }
+      if(kind==='refresh-git-status'){
+        loadGitStatus(root,state);
         return;
       }
       if(kind==='run-inspect-url'){
@@ -145,6 +162,11 @@
       if(form.matches('[data-ops-form="create-project"]')){
         event.preventDefault();
         createProject(root,state,new FormData(form));
+        return;
+      }
+      if(form.matches('[data-ops-form="project-defaults"]')){
+        event.preventDefault();
+        saveProjectDefaults(root,state,new FormData(form));
         return;
       }
       if(form.matches('[data-ops-form="create-epic"]')){
@@ -246,11 +268,27 @@
       render(root,state);
       if(state.selectedProjectId){
         loadTasks(root,state);
+        loadGitStatus(root,state);
         loadRuntimeSummary(root,state);
       }
     }catch(error){
       state.loadingProjects=false;
       state.error=error && error.message ? error.message : 'Could not load projects.';
+      render(root,state);
+    }
+  }
+
+  async function loadProfiles(root,state){
+    state.loadingProfiles=true;
+    state.profilesError='';
+    render(root,state);
+    try{
+      const payload=await api('/api/profiles');
+      state.availableProfiles=Array.isArray(payload.profiles)?payload.profiles:[];
+    }catch(error){
+      state.profilesError=error && error.message ? error.message : 'Could not load profiles.';
+    }finally{
+      state.loadingProfiles=false;
       render(root,state);
     }
   }
@@ -290,6 +328,30 @@
       state.runtimeError=error && error.message ? error.message : 'Could not load runtime evidence.';
     }finally{
       state.loadingRuntimeSummary=false;
+      render(root,state);
+    }
+  }
+
+  async function loadGitStatus(root,state){
+    if(!state.selectedProjectId){
+      state.gitStatus=null;
+      state.gitError='';
+      state.loadingGitStatus=false;
+      render(root,state);
+      return;
+    }
+    state.loadingGitStatus=true;
+    state.gitStatus=null;
+    state.gitError='';
+    render(root,state);
+    try{
+      const payload=await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/git/status');
+      state.gitStatus=payload && payload.git ? payload.git : payload;
+    }catch(error){
+      state.gitStatus=null;
+      state.gitError=error && error.message ? error.message : 'Could not load project git status.';
+    }finally{
+      state.loadingGitStatus=false;
       render(root,state);
     }
   }
@@ -474,6 +536,7 @@
           name:formData.get('name'),
           path:formData.get('path'),
           coreBranch:formData.get('coreBranch'),
+          profile:formData.get('profile'),
         }
       });
       state.creatingProject=false;
@@ -481,6 +544,29 @@
     }catch(error){
       state.creatingProject=false;
       state.error=error && error.message ? error.message : 'Could not create project.';
+      render(root,state);
+    }
+  }
+
+  async function saveProjectDefaults(root,state,formData){
+    if(!state.selectedProjectId)return;
+    state.savingProjectDefaults=true;
+    state.error='';
+    render(root,state);
+    try{
+      await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/update',{
+        method:'POST',
+        body:{
+          profile:formData.get('profile'),
+          defaultModel:formData.get('defaultModel'),
+          defaultModelProvider:formData.get('defaultModelProvider'),
+        }
+      });
+      state.savingProjectDefaults=false;
+      loadProjects(root,state,true);
+    }catch(error){
+      state.savingProjectDefaults=false;
+      state.error=error && error.message ? error.message : 'Could not save project defaults.';
       render(root,state);
     }
   }
@@ -689,6 +775,7 @@
 
     return [
       '<div class="ops-project-layout">',
+      renderProfileDatalist(state),
       '<section class="ops-project-column">',
       '<div class="ops-project-column-header"><h2>Projects</h2><span>'+(state.loadingProjects?'Loading…':escapeHtml(String(projects.length)+' loaded'))+'</span></div>',
       renderCreateProjectForm(state),
@@ -707,6 +794,7 @@
       '<label><span>Name</span><input name="name" type="text" placeholder="Hermes Web UI"></label>',
       '<label><span>Path</span><input name="path" type="text" placeholder="/home/ubuntu/cloud-terminal-data/projects/hermes-webui"></label>',
       '<label><span>Core branch</span><input name="coreBranch" type="text" placeholder="main"></label>',
+      '<label><span>Profile</span><input name="profile" type="text" list="ops-project-profile-list" placeholder="default"></label>',
       '<button class="ops-shell-link primary" type="submit"'+(state.creatingProject?' disabled':'')+'>'+(state.creatingProject?'Creating…':'Create project')+'</button>',
       '</form>'
     ].join('');
@@ -727,7 +815,11 @@
       '<div class="ops-project-meta">',
       '<span><strong>Path</strong>'+escapeHtml(selectedProject.path||'')+'</span>',
       '<span><strong>Tasks file</strong>'+escapeHtml(selectedProject.tasksFilePath||'')+'</span>',
+      '<span><strong>Profile</strong>'+escapeHtml(selectedProject.profile||'default')+'</span>',
+      '<span><strong>Default model</strong>'+escapeHtml(selectedProject.defaultModel||'profile default')+'</span>',
       '</div>',
+      renderProjectDefaultsForm(state,selectedProject),
+      renderGitStatusSection(state,selectedProject),
       renderRuntimeSection(state,selectedProject),
       renderQuickTaskForm(),
       renderFilterForm(state),
@@ -737,6 +829,45 @@
       '</form>',
       '<div class="ops-epic-list">'+epicRows+'</div>'
     ].join('');
+  }
+
+  function renderProfileDatalist(state){
+    const profiles=Array.isArray(state.availableProfiles)?state.availableProfiles:[];
+    const options=['<option value="default"></option>'].concat(profiles.map(function(profile){
+      return '<option value="'+escapeHtml(profile && profile.name || '')+'"></option>';
+    }));
+    return '<datalist id="ops-project-profile-list">'+options.join('')+'</datalist>';
+  }
+
+  function renderProjectDefaultsForm(state,selectedProject){
+    const currentProfile=findProfileEntry(state,selectedProject.profile);
+    const profileHint=currentProfile
+      ? [currentProfile.model ? 'Model '+currentProfile.model : '', currentProfile.provider ? 'Provider '+currentProfile.provider : ''].filter(Boolean).join(' • ')
+      : '';
+    return [
+      '<form class="ops-inline-form compact project-defaults-form" data-ops-form="project-defaults">',
+      '<div class="ops-epic-header"><h3>Launch defaults</h3><span>Task sessions inherit these values</span></div>',
+      '<label><span>Profile</span><input name="profile" type="text" list="ops-project-profile-list" value="'+escapeHtml(selectedProject.profile||'')+'" placeholder="default"></label>',
+      '<label><span>Default model</span><input name="defaultModel" type="text" value="'+escapeHtml(selectedProject.defaultModel||'')+'" placeholder="leave blank to use the profile default"></label>',
+      '<label><span>Model provider</span><input name="defaultModelProvider" type="text" value="'+escapeHtml(selectedProject.defaultModelProvider||'')+'" placeholder="optional provider hint"></label>',
+      profileHint?'<p class="ops-runtime-note">Selected profile defaults: '+escapeHtml(profileHint)+'</p>':'',
+      state.profilesError?'<p class="ops-runtime-note">'+escapeHtml(state.profilesError)+'</p>':'',
+      '<div class="ops-runtime-actions">',
+      '<button class="ops-shell-link primary" type="submit"'+(state.savingProjectDefaults?' disabled':'')+'>'+(state.savingProjectDefaults?'Saving…':'Save defaults')+'</button>',
+      '</div>',
+      '</form>'
+    ].join('');
+  }
+
+  function findProfileEntry(state,name){
+    const key=String(name||'').trim();
+    if(!key)return null;
+    const profiles=Array.isArray(state.availableProfiles)?state.availableProfiles:[];
+    for(let index=0;index<profiles.length;index+=1){
+      const profile=profiles[index];
+      if(profile && String(profile.name||'').trim()===key)return profile;
+    }
+    return null;
   }
 
   function renderRuntimeSection(state,selectedProject){
@@ -758,6 +889,18 @@
         playBusyAction:state.playBusyAction,
         showPlayConfig:state.showPlayConfig,
         showPlayLogs:state.showPlayLogs,
+      });
+    }
+    return '';
+  }
+
+  function renderGitStatusSection(state,selectedProject){
+    if(window.HermesOpsGit && typeof window.HermesOpsGit.renderSection==='function'){
+      return window.HermesOpsGit.renderSection({
+        selectedProject:selectedProject,
+        loadingGitStatus:state.loadingGitStatus,
+        gitStatus:state.gitStatus,
+        gitError:state.gitError,
       });
     }
     return '';

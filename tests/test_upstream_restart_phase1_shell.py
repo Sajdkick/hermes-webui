@@ -40,6 +40,7 @@ def test_ops_shell_route_is_registered_and_serves_html():
     assert (handler.header("Content-Type") or "").startswith("text/html")
     html = bytes(handler.body).decode("utf-8")
     assert 'data-ops-shell="cloud-terminal"' in html
+    assert "/static/ops-git.js" in html
     assert "/static/ops-projects.js" in html
     assert "/static/cloud-terminal-entry.js" in html
     assert "/static/cloud-terminal.css" in html
@@ -59,6 +60,7 @@ def test_ops_shell_bootstrap_api_is_registered():
     assert payload["route"] == "/ops"
     assert payload["assets"]["entryScript"] == "/static/cloud-terminal-entry.js"
     assert payload["assets"]["entryStylesheet"] == "/static/cloud-terminal.css"
+    assert payload["assets"]["gitScript"] == "/static/ops-git.js"
     assert payload["assets"]["projectsScript"] == "/static/ops-projects.js"
 
 
@@ -74,6 +76,11 @@ def test_ops_shell_assets_are_served_by_static_route():
     assert handle_get(stylesheet, urlparse("http://example.com/static/cloud-terminal.css")) is True
     assert stylesheet.status == 200
     assert (stylesheet.header("Content-Type") or "").startswith("text/css")
+
+    git_script = _FakeHandler()
+    assert handle_get(git_script, urlparse("http://example.com/static/ops-git.js")) is True
+    assert git_script.status == 200
+    assert (git_script.header("Content-Type") or "").startswith("application/javascript")
 
     projects_script = _FakeHandler()
     assert handle_get(projects_script, urlparse("http://example.com/static/ops-projects.js")) is True
