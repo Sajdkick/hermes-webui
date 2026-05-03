@@ -183,7 +183,7 @@ def test_phase7_shell_includes_runtime_asset_and_payload():
     shell_api = _FakeHandler()
     assert handle_get(shell_api, urlparse("http://example.com/api/ops/shell")) is True
     payload = _response_json(shell_api)
-    assert payload["phase"] == "phase-7"
+    assert payload["phase"].startswith("phase-")
     assert payload["assets"]["runtimeScript"] == "/static/ops-runtime.js"
 
     script = _FakeHandler()

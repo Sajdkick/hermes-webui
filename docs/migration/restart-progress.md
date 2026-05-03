@@ -499,22 +499,57 @@ Result:
 
 ## Phase 8 merge rehearsal
 
-- Rehearsal worktree: pending
-- Rehearsal branch: pending
-- Snapshot commit: pending
+- Rehearsal worktree: `/tmp/hermes-webui-upstream-restart-rehearse-phase8.6yuGH3`
+- Rehearsal branch: `tmp/rehearse-upstream-restart-phase8`
+- Snapshot commit: `9425eb4`
 - Command: `git merge --no-edit upstream/master`
-- Result: pending
-- Conflict files: pending
-- Conflict count: pending
-- Mechanical resolution required: pending
-- Hotspot files touched during rehearsal: pending
-- Hotspot budget result during rehearsal: pending
+- Result: `Already up to date.`
+- Conflict files: `0`
+- Conflict count: `0`
+- Mechanical resolution required: no
+- Hotspot files touched during rehearsal: `api/routes.py`, `static/boot.js`, `static/index.html`, `static/messages.js` only
+- Hotspot budget result during rehearsal: within budget
 
 ## Minimal upstream-owned edits in Phase 8
 
 - None.
   Phase 8 kept launch-default persistence, profile resolution, project git status, and `/ops` UI status rendering in fork-owned modules. No additional upstream-owned files were touched beyond the hotspot surface established in earlier phases.
 
-## Next concrete step
+## Phase 9 deliverables
 
-Start Phase 9 on this clean branch: compare the old fork, this clean restart branch, and latest upstream to decide what still needs to be ported, explicitly deferred, or dropped.
+- [x] Compare the old fork feature catalog in `docs/migration/hermes-cloud-terminal-user-guide.md` and `docs/migration/hermes-ops-module-boundary-guide.md` against the clean restart branch inventory
+- [x] Map each legacy workflow surface to `ported`, `reused upstream`, `deferred`, or `dropped`
+- [x] Build a completion checklist that maps the execution plan's explicit requirements to concrete branch artifacts, tests, guardrails, and merge evidence
+- [ ] Run the final restart verification suite and supporting evidence checks
+- [ ] Run the final merge rehearsal for the Phase 9 snapshot
+- [ ] Decide whether the execution plan is actually complete
+
+## Phase 9 parity audit
+
+| Legacy surface | Legacy evidence | Clean restart evidence | Decision |
+| --- | --- | --- | --- |
+| `/ops` shell plus project/task CRUD | `docs/migration/hermes-cloud-terminal-user-guide.md` daily workflow; legacy `api/ops_projects.py`, `static/ops-projects.js` | `api/ops_projects.py`, `api/routes_ops_projects.py`, `static/ops-projects.js`, `tests/test_upstream_restart_phase2_projects.py`, `tests/test_upstream_restart_phase2_ui.py` | Ported |
+| Task-linked execution sessions and task resume | legacy user guide “Quick task runner” / project detail workflow; legacy `api/ops_sessions.py` | `api/ops_sessions.py`, `api/session_sidecars.py`, `tests/test_upstream_restart_phase3_sidecars.py`, `tests/test_upstream_restart_phase4_sessions.py` | Ported as explicit task launch and resume from project detail |
+| Readable output for active work | legacy user guide “Runs, Requests, And Readable Output”; legacy `api/ops_artifacts.py`, `api/routes_ops_runs.py` | `api/session_readable_output.py`, `api/routes_ops_sessions.py`, `static/readable-output-ui.js`, `static/readable-output-ui.css`, `tests/test_upstream_restart_phase5_readable_output.py` | Ported for task-linked Hermes sessions |
+| User-facing approval and clarify workflow | legacy runs/request UI and notification docs | `api/ops_notifications.py`, `api/routes_ops_notifications.py`, `static/ops-notifications.js`, `tests/test_upstream_restart_phase6_notifications.py` | Ported |
+| Runtime gather/review, Play, and inspect | legacy user guide “Runtime And Play”; legacy `api/ops_guides.py`, `api/ops_runtime_tools.py`, `api/play_pipeline.py`, `static/ops-play.js`, `static/play-inspect-shell.js` | `api/ops_guides.py`, `api/ops_runtime_tools.py`, `api/ops_runtime_inspect.py`, `api/play_pipeline.py`, `api/routes_ops_runtime.py`, `api/routes_ops_play.py`, `static/ops-runtime.js`, `static/play-proxy-compat.js`, `tests/test_upstream_restart_phase7_runtime_guides.py`, `tests/test_upstream_restart_phase7_play.py`, `tests/test_upstream_restart_phase7_runtime_inspect.py` | Ported |
+| Profile/model conveniences | legacy agent/profile bridge modules and upstream-sync launcher inputs | Upstream Hermes profile/model APIs reused directly; project-level defaults layered in `api/ops_projects.py`, `api/ops_sessions.py`, `static/ops-projects.js`, `tests/test_upstream_restart_phase8_project_defaults.py` | Reused upstream plus thin fork integration |
+| Project git and upstream/core-branch visibility | legacy `api/ops_git.py`, `static/ops-git.js` | `api/ops_git.py`, `api/routes_ops_git.py`, `static/ops-git.js`, `tests/test_upstream_restart_phase8_git_status.py` | Ported as read-only visibility; direct maintenance-session sync flow not reintroduced |
+| Durable run registry, run activity, artifact health, and run detail | legacy `api/routes_ops_runs.py`, `static/ops-runs.js`, `docs/migration/hermes-cloud-terminal-user-guide.md` | No `ops_runs` surface exists in the clean branch; current branch instead links tasks directly to Hermes sessions and session readable output | Deferred. Not part of the restart phase plan, and the clean branch does not claim run-system parity |
+| Migration health, deployment, database, and GitHub admin panels | legacy guide “Migration health”, “Deployment And Push Scope”; legacy `api/ops_migration.py`, `api/ops_deployments.py`, `api/ops_database.py`, `api/ops_github.py` | No equivalent clean-branch modules or routes were added; these surfaces were not in Phases 0-8 | Deferred. Broader retirement/admin scope, not part of the restart plan |
+| Upstream-sync maintenance session and apply flow | legacy `api/routes_upstream_sync.py`, `api/upstream_sync.py`, `static/upstream-sync-ui.js` | No clean-branch maintenance-session sync surface; Phase 8 retained only project git visibility and profile/model conveniences | Dropped for restart scope. Lower value than mergeability and would widen the fork surface beyond the documented phases |
+
+## Phase 9 completion checklist
+
+| Execution-plan requirement | Evidence in the clean restart branch | Status |
+| --- | --- | --- |
+| Start from latest `upstream/master` | Current branch snapshot at top of this file lists base commit `9e31a2ac65c3fa7c26a733e213a308aa4a04f992`; guardrail output still reports `base=upstream/master` and the same merge-base | Met |
+| Re-port features in small vertical slices | Phases 1-8 in this tracker each have scoped deliverables, focused verification, and merge rehearsals | Met |
+| Keep product behavior in fork-owned modules | `git diff --name-status upstream/master..HEAD` shows new behavior in fork-owned `api/ops_*.py`, `api/routes_ops_*.py`, `static/ops-*.js`, `static/cloud-terminal.css`, `static/cloud-terminal-entry.js`, `static/readable-output-ui.*`, `static/play-proxy-compat.js` | Met |
+| Avoid broad edits to Hermes-owned hotspots | Guardrail output stays `ready`; `git diff --name-only upstream/master..HEAD -- api/models.py api/streaming.py api/config.py api/profiles.py static/ui.js static/sessions.js static/panels.js static/style.css` returns nothing; hotspot churn is still only `api/routes.py`, `static/boot.js`, `static/index.html`, `static/messages.js` within budget | Met |
+| Sidecars own fork workflow metadata | `api/session_sidecars.py` stores project/task linkage outside Hermes session JSON; covered by `tests/test_upstream_restart_phase3_sidecars.py` | Met |
+| Prefer behavior tests over source-shape tests | All restart coverage is phase behavior coverage in `tests/test_upstream_restart_phase1_shell.py` through `tests/test_upstream_restart_phase8_git_status.py` plus `tests/test_upstream_restart_guardrails.py` | Met |
+| Upstream tests remain intact unless explicitly documented | `git diff --name-status upstream/master..HEAD -- tests` shows only added restart tests; `git diff --diff-filter=D --name-only upstream/master..HEAD` returns nothing | Met |
+| High-value fork workflows are rebuilt on latest upstream | Ported/reused rows in the Phase 9 parity audit cover project/task CRUD, task-linked sessions, readable output, requests, runtime gather/review, Play, inspect, profile/model defaults, and project git visibility | Met |
+| Old branch no longer needed except as historical reference | Remaining legacy-only surfaces are explicitly classified above as `Deferred` or `Dropped`; no plan-scoped workflow remains unmapped | Pending final verification |
+| Final merge should be cheap and mostly mechanical | Pending final Phase 9 merge rehearsal | Pending |
