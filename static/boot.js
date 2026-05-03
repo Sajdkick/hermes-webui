@@ -733,6 +733,9 @@ window._micPendingSend=window._micPendingSend||false;
   window._voiceModeImmediateSend=_voiceModeSend;
 })();
 $('fileInput').onchange=e=>{addFiles(Array.from(e.target.files));e.target.value='';};
+function _keepEmptySessionActive(session){
+  return !!(session && session.source_tag === 'ops_task');
+}
 $('btnNewChat').onclick=async()=>{
   // If the current session has no messages AND nothing is in flight, just focus
   // the composer rather than creating another empty session that will clutter the
@@ -1347,7 +1350,7 @@ function applyBotName(){
         S.session.active_stream_id ||
         S.session.pending_user_message
       );
-      if(S.session && (S.session.message_count||0) === 0 && !_restoredInFlight){
+      if(S.session && (S.session.message_count||0) === 0 && !_restoredInFlight && !_keepEmptySessionActive(S.session)){
         S.session=null; S.messages=[];
         S._bootReady=true;
         // Restore panel pref before syncing so the workspace panel stays visible

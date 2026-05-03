@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermes Ops Shell</title>
+<link rel="stylesheet" href="/static/style.css?v=__WEBUI_VERSION__">
+<link rel="stylesheet" href="/static/cloud-terminal.css?v=__WEBUI_VERSION__">
+</head>
+<body class="ops-shell-page">
+<main class="ops-shell-main">
+  <section class="ops-shell-hero">
+    <p class="ops-shell-kicker">Phase 6 workflow inbox shell</p>
+    <h1>Cloud Terminal on a clean Hermes base</h1>
+    <p class="ops-shell-copy">
+      This shell now pairs task-linked Hermes sessions, readable output, and fork-owned approval and clarify inboxes without taking over upstream streaming.
+    </p>
+    <div class="ops-shell-links">
+      <a class="ops-shell-link" href="/">Back to Hermes</a>
+      <a class="ops-shell-link" href="/api/ops/shell">View shell payload</a>
+    </div>
+  </section>
+  <section class="ops-shell-panel">
+    <div id="ops-root" data-ops-shell="cloud-terminal">
+      <p class="ops-shell-loading">Loading project, task, session, readable-output, and workflow notification metadata…</p>
+    </div>
+  </section>
+</main>
+<script src="/static/ops-notifications.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/ops-projects.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/cloud-terminal-entry.js?v=__WEBUI_VERSION__" defer></script>
+</body>
+</html>

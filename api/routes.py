@@ -1234,6 +1234,12 @@ def handle_get(handler, parsed) -> bool:
             },
         )
 
+    if parsed.path in ("/ops", "/ops/") or parsed.path.startswith("/api/ops/"):
+        from api.routes_ops import handle_get as handle_ops_get
+
+        if handle_ops_get(handler, parsed):
+            return True
+
     if parsed.path == "/api/models":
         return j(handler, get_available_models())
 
@@ -1824,6 +1830,12 @@ def handle_post(handler, parsed) -> bool:
         return handle_transcribe(handler)
 
     body = read_body(handler)
+
+    if parsed.path.startswith("/api/ops/"):
+        from api.routes_ops import handle_post as handle_ops_post
+
+        if handle_ops_post(handler, parsed, body):
+            return True
 
     if parsed.path == "/api/session/new":
         try:
