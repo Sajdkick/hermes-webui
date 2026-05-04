@@ -168,6 +168,13 @@ def test_main_shell_exposes_ops_navigation_entry():
     assert "return new URL(rel, base).href;" in js
     assert "_appRelativeUrl('ops')" in js
 
+    assert html.count('onclick="openRecoveryPage()"') == 3
+    assert html.count("title=\"Recovery page\"") == 2
+    assert "Open recovery page" in html
+    assert "function openRecoveryPage()" in js
+    assert "function _siteRootUrl(path)" in js
+    assert "const target=_siteRootUrl('recovery');" in js
+
 
 def test_main_shell_exposes_codex_and_maintenance_settings_entries():
     html = Path("static/index.html").read_text(encoding="utf-8")

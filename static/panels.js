@@ -2752,9 +2752,31 @@ function _appRelativeUrl(path){
   try{return new URL(rel, base).href;}catch(_error){return raw.startsWith('/') ? raw : '/'+raw;}
 }
 
+function _siteRootUrl(path){
+  const raw=String(path||'').trim();
+  const base=(typeof window!=='undefined' && window.location && window.location.origin)
+    || (typeof location!=='undefined' && location.origin)
+    || '';
+  if(!raw) return base || '/';
+  if(/^[a-z]+:/i.test(raw) || raw.startsWith('//')) return raw;
+  const rel=raw.startsWith('/') ? raw : '/'+raw;
+  if(!base) return rel;
+  try{return new URL(rel, base).href;}catch(_error){return rel;}
+}
+
 function openOpsDashboard(){
   if(typeof window==='undefined' || !window.location) return;
   const target=_appRelativeUrl('ops');
+  if(typeof window.location.assign==='function'){
+    window.location.assign(target);
+    return;
+  }
+  window.location.href=target;
+}
+
+function openRecoveryPage(){
+  if(typeof window==='undefined' || !window.location) return;
+  const target=_siteRootUrl('recovery');
   if(typeof window.location.assign==='function'){
     window.location.assign(target);
     return;
