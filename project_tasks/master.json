@@ -10,10 +10,10 @@
           "done": false,
           "dependencies": [],
           "grade": "green",
+          "createdAt": "2026-05-04T07:52:00.000Z",
           "markers": [
             "AI suggestion"
-          ],
-          "createdAt": "2026-05-04T07:52:00Z"
+          ]
         }
       ],
       "createdBy": {
