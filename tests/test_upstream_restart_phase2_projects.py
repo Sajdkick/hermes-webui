@@ -142,7 +142,7 @@ def test_phase2_shell_includes_projects_asset_and_payload():
     shell_page = _FakeHandler()
     assert handle_get(shell_page, urlparse("http://example.com/ops")) is True
     html = bytes(shell_page.body).decode("utf-8")
-    assert "/static/ops-projects.js" in html
+    assert 'src="static/ops-projects.js?v=' in html
     assert 'data-ops-shell="cloud-terminal"' in html
 
     shell_api = _FakeHandler()

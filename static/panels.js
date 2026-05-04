@@ -2690,6 +2690,28 @@ const _settingsMaintenanceState = {
   busyAction: '',
 };
 
+function _appRelativeUrl(path){
+  const raw=String(path||'').trim();
+  const base=(typeof document!=='undefined' && document.baseURI)
+    || (typeof location!=='undefined' && location.href)
+    || '';
+  if(!raw) return base || '/';
+  if(/^[a-z]+:/i.test(raw) || raw.startsWith('//')) return raw;
+  const rel=raw.startsWith('/') ? raw.slice(1) : raw;
+  if(!base) return raw.startsWith('/') ? raw : '/'+raw;
+  try{return new URL(rel, base).href;}catch(_error){return raw.startsWith('/') ? raw : '/'+raw;}
+}
+
+function openOpsDashboard(){
+  if(typeof window==='undefined' || !window.location) return;
+  const target=_appRelativeUrl('ops');
+  if(typeof window.location.assign==='function'){
+    window.location.assign(target);
+    return;
+  }
+  window.location.href=target;
+}
+
 function switchSettingsSection(name){
   const section=(name==='appearance'||name==='preferences'||name==='providers'||name==='codex'||name==='maintenance'||name==='system')?name:'conversation';
   _settingsSection=section;

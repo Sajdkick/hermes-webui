@@ -158,10 +158,14 @@ def test_phase10_ops_ui_renders_admin_panels():
 
 def test_main_shell_exposes_ops_navigation_entry():
     html = Path("static/index.html").read_text(encoding="utf-8")
+    js = Path("static/panels.js").read_text(encoding="utf-8")
 
-    assert html.count("onclick=\"window.location.assign('ops')\"") == 3
+    assert html.count('onclick="openOpsDashboard()"') == 3
     assert html.count("title=\"Ops dashboard\"") == 2
     assert "Open Ops dashboard" in html
+    assert "function openOpsDashboard()" in js
+    assert "const base=(typeof document!=='undefined' && document.baseURI)" in js
+    assert "return new URL(rel, base).href;" in js
 
 
 def test_main_shell_exposes_codex_and_maintenance_settings_entries():

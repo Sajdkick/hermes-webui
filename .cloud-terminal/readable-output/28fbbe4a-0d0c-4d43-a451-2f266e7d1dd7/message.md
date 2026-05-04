@@ -1,27 +1,23 @@
-# Settings Integration
+# Ops path fix
 
-Added the missing main-shell entry points for the Cloud Terminal features you called out, without spreading the implementation across unrelated Hermes files.
+`/ops` was failing because the ops entry points were still assuming the app lived at domain root. In your current setup, Hermes is being served from an app base path, so the correct ops URL is derived from that base, not always from `/`.
 
-- `Codex` is now its own settings section in [static/index.html](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/static/index.html) with:
-  - shared `~/.codex/config.toml` editing
-  - inline ChatGPT/Codex OAuth using the existing `/api/oauth/codex/*` flow
-  - a low-conflict backend helper in [api/codex_settings.py](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/api/codex_settings.py) plus `/api/codex-config` routes in [api/routes.py](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/api/routes.py)
-- `Maintenance` is now its own settings section in [static/index.html](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/static/index.html) and [static/panels.js](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/static/panels.js), reusing the existing `/api/ops/projects/.../upstream-sync` APIs instead of copying `/ops` internals into the main shell.
-- The provider card for `openai-codex` now has an `Open Codex settings` action instead of dead-ending at “use the terminal”.
+## What changed
 
-This was kept merge-friendly on purpose:
+- Main-shell `Ops` buttons now resolve through `document.baseURI` instead of hardcoding `ops` against the raw browser location.
+- The ops shell now uses the same base-href bootstrap as the main Hermes UI.
+- Ops shell assets, bootstrap fetches, and cross-links now resolve relative to the app base.
+- I updated the stale shell tests to keep this additive and merge-friendly rather than rewriting the backend route contract.
 
-- new UI is additive (`Codex` and `Maintenance` sections) instead of reshaping existing settings panes
-- upstream merge flow still lives in the existing ops APIs
-- Codex file handling is isolated in one new backend helper
+## What to test
 
-Verification:
+- Reload Hermes and use the `Ops` button from the main UI.
+- If your current page URL looks like `https://host/prefix/session/<id>`, the correct manual ops URL is `https://host/prefix/ops`.
+- Literal root `/ops` only works when Hermes is mounted at the site root.
 
-- `python -m py_compile api/codex_settings.py api/routes.py`
-- `node --check static/panels.js`
-- `python -m pytest tests/test_codex_settings_panel.py tests/test_upstream_restart_phase10_admin_ui.py`
+## Verification
+
+- `node --check static/panels.js static/cloud-terminal-entry.js static/ops-projects.js static/ops-notifications.js static/ops-runs.js static/ops-upstream-sync.js`
+- `python -m pytest tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase10_admin_ui.py`
+- `python -m pytest tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase6_notifications.py tests/test_upstream_restart_phase7_runtime_inspect.py tests/test_upstream_restart_phase8_project_defaults.py tests/test_upstream_restart_phase10_upstream_sync.py`
 - `git diff --check`
-
-Focused tests passed: `7 passed`.
-
-I did not run a live browser check here, so the remaining gap is visual runtime confirmation in the app itself.

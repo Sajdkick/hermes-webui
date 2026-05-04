@@ -8,6 +8,18 @@
       .replace(/'/g,'&#39;');
   }
 
+  function appUrl(path){
+    const raw=String(path||'').trim();
+    const base=(typeof document!=='undefined' && document.baseURI)
+      || (typeof location!=='undefined' && location.href)
+      || '';
+    if(!raw) return base || '/';
+    if(/^[a-z]+:/i.test(raw) || raw.startsWith('//')) return raw;
+    const rel=raw.startsWith('/') ? raw.slice(1) : raw;
+    if(!base) return raw.startsWith('/') ? raw : '/'+raw;
+    try{return new URL(rel, base).href;}catch(_error){return raw.startsWith('/') ? raw : '/'+raw;}
+  }
+
   function statusMeta(value){
     const status=String(value||'running').trim().toLowerCase();
     if(status==='succeeded')return { label:'Succeeded', kind:'ready' };
@@ -61,8 +73,8 @@
         ].filter(Boolean).join(' • '))+'</p>',
         '</div>',
         '<div class="ops-task-actions">',
-        sessionUrl ? '<a class="ops-shell-link" href="'+escapeHtml(sessionUrl)+'">Open session</a>' : '',
-        readableUrl ? '<a class="ops-shell-link" href="'+escapeHtml(readableUrl)+'">Readable output</a>' : '',
+        sessionUrl ? '<a class="ops-shell-link" href="'+escapeHtml(appUrl(sessionUrl))+'">Open session</a>' : '',
+        readableUrl ? '<a class="ops-shell-link" href="'+escapeHtml(appUrl(readableUrl))+'">Readable output</a>' : '',
         '</div>',
         '</article>'
       ].join('');

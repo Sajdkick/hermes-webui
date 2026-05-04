@@ -8,6 +8,18 @@
       .replace(/'/g,'&#39;');
   }
 
+  function appUrl(path){
+    const raw=String(path||'').trim();
+    const base=(typeof document!=='undefined' && document.baseURI)
+      || (typeof location!=='undefined' && location.href)
+      || '';
+    if(!raw) return base || '/';
+    if(/^[a-z]+:/i.test(raw) || raw.startsWith('//')) return raw;
+    const rel=raw.startsWith('/') ? raw.slice(1) : raw;
+    if(!base) return raw.startsWith('/') ? raw : '/'+raw;
+    try{return new URL(rel, base).href;}catch(_error){return raw.startsWith('/') ? raw : '/'+raw;}
+  }
+
   function renderSection(state){
     const items=Array.isArray(state.notifications)?state.notifications:[];
     const content=state.loadingNotifications
@@ -46,7 +58,7 @@
       '</div>',
       summary,
       '<div class="ops-notification-footer">',
-      '<a class="ops-shell-link" href="'+escapeHtml(String(item&&item.sessionUrl||'/'))+'">Open session</a>',
+      '<a class="ops-shell-link" href="'+escapeHtml(appUrl(String(item&&item.sessionUrl||'./')))+'">Open session</a>',
       '</div>',
       '</article>'
     ].join('');

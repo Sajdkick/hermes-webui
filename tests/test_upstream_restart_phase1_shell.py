@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from urllib.parse import urlparse
 
 
@@ -40,14 +41,17 @@ def test_ops_shell_route_is_registered_and_serves_html():
     assert (handler.header("Content-Type") or "").startswith("text/html")
     html = bytes(handler.body).decode("utf-8")
     assert 'data-ops-shell="cloud-terminal"' in html
-    assert "/static/ops-github-admin.js" in html
-    assert "/static/ops-database.js" in html
-    assert "/static/ops-git.js" in html
-    assert "/static/ops-runs.js" in html
-    assert "/static/ops-upstream-sync.js" in html
-    assert "/static/ops-projects.js" in html
-    assert "/static/cloud-terminal-entry.js" in html
-    assert "/static/cloud-terminal.css" in html
+    assert 'document.write(\'<base href="' in html
+    assert 'href="static/cloud-terminal.css?v=__WEBUI_VERSION__"' not in html
+    assert 'href="static/cloud-terminal.css?v=' in html
+    assert 'src="static/ops-github-admin.js?v=' in html
+    assert 'src="static/ops-database.js?v=' in html
+    assert 'src="static/ops-git.js?v=' in html
+    assert 'src="static/ops-runs.js?v=' in html
+    assert 'src="static/ops-upstream-sync.js?v=' in html
+    assert 'src="static/ops-projects.js?v=' in html
+    assert 'src="static/cloud-terminal-entry.js?v=' in html
+    assert 'href="api/ops/shell"' in html
 
 
 def test_ops_shell_bootstrap_api_is_registered():
@@ -70,6 +74,14 @@ def test_ops_shell_bootstrap_api_is_registered():
     assert payload["assets"]["runsScript"] == "/static/ops-runs.js"
     assert payload["assets"]["upstreamSyncScript"] == "/static/ops-upstream-sync.js"
     assert payload["assets"]["projectsScript"] == "/static/ops-projects.js"
+
+
+def test_ops_entry_uses_base_relative_shell_fetch():
+    source = Path("static/cloud-terminal-entry.js").read_text(encoding="utf-8")
+
+    assert "const base=(typeof document!=='undefined' && document.baseURI)" in source
+    assert "return new URL(rel, base).href;" in source
+    assert "fetch(appUrl('api/ops/shell')" in source
 
 
 def test_ops_shell_assets_are_served_by_static_route():

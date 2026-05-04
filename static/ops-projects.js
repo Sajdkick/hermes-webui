@@ -10,6 +10,18 @@
       .replace(/'/g,'&#39;');
   }
 
+  function appUrl(path){
+    const raw=String(path||'').trim();
+    const base=(typeof document!=='undefined' && document.baseURI)
+      || (typeof location!=='undefined' && location.href)
+      || '';
+    if(!raw) return base || '/';
+    if(/^[a-z]+:/i.test(raw) || raw.startsWith('//')) return raw;
+    const rel=raw.startsWith('/') ? raw.slice(1) : raw;
+    if(!base) return raw.startsWith('/') ? raw : '/'+raw;
+    try{return new URL(rel, base).href;}catch(_error){return raw.startsWith('/') ? raw : '/'+raw;}
+  }
+
   function mount(root,shellPayload){
     const state={
       shellPayload:shellPayload||{},
@@ -378,7 +390,7 @@
       requestOptions.headers['Content-Type']='application/json';
       requestOptions.body=JSON.stringify(options.body||{});
     }
-    const response=await fetch(path,requestOptions);
+    const response=await fetch(appUrl(path),requestOptions);
     const payload=await response.json().catch(function(){return {};});
     if(!response.ok){
       const message=payload && payload.error ? payload.error : 'Request failed with status '+response.status;
@@ -1010,11 +1022,12 @@
     const target=summary && summary.inspectUrl ? String(summary.inspectUrl) : '';
     if(!target)return;
     if(typeof window!=='undefined' && window.location){
+      const normalized=appUrl(target);
       if(typeof window.location.assign==='function'){
-        window.location.assign(target);
+        window.location.assign(normalized);
         return;
       }
-      window.location.href=target;
+      window.location.href=normalized;
     }
   }
 
@@ -1202,11 +1215,12 @@
       );
       const target=payload && payload.sessionUrl ? String(payload.sessionUrl) : '';
       if(target && typeof window!=='undefined' && window.location){
+        const normalized=appUrl(target);
         if(typeof window.location.assign==='function'){
-          window.location.assign(target);
+          window.location.assign(normalized);
           return;
         }
-        window.location.href=target;
+        window.location.href=normalized;
         return;
       }
       state.launchingTaskId='';
@@ -1550,7 +1564,7 @@
       if(item && item.available===false){
         return '<span class="ops-task-session-link unavailable">'+escapeHtml(title+' unavailable')+'</span>';
       }
-      return '<a class="ops-task-session-link" href="'+escapeHtml(href)+'">'+escapeHtml(title+suffix)+'</a>';
+      return '<a class="ops-task-session-link" href="'+escapeHtml(appUrl(href))+'">'+escapeHtml(title+suffix)+'</a>';
     }).join('');
   }
 
@@ -1563,7 +1577,7 @@
     return [
       '<span class="ops-task-actions">',
       '<button class="ops-shell-link'+(launching?' disabled':'')+'" type="button" data-ops-action="launch-task-session" data-task-id="'+escapeHtml(task.id||'')+'"'+(launching?' disabled':'')+'>'+(launching?'Opening…':'New session')+'</button>',
-      latest ? '<a class="ops-shell-link" href="'+escapeHtml(String(latest.sessionUrl||sessionUrlFor(latest.sessionId)))+'">Resume latest</a>' : '',
+      latest ? '<a class="ops-shell-link" href="'+escapeHtml(appUrl(String(latest.sessionUrl||sessionUrlFor(latest.sessionId))))+'">Resume latest</a>' : '',
       '</span>'
     ].join('');
   }
@@ -1581,7 +1595,7 @@
 
   function sessionUrlFor(sessionId){
     const sid=String(sessionId||'').trim();
-    return sid ? '/session/'+encodeURIComponent(sid) : '/';
+    return sid ? appUrl('session/'+encodeURIComponent(sid)) : appUrl('./');
   }
 
   function notificationKey(payload){

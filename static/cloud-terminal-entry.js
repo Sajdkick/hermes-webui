@@ -1,9 +1,25 @@
 (function(){
+  function appUrl(path){
+    const raw=String(path||'').trim();
+    const base=(typeof document!=='undefined' && document.baseURI)
+      || (typeof location!=='undefined' && location.href)
+      || '';
+    if(!raw) return base || '/';
+    if(/^[a-z]+:/i.test(raw) || raw.startsWith('//')) return raw;
+    const rel=raw.startsWith('/') ? raw.slice(1) : raw;
+    if(!base) return raw.startsWith('/') ? raw : '/'+raw;
+    try{return new URL(rel, base).href;}catch(_error){return raw.startsWith('/') ? raw : '/'+raw;}
+  }
+
+  window.HermesOpsPath={
+    appUrl:appUrl,
+  };
+
   async function loadShell(){
     const root=document.querySelector('[data-ops-shell]');
     if(!root)return;
     try{
-      const response=await fetch('/api/ops/shell',{credentials:'same-origin'});
+      const response=await fetch(appUrl('api/ops/shell'),{credentials:'same-origin'});
       if(!response.ok)throw new Error('Shell request failed with status '+response.status);
       const payload=await response.json();
       if(window.HermesOpsProjects && typeof window.HermesOpsProjects.mount==='function'){

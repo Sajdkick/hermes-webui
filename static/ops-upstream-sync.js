@@ -8,6 +8,18 @@
       .replace(/'/g,'&#39;');
   }
 
+  function appUrl(path){
+    const raw=String(path||'').trim();
+    const base=(typeof document!=='undefined' && document.baseURI)
+      || (typeof location!=='undefined' && location.href)
+      || '';
+    if(!raw) return base || '/';
+    if(/^[a-z]+:/i.test(raw) || raw.startsWith('//')) return raw;
+    const rel=raw.startsWith('/') ? raw.slice(1) : raw;
+    if(!base) return raw.startsWith('/') ? raw : '/'+raw;
+    try{return new URL(rel, base).href;}catch(_error){return raw.startsWith('/') ? raw : '/'+raw;}
+  }
+
   function syncMeta(sync,error,loading){
     if(error){
       return { kind:'error', label:'Unavailable', summary:error };
@@ -63,7 +75,7 @@
       '<button class="ops-shell-link" type="button" data-ops-action="refresh-upstream-sync"'+(loading?' disabled':'')+'>'+(loading?'Refreshing…':'Refresh sync')+'</button>',
       '<button class="ops-shell-link primary" type="button" data-ops-action="start-upstream-sync"'+(busyAction==='start'?' disabled':'')+'>'+(busyAction==='start'?'Starting…':'Start maintenance session')+'</button>',
       '<button class="ops-shell-link" type="button" data-ops-action="apply-upstream-sync"'+(busyAction==='apply' || !(sync && sync.canApply)?' disabled':'')+'>'+(busyAction==='apply'?'Applying…':'Apply reviewed sync')+'</button>',
-      openSession?'<a class="ops-shell-link" href="'+escapeHtml(openSession)+'">Open session</a>':'',
+      openSession?'<a class="ops-shell-link" href="'+escapeHtml(appUrl(openSession))+'">Open session</a>':'',
       '</div>',
       '</div>',
       sync && Array.isArray(sync.blockers) && sync.blockers.length ? '<p class="ops-shell-error">'+escapeHtml(sync.blockers.join(' | '))+'</p>' : '',
