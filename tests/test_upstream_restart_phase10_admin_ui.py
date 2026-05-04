@@ -1,5 +1,6 @@
 import subprocess
 import textwrap
+from pathlib import Path
 
 
 def test_phase10_ops_ui_renders_admin_panels():
@@ -153,3 +154,30 @@ def test_phase10_ops_ui_renders_admin_panels():
         text=True,
     )
     assert completed.stdout.strip() == "ok"
+
+
+def test_main_shell_exposes_ops_navigation_entry():
+    html = Path("static/index.html").read_text(encoding="utf-8")
+
+    assert html.count("onclick=\"window.location.assign('ops')\"") == 3
+    assert html.count("title=\"Ops dashboard\"") == 2
+    assert "Open Ops dashboard" in html
+
+
+def test_main_shell_exposes_codex_and_maintenance_settings_entries():
+    html = Path("static/index.html").read_text(encoding="utf-8")
+    js = Path("static/panels.js").read_text(encoding="utf-8")
+
+    assert 'data-settings-section="codex"' in html
+    assert 'id="settingsPaneCodex"' in html
+    assert 'id="settingsCodexConfigEditor"' in html
+    assert 'data-settings-section="maintenance"' in html
+    assert 'id="settingsPaneMaintenance"' in html
+    assert 'id="settingsMaintenanceProject"' in html
+    assert "switchSettingsSection('codex')" in html
+    assert "switchSettingsSection('maintenance')" in html
+
+    assert "name==='appearance'||name==='preferences'||name==='providers'||name==='codex'||name==='maintenance'||name==='system'" in js
+    assert "api('/api/codex-config')" in js
+    assert "/api/ops/projects/'+encodeURIComponent(state.selectedProjectId)+'/upstream-sync" in js
+    assert "Open Codex settings" in js

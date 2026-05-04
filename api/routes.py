@@ -1687,6 +1687,16 @@ def handle_get(handler, parsed) -> bool:
             handler.wfile.flush()
         return  # SSE handled, no JSON response
 
+    if parsed.path == "/api/codex-config":
+        try:
+            from api.codex_settings import load_codex_config
+
+            return j(handler, load_codex_config())
+        except ValueError as e:
+            return bad(handler, str(e), 400)
+        except Exception as e:
+            return j(handler, {"error": str(e)}, status=500)
+
     # ── Cron API (GET) ──
     if parsed.path == "/api/crons":
         from cron.jobs import list_jobs
@@ -2423,6 +2433,16 @@ def handle_post(handler, parsed) -> bool:
 
     if parsed.path == "/api/skills/delete":
         return _handle_skill_delete(handler, body)
+
+    if parsed.path == "/api/codex-config":
+        try:
+            from api.codex_settings import save_codex_config
+
+            return j(handler, save_codex_config(body.get("content", "")))
+        except ValueError as e:
+            return bad(handler, str(e), 400)
+        except Exception as e:
+            return j(handler, {"error": str(e)}, status=500)
 
     # ── Memory (POST) ──
     if parsed.path == "/api/memory/write":

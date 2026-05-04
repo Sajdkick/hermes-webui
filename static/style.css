@@ -2186,6 +2186,84 @@ main.main.showing-profiles > #mainProfiles{display:flex;}
   background:var(--accent-hover);
 }
 
+#mainSettings textarea.settings-code-editor{
+  width:100%;
+  min-height:240px;
+  resize:vertical;
+  padding:12px;
+  background:var(--bg);
+  color:var(--text);
+  border:1px solid var(--border);
+  border-radius:10px;
+  font-size:12px;
+  line-height:1.55;
+  font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  transition:border-color .15s,box-shadow .15s;
+}
+#mainSettings textarea.settings-code-editor:focus{
+  border-color:var(--accent);
+  box-shadow:0 0 0 3px var(--accent-bg);
+  outline:none;
+}
+.settings-inline-note{margin-bottom:10px;font-size:12px;color:var(--muted);line-height:1.55;}
+.settings-inline-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;}
+.settings-inline-status{margin-top:12px;min-height:18px;font-size:12px;color:var(--muted);line-height:1.5;}
+.settings-inline-status.error{color:var(--error);}
+.settings-inline-status.success{color:var(--success);}
+.settings-maintenance-summary{
+  padding:16px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--bg);
+  font-size:12px;
+  color:var(--muted);
+  line-height:1.6;
+}
+.settings-maintenance-summary strong{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:13px;
+  color:var(--text);
+}
+.settings-status-pill{
+  display:inline-flex;
+  align-items:center;
+  padding:3px 8px;
+  border-radius:999px;
+  background:var(--surface);
+  color:var(--muted);
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.02em;
+}
+.settings-status-pill.ready{background:rgba(34,197,94,.12);color:#16a34a;}
+.settings-status-pill.warning{background:rgba(245,158,11,.14);color:#d97706;}
+.settings-status-pill.error{background:rgba(239,68,68,.12);color:#dc2626;}
+.settings-status-pill.idle{background:var(--surface);color:var(--muted);}
+.settings-maintenance-history{display:flex;flex-direction:column;gap:10px;margin-top:14px;}
+.settings-maintenance-history-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:10px 12px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--bg);
+  font-size:12px;
+}
+.settings-maintenance-history-row strong{
+  display:block;
+  font-size:12px;
+  color:var(--text);
+  margin-bottom:2px;
+}
+.settings-maintenance-history-row span{
+  color:var(--muted);
+  text-align:right;
+}
+
 /* Secondary sm-btn fallback (Sign out / Disable auth) — neutral outline. */
 #mainSettings .sm-btn{border-radius:8px;padding:9px 16px;font-weight:600;font-size:13px;background:var(--surface);border:1px solid var(--border);color:var(--text);cursor:pointer;transition:background .15s,border-color .15s;}
 #mainSettings .sm-btn:hover{background:var(--accent-bg);border-color:var(--accent-bg-strong);}

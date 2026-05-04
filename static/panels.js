@@ -2677,18 +2677,30 @@ let _settingsAppearanceAutosaveTimer = null;
 let _settingsAppearanceAutosaveRetryPayload = null;
 let _settingsPreferencesAutosaveTimer = null;
 let _settingsPreferencesAutosaveRetryPayload = null;
+let _settingsCodexOAuthSSE = null;
+let _settingsMaintenanceLoaded = false;
+const _settingsMaintenanceState = {
+  projects: [],
+  selectedProjectId: '',
+  loadingProjects: false,
+  loadingSync: false,
+  sync: null,
+  records: [],
+  error: '',
+  busyAction: '',
+};
 
 function switchSettingsSection(name){
-  const section=(name==='appearance'||name==='preferences'||name==='providers'||name==='system')?name:'conversation';
+  const section=(name==='appearance'||name==='preferences'||name==='providers'||name==='codex'||name==='maintenance'||name==='system')?name:'conversation';
   _settingsSection=section;
   _currentSettingsSection=section;
-  const map={conversation:'Conversation',appearance:'Appearance',preferences:'Preferences',providers:'Providers',system:'System'};
+  const map={conversation:'Conversation',appearance:'Appearance',preferences:'Preferences',providers:'Providers',codex:'Codex',maintenance:'Maintenance',system:'System'};
   // Sidebar menu items
   document.querySelectorAll('#settingsMenu .side-menu-item').forEach(it=>{
     it.classList.toggle('active', it.dataset.settingsSection===section);
   });
   // Panes in main
-  ['conversation','appearance','preferences','providers','system'].forEach(key=>{
+  ['conversation','appearance','preferences','providers','codex','maintenance','system'].forEach(key=>{
     const pane=$('settingsPane'+map[key]);
     if(pane) pane.classList.toggle('active', key===section);
   });
@@ -2968,7 +2980,7 @@ async function loadSettingsPanel(){
     const settings=await api('/api/settings');
     // Populate the version badge from the server — keeps it in sync with git
     // tags automatically without any manual release step.
-    const vbadge=document.querySelector('.settings-version-badge');
+    const vbadge=document.querySelector('#checkUpdatesBlock .settings-version-badge');
     if(vbadge && settings.webui_version) vbadge.textContent=settings.webui_version;
     // Hydrate appearance controls first so a slow /api/models request
     // cannot overwrite an in-progress theme/skin selection.
@@ -3176,6 +3188,410 @@ async function loadSettingsPanel(){
   }
 }
 
+function _setSettingsInlineStatus(id,message,kind){
+  const el=$(id);
+  if(!el) return;
+  el.textContent=message||'';
+  el.className='settings-inline-status'+(kind?(' '+kind):'');
+}
+
+function _setCodexProviderBadge(label){
+  const badge=$('settingsCodexProviderBadge');
+  if(badge) badge.textContent=label||'Unavailable';
+}
+
+function _updateCodexProviderUi(provider){
+  const hint=$('settingsCodexOAuthHint');
+  const btn=$('settingsCodexOAuthBtn');
+  if(!hint||!btn){
+    return;
+  }
+  btn.textContent=t('oauth_login_codex');
+  btn.disabled=false;
+  if(!provider){
+    _setCodexProviderBadge('Unavailable');
+    hint.textContent='The openai-codex provider is not available in this build.';
+    btn.disabled=true;
+    return;
+  }
+  if(provider.key_source==='config_yaml'){
+    _setCodexProviderBadge('config.yaml');
+    hint.textContent=t('providers_oauth_config_yaml_hint')||'Token configured via config.yaml. To update it, edit the providers section in config.yaml.';
+    btn.disabled=true;
+    return;
+  }
+  if(provider.has_key){
+    _setCodexProviderBadge('Authenticated');
+    hint.textContent=t('providers_oauth_hint')||'Authenticated via OAuth. No API key needed.';
+    return;
+  }
+  if(provider.auth_error){
+    _setCodexProviderBadge('Attention');
+    hint.textContent=provider.auth_error;
+    return;
+  }
+  _setCodexProviderBadge('Not authenticated');
+  hint.textContent='Not authenticated. Start the device-code flow here instead of switching back to the terminal.';
+}
+
+async function loadCodexSettingsPanel(opts){
+  const options=opts||{};
+  const preserveEditor=!!options.preserveEditor;
+  const pathField=$('settingsCodexConfigPath');
+  const editor=$('settingsCodexConfigEditor');
+  const reloadBtn=$('settingsCodexReloadBtn');
+  const saveBtn=$('settingsCodexSaveBtn');
+  if(reloadBtn) reloadBtn.disabled=true;
+  if(saveBtn) saveBtn.disabled=true;
+  _setSettingsInlineStatus('settingsCodexConfigStatus', preserveEditor ? 'Refreshing Codex status…' : 'Loading Codex settings…');
+  try{
+    const [configPayload,providersPayload]=await Promise.all([
+      api('/api/codex-config'),
+      api('/api/providers'),
+    ]);
+    if(pathField) pathField.value=String(configPayload&&configPayload.path||'');
+    if(editor&&!preserveEditor) editor.value=String(configPayload&&configPayload.content||'');
+    const provider=((providersPayload&&providersPayload.providers)||[]).find(p=>p&&p.id==='openai-codex')||null;
+    _updateCodexProviderUi(provider);
+    _setSettingsInlineStatus('settingsCodexConfigStatus','');
+  }catch(e){
+    _setCodexProviderBadge('Unavailable');
+    _setSettingsInlineStatus('settingsCodexConfigStatus',e&&e.message?e.message:String(e),'error');
+  }finally{
+    if(reloadBtn) reloadBtn.disabled=false;
+    if(saveBtn) saveBtn.disabled=false;
+  }
+}
+
+async function saveCodexConfigSettings(){
+  const editor=$('settingsCodexConfigEditor');
+  const saveBtn=$('settingsCodexSaveBtn');
+  const reloadBtn=$('settingsCodexReloadBtn');
+  const pathField=$('settingsCodexConfigPath');
+  if(!editor) return;
+  if(saveBtn) saveBtn.disabled=true;
+  if(reloadBtn) reloadBtn.disabled=true;
+  _setSettingsInlineStatus('settingsCodexConfigStatus','Saving Codex config…');
+  try{
+    const payload=await api('/api/codex-config',{
+      method:'POST',
+      body:JSON.stringify({content:editor.value||''}),
+    });
+    if(pathField&&payload&&payload.path) pathField.value=String(payload.path);
+    if(payload&&typeof payload.content==='string') editor.value=payload.content;
+    _setSettingsInlineStatus('settingsCodexConfigStatus','Codex config saved.','success');
+    showToast('Codex config saved.');
+  }catch(e){
+    const message=e&&e.message?e.message:String(e);
+    _setSettingsInlineStatus('settingsCodexConfigStatus',message,'error');
+    showToast('Failed to save Codex config: '+message);
+  }finally{
+    if(saveBtn) saveBtn.disabled=false;
+    if(reloadBtn) reloadBtn.disabled=false;
+  }
+}
+
+async function startSettingsCodexOAuth(){
+  const flowDiv=$('settingsCodexOAuthFlow');
+  const btn=$('settingsCodexOAuthBtn');
+  if(!flowDiv||!btn) return;
+  btn.disabled=true;
+  btn.textContent='Starting…';
+  flowDiv.style.display='block';
+  flowDiv.innerHTML=`<div class="onboarding-oauth-card onboarding-oauth-pending"><div class="onboarding-oauth-icon">⏳</div><div><strong>${t('oauth_codex_polling')}</strong><p>Starting device-code flow…</p></div></div>`;
+  try{
+    const resp=await api('/api/oauth/codex/start',{method:'POST'});
+    if(resp.error) throw new Error(resp.error);
+    const deviceCode=resp.device_code;
+    const userCode=resp.user_code;
+    const verificationUri=resp.verification_uri;
+    if(!deviceCode||!userCode||!verificationUri) throw new Error('Invalid OAuth response');
+    window.open(verificationUri,'_blank');
+    flowDiv.innerHTML=`
+      <div class="onboarding-oauth-card onboarding-oauth-pending">
+        <div class="onboarding-oauth-icon">📋</div>
+        <div style="flex:1">
+          <strong>${t('oauth_codex_step1')}</strong>
+          <p><a href="${esc(verificationUri)}" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all">${esc(verificationUri)}</a></p>
+          <p style="margin-top:8px"><strong>${t('oauth_codex_step2')}</strong></p>
+          <code style="display:inline-block;font-size:18px;letter-spacing:0.1em;background:rgba(255,255,255,.08);padding:6px 14px;border-radius:8px;margin-top:4px;user-select:all">${esc(userCode)}</code>
+          <p style="margin-top:8px;color:var(--muted);font-size:13px">${t('oauth_codex_polling')}</p>
+        </div>
+      </div>`;
+    const pollUrl=new URL('api/oauth/codex/poll?device_code='+encodeURIComponent(deviceCode),location.href);
+    if(_settingsCodexOAuthSSE){
+      _settingsCodexOAuthSSE.close();
+      _settingsCodexOAuthSSE=null;
+    }
+    _settingsCodexOAuthSSE=new EventSource(pollUrl.href);
+    _settingsCodexOAuthSSE.onmessage=function(ev){
+      let data;
+      try{
+        data=JSON.parse(ev.data);
+      }catch(_error){
+        return;
+      }
+      if(data.status==='success'){
+        if(_settingsCodexOAuthSSE){
+          _settingsCodexOAuthSSE.close();
+          _settingsCodexOAuthSSE=null;
+        }
+        flowDiv.innerHTML=`
+          <div class="onboarding-oauth-card onboarding-oauth-ready">
+            <div class="onboarding-oauth-icon">✅</div>
+            <div><strong>${t('oauth_codex_success')}</strong><p>Token saved to the shared Codex credential cache.</p></div>
+          </div>`;
+        btn.disabled=false;
+        btn.textContent=t('oauth_login_codex');
+        showToast(t('oauth_codex_success'));
+        loadCodexSettingsPanel({preserveEditor:true}).catch(()=>{});
+        loadProvidersPanel().catch(()=>{});
+      }else if(data.status==='error'){
+        if(_settingsCodexOAuthSSE){
+          _settingsCodexOAuthSSE.close();
+          _settingsCodexOAuthSSE=null;
+        }
+        const isExpired=String(data.error||'').includes('expired');
+        flowDiv.innerHTML=`
+          <div class="onboarding-oauth-card" style="border-color:var(--error,#e55)">
+            <div class="onboarding-oauth-icon">❌</div>
+            <div><strong>${isExpired?t('oauth_codex_expired'):t('oauth_codex_error')}</strong><p>${esc(data.error||'Unknown error')}</p></div>
+          </div>`;
+        btn.disabled=false;
+        btn.textContent=t('oauth_login_codex');
+      }
+    };
+    _settingsCodexOAuthSSE.onerror=function(){
+      if(_settingsCodexOAuthSSE){
+        _settingsCodexOAuthSSE.close();
+        _settingsCodexOAuthSSE=null;
+      }
+      btn.disabled=false;
+      btn.textContent=t('oauth_login_codex');
+      if(!flowDiv.querySelector('.onboarding-oauth-ready')&&!flowDiv.querySelector('[style*="error"]')){
+        flowDiv.innerHTML=`
+          <div class="onboarding-oauth-card" style="border-color:var(--error,#e55)">
+            <div class="onboarding-oauth-icon">❌</div>
+            <div><strong>${t('oauth_codex_error')}</strong><p>Connection lost. Please try again.</p></div>
+          </div>`;
+      }
+    };
+  }catch(e){
+    flowDiv.innerHTML=`
+      <div class="onboarding-oauth-card" style="border-color:var(--error,#e55)">
+        <div class="onboarding-oauth-icon">❌</div>
+        <div><strong>${t('oauth_codex_error')}</strong><p>${esc(e&&e.message?e.message:String(e))}</p></div>
+      </div>`;
+    btn.disabled=false;
+    btn.textContent=t('oauth_login_codex');
+  }
+}
+
+function _settingsMaintenanceMeta(){
+  const state=_settingsMaintenanceState;
+  const sync=state.sync;
+  const error=String(state.error||'').trim();
+  if(error){
+    return {kind:'error',label:'Unavailable',summary:error};
+  }
+  if(!state.selectedProjectId){
+    return {kind:'idle',label:'No project',summary:'Select a project to inspect or start an upstream merge session.'};
+  }
+  if(state.loadingSync){
+    return {kind:'idle',label:'Checking',summary:'Loading maintenance sync state.'};
+  }
+  if(!sync){
+    return {kind:'idle',label:'No sync yet',summary:'Start a maintenance session to create a clean upstream-sync worktree.'};
+  }
+  if(sync.applied){
+    return {kind:'ready',label:'Applied',summary:sync.message||'The reviewed sync has already been applied.'};
+  }
+  if(sync.canApply){
+    return {kind:'ready',label:'Ready',summary:sync.message||'Ready to fast-forward the source checkout.'};
+  }
+  if(String(sync.state||'').trim()==='blocked'){
+    return {kind:'error',label:'Blocked',summary:sync.message||'Maintenance sync is blocked.'};
+  }
+  return {kind:'warning',label:'In review',summary:sync.message||'Maintenance session is still in progress.'};
+}
+
+function _renderSettingsMaintenancePanel(){
+  const select=$('settingsMaintenanceProject');
+  const summary=$('settingsMaintenanceSummary');
+  const history=$('settingsMaintenanceHistory');
+  const refreshBtn=$('settingsMaintenanceRefreshBtn');
+  const startBtn=$('settingsMaintenanceStartBtn');
+  const applyBtn=$('settingsMaintenanceApplyBtn');
+  const state=_settingsMaintenanceState;
+  if(select){
+    const projects=Array.isArray(state.projects)?state.projects:[];
+    const options=['<option value="">'+esc(state.loadingProjects?'Loading projects…':'Select a project…')+'</option>'];
+    for(const project of projects){
+      const id=String(project&&project.id||'').trim();
+      if(!id) continue;
+      const label=String(project&&project.name||project&&project.repoName||project&&project.repo||id);
+      options.push('<option value="'+esc(id)+'"'+(id===state.selectedProjectId?' selected':'')+'>'+esc(label)+'</option>');
+    }
+    select.innerHTML=options.join('');
+    select.disabled=!!state.loadingProjects;
+  }
+  const meta=_settingsMaintenanceMeta();
+  if(summary){
+    const sync=state.sync;
+    const detailLines=[];
+    if(sync){
+      detailLines.push('Source <code>'+esc(sync.sourceBranch||'')+'</code> · Upstream <code>'+esc(sync.upstreamRef||'')+'</code>');
+      if(sync.worktreePath) detailLines.push('Worktree <code>'+esc(sync.worktreePath)+'</code>');
+      if(Array.isArray(sync.blockers)&&sync.blockers.length){
+        detailLines.push('Blockers: '+esc(sync.blockers.join(' | ')));
+      }
+      if(sync.sessionUrl){
+        detailLines.push('<a href="'+esc(sync.sessionUrl)+'">Open maintenance session</a>');
+      }
+    }
+    summary.innerHTML='<strong><span class="settings-status-pill '+esc(meta.kind)+'">'+esc(meta.label)+'</span> '+esc(meta.summary)+'</strong>'
+      +(detailLines.length?'<div style="margin-top:10px">'+detailLines.join('<br>')+'</div>':'');
+  }
+  if(refreshBtn) refreshBtn.disabled=!state.selectedProjectId||state.loadingProjects||state.loadingSync;
+  if(startBtn) startBtn.disabled=!state.selectedProjectId||state.loadingProjects||state.busyAction==='start';
+  if(applyBtn) applyBtn.disabled=!state.selectedProjectId||state.loadingProjects||state.busyAction==='apply'||!(state.sync&&state.sync.canApply);
+  if(history){
+    const items=Array.isArray(state.records)?state.records.slice(0,4):[];
+    history.innerHTML=items.length
+      ? items.map(item=>'<div class="settings-maintenance-history-row"><div><strong>'+esc(item.syncBranch||item.recordId||'sync')+'</strong><div>'+esc(item.state||'')+'</div></div><span>'+esc(item.createdAt||item.updatedAt||'')+'</span></div>').join('')
+      : '';
+  }
+}
+
+async function loadSettingsMaintenanceSync(){
+  const state=_settingsMaintenanceState;
+  if(!state.selectedProjectId){
+    state.sync=null;
+    state.records=[];
+    state.loadingSync=false;
+    state.busyAction='';
+    _renderSettingsMaintenancePanel();
+    return;
+  }
+  state.loadingSync=true;
+  state.busyAction='refresh';
+  state.error='';
+  _renderSettingsMaintenancePanel();
+  try{
+    const payload=await api('/api/ops/projects/'+encodeURIComponent(state.selectedProjectId)+'/upstream-sync');
+    state.sync=payload&&payload.sync?payload.sync:null;
+    state.records=Array.isArray(payload&&payload.records)?payload.records:[];
+    _setSettingsInlineStatus('settingsMaintenanceStatus','');
+  }catch(e){
+    state.sync=null;
+    state.records=[];
+    state.error=e&&e.message?e.message:'Could not load maintenance sync status.';
+    _setSettingsInlineStatus('settingsMaintenanceStatus',state.error,'error');
+  }finally{
+    state.loadingSync=false;
+    state.busyAction='';
+    _renderSettingsMaintenancePanel();
+  }
+}
+
+async function loadSettingsMaintenancePanel(force){
+  const state=_settingsMaintenanceState;
+  if(state.loadingProjects) return;
+  if(_settingsMaintenanceLoaded&&!force){
+    _renderSettingsMaintenancePanel();
+    if(state.selectedProjectId&&!state.sync&&!state.loadingSync){
+      loadSettingsMaintenanceSync().catch(()=>{});
+    }
+    return;
+  }
+  _settingsMaintenanceLoaded=true;
+  state.loadingProjects=true;
+  state.error='';
+  _renderSettingsMaintenancePanel();
+  try{
+    const payload=await api('/api/ops/projects');
+    state.projects=Array.isArray(payload&&payload.projects)?payload.projects:[];
+    if(!state.projects.some(project=>String(project&&project.id||'')===state.selectedProjectId)){
+      state.selectedProjectId=state.projects.length?String(state.projects[0].id||''):'';
+    }
+    _setSettingsInlineStatus('settingsMaintenanceStatus','');
+  }catch(e){
+    state.projects=[];
+    state.selectedProjectId='';
+    state.error=e&&e.message?e.message:'Could not load projects.';
+    _setSettingsInlineStatus('settingsMaintenanceStatus',state.error,'error');
+  }finally{
+    state.loadingProjects=false;
+    _renderSettingsMaintenancePanel();
+  }
+  if(state.selectedProjectId){
+    loadSettingsMaintenanceSync().catch(()=>{});
+  }
+}
+
+function selectSettingsMaintenanceProject(value){
+  _settingsMaintenanceState.selectedProjectId=String(value||'').trim();
+  _settingsMaintenanceState.sync=null;
+  _settingsMaintenanceState.records=[];
+  _settingsMaintenanceState.error='';
+  _setSettingsInlineStatus('settingsMaintenanceStatus','');
+  loadSettingsMaintenanceSync().catch(e=>{
+    _setSettingsInlineStatus('settingsMaintenanceStatus',e&&e.message?e.message:String(e),'error');
+  });
+}
+
+function refreshSettingsMaintenanceSync(){
+  loadSettingsMaintenanceSync().catch(e=>{
+    _setSettingsInlineStatus('settingsMaintenanceStatus',e&&e.message?e.message:String(e),'error');
+  });
+}
+
+async function startSettingsMaintenanceSession(){
+  const state=_settingsMaintenanceState;
+  if(!state.selectedProjectId) return;
+  state.busyAction='start';
+  state.error='';
+  _setSettingsInlineStatus('settingsMaintenanceStatus','Starting maintenance session…');
+  _renderSettingsMaintenancePanel();
+  try{
+    await api('/api/ops/projects/'+encodeURIComponent(state.selectedProjectId)+'/upstream-sync/start',{
+      method:'POST',
+      body:JSON.stringify({}),
+    });
+    _setSettingsInlineStatus('settingsMaintenanceStatus','Maintenance session started.','success');
+    await loadSettingsMaintenanceSync();
+  }catch(e){
+    state.busyAction='';
+    const message=e&&e.message?e.message:'Could not start the maintenance session.';
+    state.error=message;
+    _setSettingsInlineStatus('settingsMaintenanceStatus',message,'error');
+    _renderSettingsMaintenancePanel();
+  }
+}
+
+async function applySettingsMaintenanceSync(){
+  const state=_settingsMaintenanceState;
+  if(!state.selectedProjectId||!state.sync||!state.sync.recordId) return;
+  state.busyAction='apply';
+  state.error='';
+  _setSettingsInlineStatus('settingsMaintenanceStatus','Applying reviewed sync…');
+  _renderSettingsMaintenancePanel();
+  try{
+    await api('/api/ops/projects/'+encodeURIComponent(state.selectedProjectId)+'/upstream-sync/apply',{
+      method:'POST',
+      body:JSON.stringify({recordId:state.sync.recordId}),
+    });
+    _setSettingsInlineStatus('settingsMaintenanceStatus','Reviewed sync applied.','success');
+    await loadSettingsMaintenanceSync();
+  }catch(e){
+    state.busyAction='';
+    const message=e&&e.message?e.message:'Could not apply the maintenance sync.';
+    state.error=message;
+    _setSettingsInlineStatus('settingsMaintenanceStatus',message,'error');
+    _renderSettingsMaintenancePanel();
+  }
+}
+
 // ── Providers panel ───────────────────────────────────────────────────────
 
 const _providerCardEls = new Map(); // providerId → {card, statusDot, input, saveBtn, removeBtn}
@@ -3254,6 +3670,20 @@ function _buildProviderCard(p){
       hint.style.color='var(--muted)';
     }
     body.appendChild(hint);
+    if(p.id==='openai-codex'){
+      const row=document.createElement('div');
+      row.className='provider-card-row';
+      row.style.marginTop='10px';
+      const openBtn=document.createElement('button');
+      openBtn.type='button';
+      openBtn.className='provider-card-btn provider-card-btn-ghost';
+      openBtn.textContent='Open Codex settings';
+      openBtn.onclick=()=>{
+        switchSettingsSection('codex');
+      };
+      row.appendChild(openBtn);
+      body.appendChild(row);
+    }
     card.appendChild(body);
     header.addEventListener('click',()=>card.classList.toggle('open'));
     return card;
@@ -3811,7 +4241,10 @@ async function deleteMcpServer(name){
 const _origSwitchSettings=switchSettingsSection;
 switchSettingsSection=function(name){
   _origSwitchSettings(name);
-  if(name==='system') loadMcpServers();
+  const section=_currentSettingsSection;
+  if(section==='system') loadMcpServers();
+  if(section==='codex') loadCodexSettingsPanel({preserveEditor:false});
+  if(section==='maintenance') loadSettingsMaintenancePanel(false);
 };
 
 // ── Checkpoints / Rollback ──────────────────────────────────────────────────
