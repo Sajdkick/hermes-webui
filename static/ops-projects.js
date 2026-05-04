@@ -16,6 +16,25 @@
       projectsOpen:false,
       loadingProjects:false,
       creatingProject:false,
+      loadingRuns:false,
+      runs:[],
+      runsError:'',
+      loadingDatabaseSettings:false,
+      databaseSettings:null,
+      databaseTables:[],
+      databaseQueryResult:null,
+      databaseError:'',
+      databaseBusyAction:'',
+      loadingGitHubStatus:false,
+      githubStatus:null,
+      loadingGitHubRepos:false,
+      githubRepos:[],
+      githubBranchesByRepo:{},
+      githubError:'',
+      githubQuery:'',
+      githubLoadingBranchesKey:'',
+      githubImportingRepoKey:'',
+      githubLastImport:null,
       loadingProfiles:false,
       availableProfiles:[],
       profilesError:'',
@@ -35,6 +54,17 @@
       loadingGitStatus:false,
       gitStatus:null,
       gitError:'',
+      loadingProjectDatabase:false,
+      projectDatabase:null,
+      projectDatabaseTables:[],
+      projectDatabaseQueryResult:null,
+      projectDatabaseError:'',
+      projectDatabaseBusyAction:'',
+      loadingUpstreamSync:false,
+      upstreamSync:null,
+      upstreamSyncRecords:[],
+      upstreamSyncError:'',
+      upstreamSyncBusyAction:'',
       inspectError:'',
       inspectBusyAction:'',
       loadingPlayConfig:false,
@@ -72,12 +102,23 @@
         state.playConfigDoc=null;
         state.playLogs=null;
         state.playError='';
+        state.projectDatabase=null;
+        state.projectDatabaseTables=[];
+        state.projectDatabaseQueryResult=null;
+        state.projectDatabaseError='';
+        state.projectDatabaseBusyAction='';
+        state.upstreamSync=null;
+        state.upstreamSyncRecords=[];
+        state.upstreamSyncError='';
+        state.upstreamSyncBusyAction='';
         state.inspectError='';
         state.inspectBusyAction='';
         state.showPlayConfig=false;
         state.showPlayLogs=false;
         loadTasks(root,state);
         loadGitStatus(root,state);
+        loadProjectDatabase(root,state);
+        loadUpstreamSync(root,state);
         loadRuntimeSummary(root,state);
         return;
       }
@@ -85,8 +126,66 @@
         loadProjects(root,state,true);
         return;
       }
+      if(kind==='refresh-runs'){
+        if(!(window.HermesOpsRuns && typeof window.HermesOpsRuns.renderSection==='function'))return;
+        loadRuns(root,state);
+        return;
+      }
+      if(kind==='refresh-database'){
+        loadDatabaseSettings(root,state);
+        return;
+      }
+      if(kind==='test-database'){
+        testDatabase(root,state);
+        return;
+      }
+      if(kind==='inspect-database'){
+        inspectDatabaseTables(root,state);
+        return;
+      }
+      if(kind==='refresh-project-database'){
+        loadProjectDatabase(root,state);
+        return;
+      }
+      if(kind==='test-project-database'){
+        testProjectDatabase(root,state);
+        return;
+      }
+      if(kind==='inspect-project-database'){
+        inspectProjectDatabase(root,state);
+        return;
+      }
+      if(kind==='refresh-github-status'){
+        loadGitHubStatus(root,state);
+        return;
+      }
+      if(kind==='github-load-branches'){
+        loadGitHubBranches(root,state,action.getAttribute('data-owner')||'',action.getAttribute('data-repo')||'');
+        return;
+      }
+      if(kind==='github-import-repo'){
+        importGitHubRepository(root,state,{
+          owner:action.getAttribute('data-owner')||'',
+          repo:action.getAttribute('data-repo')||'',
+          branch:action.getAttribute('data-branch')||'',
+          projectName:action.getAttribute('data-project-name')||'',
+        });
+        return;
+      }
       if(kind==='refresh-notifications'){
         loadNotifications(root,state);
+        return;
+      }
+      if(kind==='refresh-upstream-sync'){
+        loadUpstreamSync(root,state);
+        return;
+      }
+      if(kind==='start-upstream-sync'){
+        startUpstreamSync(root,state);
+        return;
+      }
+      if(kind==='apply-upstream-sync'){
+        applyUpstreamSync(root,state);
         return;
       }
       if(kind==='refresh-runtime'){
@@ -169,6 +268,31 @@
         saveProjectDefaults(root,state,new FormData(form));
         return;
       }
+      if(form.matches('[data-ops-form="database-settings"]')){
+        event.preventDefault();
+        saveDatabaseSettings(root,state,new FormData(form));
+        return;
+      }
+      if(form.matches('[data-ops-form="database-query"]')){
+        event.preventDefault();
+        runDatabaseQuery(root,state,new FormData(form));
+        return;
+      }
+      if(form.matches('[data-ops-form="project-database-settings"]')){
+        event.preventDefault();
+        saveProjectDatabaseSettings(root,state,new FormData(form));
+        return;
+      }
+      if(form.matches('[data-ops-form="project-database-query"]')){
+        event.preventDefault();
+        runProjectDatabaseQuery(root,state,new FormData(form));
+        return;
+      }
+      if(form.matches('[data-ops-form="github-search"]')){
+        event.preventDefault();
+        searchGitHubRepos(root,state,new FormData(form));
+        return;
+      }
       if(form.matches('[data-ops-form="create-epic"]')){
         event.preventDefault();
         createEpic(root,state,new FormData(form));
@@ -236,6 +360,15 @@
 
     render(root,state);
     loadNotifications(root,state);
+    if(window.HermesOpsRuns && typeof window.HermesOpsRuns.renderSection==='function'){
+      loadRuns(root,state);
+    }
+    if(window.HermesOpsDatabase && typeof window.HermesOpsDatabase.renderGlobalSection==='function'){
+      loadDatabaseSettings(root,state);
+    }
+    if(window.HermesOpsGitHubAdmin && typeof window.HermesOpsGitHubAdmin.renderSection==='function'){
+      loadGitHubStatus(root,state);
+    }
   }
 
   async function api(path,options){
@@ -269,6 +402,8 @@
       if(state.selectedProjectId){
         loadTasks(root,state);
         loadGitStatus(root,state);
+        loadProjectDatabase(root,state);
+        loadUpstreamSync(root,state);
         loadRuntimeSummary(root,state);
       }
     }catch(error){
@@ -289,6 +424,112 @@
       state.profilesError=error && error.message ? error.message : 'Could not load profiles.';
     }finally{
       state.loadingProfiles=false;
+      render(root,state);
+    }
+  }
+
+  async function loadRuns(root,state){
+    state.loadingRuns=true;
+    state.runsError='';
+    render(root,state);
+    try{
+      const payload=await api('/api/ops/runs');
+      state.runs=Array.isArray(payload.runs)?payload.runs:[];
+    }catch(error){
+      state.runs=[];
+      state.runsError=error && error.message ? error.message : 'Could not load run activity.';
+    }finally{
+      state.loadingRuns=false;
+      render(root,state);
+    }
+  }
+
+  async function loadDatabaseSettings(root,state){
+    state.loadingDatabaseSettings=true;
+    state.databaseBusyAction='refresh';
+    state.databaseError='';
+    render(root,state);
+    try{
+      const payload=await api('/api/ops/database/settings');
+      state.databaseSettings=payload;
+    }catch(error){
+      state.databaseSettings=null;
+      state.databaseError=error && error.message ? error.message : 'Could not load database settings.';
+    }finally{
+      state.loadingDatabaseSettings=false;
+      state.databaseBusyAction='';
+      render(root,state);
+    }
+  }
+
+  async function saveDatabaseSettings(root,state,formData){
+    state.databaseBusyAction='save';
+    state.databaseError='';
+    render(root,state);
+    try{
+      await api('/api/ops/database/settings',{
+        method:'POST',
+        body:{
+          path:formData.get('path'),
+          label:formData.get('label'),
+          mode:formData.get('mode'),
+        },
+      });
+      await loadDatabaseSettings(root,state);
+    }catch(error){
+      state.databaseBusyAction='';
+      state.databaseError=error && error.message ? error.message : 'Could not save database settings.';
+      render(root,state);
+    }
+  }
+
+  async function testDatabase(root,state){
+    state.databaseBusyAction='test';
+    state.databaseError='';
+    render(root,state);
+    try{
+      await api('/api/ops/database/test',{method:'POST',body:{}});
+    }catch(error){
+      state.databaseError=error && error.message ? error.message : 'Could not test database connection.';
+    }finally{
+      state.databaseBusyAction='';
+      render(root,state);
+    }
+  }
+
+  async function inspectDatabaseTables(root,state){
+    state.databaseBusyAction='inspect';
+    state.databaseError='';
+    render(root,state);
+    try{
+      const payload=await api('/api/ops/database/inspect/tables');
+      state.databaseTables=Array.isArray(payload.tables)?payload.tables:[];
+    }catch(error){
+      state.databaseTables=[];
+      state.databaseError=error && error.message ? error.message : 'Could not inspect database tables.';
+    }finally{
+      state.databaseBusyAction='';
+      render(root,state);
+    }
+  }
+
+  async function runDatabaseQuery(root,state,formData){
+    state.databaseBusyAction='query';
+    state.databaseError='';
+    render(root,state);
+    try{
+      state.databaseQueryResult=await api('/api/ops/database/inspect/query',{
+        method:'POST',
+        body:{
+          query:formData.get('query'),
+          limit:formData.get('limit'),
+        },
+      });
+    }catch(error){
+      state.databaseQueryResult=null;
+      state.databaseError=error && error.message ? error.message : 'Could not run the database query.';
+    }finally{
+      state.databaseBusyAction='';
       render(root,state);
     }
   }
@@ -352,6 +593,258 @@
       state.gitError=error && error.message ? error.message : 'Could not load project git status.';
     }finally{
       state.loadingGitStatus=false;
+      render(root,state);
+    }
+  }
+
+  async function loadProjectDatabase(root,state){
+    if(!state.selectedProjectId){
+      state.projectDatabase=null;
+      state.projectDatabaseTables=[];
+      state.projectDatabaseQueryResult=null;
+      state.projectDatabaseError='';
+      state.loadingProjectDatabase=false;
+      render(root,state);
+      return;
+    }
+    state.loadingProjectDatabase=true;
+    state.projectDatabaseBusyAction='refresh';
+    state.projectDatabaseError='';
+    render(root,state);
+    try{
+      state.projectDatabase=await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/database/settings');
+    }catch(error){
+      state.projectDatabase=null;
+      state.projectDatabaseError=error && error.message ? error.message : 'Could not load project database settings.';
+    }finally{
+      state.loadingProjectDatabase=false;
+      state.projectDatabaseBusyAction='';
+      render(root,state);
+    }
+  }
+
+  async function saveProjectDatabaseSettings(root,state,formData){
+    if(!state.selectedProjectId)return;
+    state.projectDatabaseBusyAction='save';
+    state.projectDatabaseError='';
+    render(root,state);
+    try{
+      await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/database/settings',{
+        method:'POST',
+        body:{
+          path:formData.get('path'),
+          label:formData.get('label'),
+          mode:formData.get('mode'),
+        },
+      });
+      await loadProjectDatabase(root,state);
+    }catch(error){
+      state.projectDatabaseBusyAction='';
+      state.projectDatabaseError=error && error.message ? error.message : 'Could not save project database settings.';
+      render(root,state);
+    }
+  }
+
+  async function testProjectDatabase(root,state){
+    if(!state.selectedProjectId)return;
+    state.projectDatabaseBusyAction='test';
+    state.projectDatabaseError='';
+    render(root,state);
+    try{
+      await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/database/test',{method:'POST',body:{}});
+    }catch(error){
+      state.projectDatabaseError=error && error.message ? error.message : 'Could not test the project database.';
+    }finally{
+      state.projectDatabaseBusyAction='';
+      render(root,state);
+    }
+  }
+
+  async function inspectProjectDatabase(root,state){
+    if(!state.selectedProjectId)return;
+    state.projectDatabaseBusyAction='inspect';
+    state.projectDatabaseError='';
+    render(root,state);
+    try{
+      const payload=await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/database/inspect/tables');
+      state.projectDatabaseTables=Array.isArray(payload.tables)?payload.tables:[];
+    }catch(error){
+      state.projectDatabaseTables=[];
+      state.projectDatabaseError=error && error.message ? error.message : 'Could not inspect the project database.';
+    }finally{
+      state.projectDatabaseBusyAction='';
+      render(root,state);
+    }
+  }
+
+  async function runProjectDatabaseQuery(root,state,formData){
+    if(!state.selectedProjectId)return;
+    state.projectDatabaseBusyAction='query';
+    state.projectDatabaseError='';
+    render(root,state);
+    try{
+      state.projectDatabaseQueryResult=await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/database/inspect/query',{
+        method:'POST',
+        body:{
+          query:formData.get('query'),
+          limit:formData.get('limit'),
+        },
+      });
+    }catch(error){
+      state.projectDatabaseQueryResult=null;
+      state.projectDatabaseError=error && error.message ? error.message : 'Could not run the project database query.';
+    }finally{
+      state.projectDatabaseBusyAction='';
+      render(root,state);
+    }
+  }
+
+  async function loadGitHubStatus(root,state){
+    state.loadingGitHubStatus=true;
+    state.githubError='';
+    render(root,state);
+    try{
+      state.githubStatus=await api('/api/ops/github/status');
+    }catch(error){
+      state.githubStatus=null;
+      state.githubError=error && error.message ? error.message : 'Could not load GitHub status.';
+    }finally{
+      state.loadingGitHubStatus=false;
+      render(root,state);
+    }
+  }
+
+  async function searchGitHubRepos(root,state,formData){
+    state.loadingGitHubRepos=true;
+    state.githubError='';
+    state.githubQuery=String(formData.get('query')||'').trim();
+    render(root,state);
+    try{
+      const query=encodeURIComponent(state.githubQuery);
+      const limit=encodeURIComponent(String(formData.get('limit')||'10').trim()||'10');
+      const payload=await api('/api/ops/github/repos?q='+query+'&limit='+limit);
+      state.githubRepos=Array.isArray(payload.repositories)?payload.repositories:[];
+    }catch(error){
+      state.githubRepos=[];
+      state.githubError=error && error.message ? error.message : 'Could not search GitHub repositories.';
+    }finally{
+      state.loadingGitHubRepos=false;
+      render(root,state);
+    }
+  }
+
+  async function loadGitHubBranches(root,state,owner,repo){
+    const key=String(owner||'').trim()+'/'+String(repo||'').trim();
+    if(!owner || !repo)return;
+    state.githubLoadingBranchesKey=key;
+    state.githubError='';
+    state.githubBranchesByRepo[key]={loading:true,branches:[]};
+    render(root,state);
+    try{
+      const payload=await api('/api/ops/github/repos/'+encodeURIComponent(owner)+'/'+encodeURIComponent(repo)+'/branches?limit=20');
+      state.githubBranchesByRepo[key]={loading:false,branches:Array.isArray(payload.branches)?payload.branches:[]};
+    }catch(error){
+      state.githubBranchesByRepo[key]={loading:false,branches:[],error:error && error.message ? error.message : 'Could not load repository branches.'};
+    }finally{
+      state.githubLoadingBranchesKey='';
+      render(root,state);
+    }
+  }
+
+  async function importGitHubRepository(root,state,payload){
+    const owner=String(payload && payload.owner || '').trim();
+    const repo=String(payload && payload.repo || '').trim();
+    const branch=String(payload && payload.branch || '').trim();
+    const key=owner+'/'+repo+':'+branch;
+    if(!owner || !repo || !branch)return;
+    state.githubImportingRepoKey=key;
+    state.githubError='';
+    render(root,state);
+    try{
+      const result=await api('/api/ops/github/import',{
+        method:'POST',
+        body:{
+          owner:owner,
+          repo:repo,
+          branch:branch,
+          defaultBranch:branch,
+          projectName:String(payload && payload.projectName || repo).trim() || repo,
+        },
+      });
+      state.githubLastImport=result;
+      state.projectsOpen=true;
+      await loadProjects(root,state,true);
+    }catch(error){
+      state.githubError=error && error.message ? error.message : 'Could not import the GitHub repository.';
+      state.githubImportingRepoKey='';
+      render(root,state);
+      return;
+    }
+    state.githubImportingRepoKey='';
+    render(root,state);
+  }
+
+  async function loadUpstreamSync(root,state){
+    if(!state.selectedProjectId){
+      state.upstreamSync=null;
+      state.upstreamSyncRecords=[];
+      state.upstreamSyncError='';
+      state.loadingUpstreamSync=false;
+      render(root,state);
+      return;
+    }
+    state.loadingUpstreamSync=true;
+    state.upstreamSyncBusyAction='refresh';
+    state.upstreamSyncError='';
+    render(root,state);
+    try{
+      const payload=await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/upstream-sync');
+      state.upstreamSync=payload && payload.sync ? payload.sync : null;
+      state.upstreamSyncRecords=Array.isArray(payload.records)?payload.records:[];
+    }catch(error){
+      state.upstreamSync=null;
+      state.upstreamSyncRecords=[];
+      state.upstreamSyncError=error && error.message ? error.message : 'Could not load maintenance sync status.';
+    }finally{
+      state.loadingUpstreamSync=false;
+      state.upstreamSyncBusyAction='';
+      render(root,state);
+    }
+  }
+
+  async function startUpstreamSync(root,state){
+    if(!state.selectedProjectId)return;
+    state.upstreamSyncBusyAction='start';
+    state.upstreamSyncError='';
+    render(root,state);
+    try{
+      await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/upstream-sync/start',{
+        method:'POST',
+        body:{},
+      });
+      await loadUpstreamSync(root,state);
+    }catch(error){
+      state.upstreamSyncBusyAction='';
+      state.upstreamSyncError=error && error.message ? error.message : 'Could not start the maintenance session.';
+      render(root,state);
+    }
+  }
+
+  async function applyUpstreamSync(root,state){
+    if(!state.selectedProjectId || !state.upstreamSync || !state.upstreamSync.recordId)return;
+    state.upstreamSyncBusyAction='apply';
+    state.upstreamSyncError='';
+    render(root,state);
+    try{
+      await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/upstream-sync/apply',{
+        method:'POST',
+        body:{recordId:state.upstreamSync.recordId},
+      });
+      await loadUpstreamSync(root,state);
+      await loadGitStatus(root,state);
+    }catch(error){
+      state.upstreamSyncBusyAction='';
+      state.upstreamSyncError=error && error.message ? error.message : 'Could not apply the maintenance sync.';
       render(root,state);
     }
   }
@@ -731,9 +1224,12 @@
     const tasksData=state.tasksData && state.tasksData.project && state.tasksData.project.id===state.selectedProjectId ? state.tasksData : null;
     const projectSection=state.projectsOpen ? renderProjectsSection(state,selectedProject,tasksData) : '';
     const notificationsSection=renderNotificationsSection(state);
+    const runsSection=renderRunsSection(state);
+    const githubSection=renderGitHubSection(state);
+    const databaseSection=renderDatabaseSection(state);
     root.innerHTML=[
       '<div class="ops-shell-status">',
-      '<span class="ops-shell-status-badge">Ready for clean project, task, session, readable-output, workflow inbox, and runtime evidence work</span>',
+      '<span class="ops-shell-status-badge">Ready for clean project, task, runtime, admin, database, and maintenance-session work</span>',
       '<div class="ops-shell-grid">',
       '<div class="ops-shell-card"><strong>Phase</strong><span>'+escapeHtml(state.shellPayload.phase||'phase-7')+'</span></div>',
       '<div class="ops-shell-card"><strong>Route</strong><span>'+escapeHtml(state.shellPayload.route||'/ops')+'</span></div>',
@@ -742,6 +1238,9 @@
       '</div>',
       '<div class="ops-projects-shell">',
       notificationsSection,
+      runsSection,
+      githubSection,
+      databaseSection,
       '<div class="ops-project-toolbar">',
       '<button class="ops-shell-link primary" type="button" data-ops-action="toggle-projects">'+escapeHtml(projectsButtonLabel)+'</button>',
       '<button class="ops-shell-link" type="button" data-ops-action="refresh-projects">Refresh</button>',
@@ -756,6 +1255,27 @@
   function renderNotificationsSection(state){
     if(window.HermesOpsNotifications && typeof window.HermesOpsNotifications.renderSection==='function'){
       return window.HermesOpsNotifications.renderSection(state);
+    }
+    return '';
+  }
+
+  function renderRunsSection(state){
+    if(window.HermesOpsRuns && typeof window.HermesOpsRuns.renderSection==='function'){
+      return window.HermesOpsRuns.renderSection(state);
+    }
+    return '';
+  }
+
+  function renderGitHubSection(state){
+    if(window.HermesOpsGitHubAdmin && typeof window.HermesOpsGitHubAdmin.renderSection==='function'){
+      return window.HermesOpsGitHubAdmin.renderSection(state);
+    }
+    return '';
+  }
+
+  function renderDatabaseSection(state){
+    if(window.HermesOpsDatabase && typeof window.HermesOpsDatabase.renderGlobalSection==='function'){
+      return window.HermesOpsDatabase.renderGlobalSection(state);
     }
     return '';
   }
@@ -820,6 +1340,8 @@
       '</div>',
       renderProjectDefaultsForm(state,selectedProject),
       renderGitStatusSection(state,selectedProject),
+      renderUpstreamSyncSection(state,selectedProject),
+      renderProjectDatabaseSection(state,selectedProject),
       renderRuntimeSection(state,selectedProject),
       renderQuickTaskForm(),
       renderFilterForm(state),
@@ -901,6 +1423,34 @@
         loadingGitStatus:state.loadingGitStatus,
         gitStatus:state.gitStatus,
         gitError:state.gitError,
+      });
+    }
+    return '';
+  }
+
+  function renderProjectDatabaseSection(state,selectedProject){
+    if(window.HermesOpsDatabase && typeof window.HermesOpsDatabase.renderProjectSection==='function'){
+      return window.HermesOpsDatabase.renderProjectSection({
+        selectedProject:selectedProject,
+        projectDatabase:state.projectDatabase,
+        projectDatabaseTables:state.projectDatabaseTables,
+        projectDatabaseQueryResult:state.projectDatabaseQueryResult,
+        projectDatabaseError:state.projectDatabaseError,
+        projectDatabaseBusyAction:state.projectDatabaseBusyAction,
+      });
+    }
+    return '';
+  }
+
+  function renderUpstreamSyncSection(state,selectedProject){
+    if(window.HermesOpsUpstreamSync && typeof window.HermesOpsUpstreamSync.renderSection==='function'){
+      return window.HermesOpsUpstreamSync.renderSection({
+        selectedProject:selectedProject,
+        loadingUpstreamSync:state.loadingUpstreamSync,
+        upstreamSync:state.upstreamSync,
+        upstreamSyncRecords:state.upstreamSyncRecords,
+        upstreamSyncError:state.upstreamSyncError,
+        upstreamSyncBusyAction:state.upstreamSyncBusyAction,
       });
     }
     return '';

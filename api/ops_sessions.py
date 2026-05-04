@@ -91,6 +91,14 @@ def _project_session_defaults(project: dict) -> tuple[str | None, str | None]:
     return _profile_config_defaults(_project_profile(project))
 
 
+def project_profile(project: dict) -> str | None:
+    return _project_profile(project)
+
+
+def project_session_defaults(project: dict) -> tuple[str | None, str | None]:
+    return _project_session_defaults(project)
+
+
 def launch_task_session(project_id: str, task_id: str) -> dict:
     resolved = ops_projects.get_ops_project_task(project_id, task_id)
     project = resolved["project"]
@@ -109,11 +117,21 @@ def launch_task_session(project_id: str, task_id: str) -> dict:
     session.source_label = OPS_TASK_SOURCE_LABEL
     session.save()
 
-    linkage = session_sidecars.set_session_linkage(session.session_id, project["id"], task["id"])
+    from api import ops_runs
+
+    run = ops_runs.create_task_run(project["id"], task["id"], session.session_id, title=session.title)
+    linkage = session_sidecars.set_session_linkage(
+        session.session_id,
+        project["id"],
+        task["id"],
+        run_id=str(run.get("id") or ""),
+    )
     return {
         "project": project,
         "task": task,
         "session": session.compact() | {"messages": session.messages},
         "sessionUrl": session_url(session.session_id),
         "linkage": linkage,
+        "run": run,
+        "runUrl": ops_runs.run_url(str(run.get("id") or "")),
     }

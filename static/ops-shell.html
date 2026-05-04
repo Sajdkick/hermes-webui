@@ -10,10 +10,10 @@
 <body class="ops-shell-page">
 <main class="ops-shell-main">
   <section class="ops-shell-hero">
-    <p class="ops-shell-kicker">Phase 9 parity and completion checkpoint</p>
+    <p class="ops-shell-kicker">Phase 10 post-restart admin slice</p>
     <h1>Cloud Terminal on a clean Hermes base</h1>
     <p class="ops-shell-copy">
-      This checkpoint closes the restart loop with a parity audit, final mergeability proof, and the fork-owned workflow slices rebuilt on latest upstream Hermes.
+      The clean restart branch now carries the follow-on admin slices as fork-owned `/ops` modules: GitHub import, read-only database inspection, and maintenance-session upstream sync.
     </p>
     <div class="ops-shell-links">
       <a class="ops-shell-link" href="/">Back to Hermes</a>
@@ -22,13 +22,17 @@
   </section>
   <section class="ops-shell-panel">
     <div id="ops-root" data-ops-shell="cloud-terminal">
-      <p class="ops-shell-loading">Loading project, task, session, readable-output, workflow notification, and runtime evidence metadata…</p>
+      <p class="ops-shell-loading">Loading project, task, session, workflow inbox, runtime evidence, GitHub admin, database, and maintenance metadata…</p>
     </div>
   </section>
 </main>
 <script src="/static/ops-notifications.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/ops-runs.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/ops-github-admin.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/ops-database.js?v=__WEBUI_VERSION__" defer></script>
 <script src="/static/ops-runtime.js?v=__WEBUI_VERSION__" defer></script>
 <script src="/static/ops-git.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/ops-upstream-sync.js?v=__WEBUI_VERSION__" defer></script>
 <script src="/static/ops-projects.js?v=__WEBUI_VERSION__" defer></script>
 <script src="/static/cloud-terminal-entry.js?v=__WEBUI_VERSION__" defer></script>
 </body>
