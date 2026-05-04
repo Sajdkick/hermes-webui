@@ -1,3 +1,32 @@
 {
-  "epics": []
+  "epics": [
+    {
+      "id": "68d2ae99-808a-44a0-8ae5-ae834bcfe8c3",
+      "title": "Cloud Terminal Follow-ups",
+      "tasks": [
+        {
+          "id": "4c702e60-c350-4d29-bef6-ab4306d39c84",
+          "text": "Fix the pre-existing Cloud Terminal prod backend crash loop caused by a deleted Codex binary path (`ENOENT` under `@openai/.codex-*`) so the proxy no longer continuously restarts the prod target during Hermes validation.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "markers": [
+            "AI suggestion"
+          ],
+          "createdAt": "2026-05-04T07:52:00Z"
+        }
+      ],
+      "createdBy": {
+        "id": "codex",
+        "label": "Codex"
+      },
+      "updatedBy": {
+        "id": "codex",
+        "label": "Codex"
+      },
+      "markers": [
+        "AI suggestion"
+      ]
+    }
+  ]
 }

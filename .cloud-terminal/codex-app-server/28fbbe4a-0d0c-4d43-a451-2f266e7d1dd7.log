@@ -12,3 +12,35 @@ codex app-server (WebSockets)
 [2m2026-05-04T07:20:25.197715Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to read file to update /home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/readable-output/28fbbe4a-0d0c-4d43-a451-2f266e7d1dd7/message.md: No such file or directory (os error 2)
 [2m2026-05-04T07:21:45.223797Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to read file to update /home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/readable-output/28fbbe4a-0d0c-4d43-a451-2f266e7d1dd7/message.md: No such file or directory (os error 2)
 [2m2026-05-04T07:29:19.484896Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to read /home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/readable-output/28fbbe4a-0d0c-4d43-a451-2f266e7d1dd7/message.md: No such file or directory (os error 2)
+[2m2026-05-04T07:38:19.875765Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to find expected lines in /home/ubuntu/cloud-terminal/proxy.js:
+async function waitForManagedBackend(name, maxWaitMs = BACKEND_STARTUP_TIMEOUT_MS) {
+  const config = appConfigs[name];
+  const startedAt = Date.now();
+  let readySince = 0;
+  let lastState = getManagedAppProcessState(name);
+  let lastPortReady = false;
+
+  while (Date.now() - startedAt < maxWaitMs) {
+    lastState = getManagedAppProcessState(name);
+    if (!lastState.running) {
+      return { ready: false, processExited: true, state: lastState, portReady: lastPortReady };
+    }
+
+    lastPortReady = await isBackendReady(config.port);
+    if (lastPortReady) {
+      if (!readySince) readySince = Date.now();
+      if (Date.now() - readySince >= BACKEND_START_STABLE_MS) {
+        return { ready: true, processExited: false, state: lastState, portReady: true };
+      }
+    } else {
+      readySince = 0;
+    }
+
+    await delay(100);
+  }
+
+  return { ready: false, processExited: false, state: lastState, portReady: lastPortReady };
+}
+
+async function ensureBackendHealthy(name, maxWaitMs = BACKEND_STARTUP_TIMEOUT_MS, options = {}) {
+  const config = appConfigs[name];

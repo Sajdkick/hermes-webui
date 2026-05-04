@@ -3,3 +3,11 @@
 [    1636ms] [LOG] [hermes] Live models loaded for openrouter: 23 new models added @ http://127.0.0.1:5003/static/ui.js:199
 [ 2340214ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5003/api/crons/recent?since=1777450376.349:0
 [429330201ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5003/api/crons/recent?since=1777450376.349:0
+[430470204ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5003/api/crons/recent?since=1777450376.349:0
+[430500184ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5003/api/crons/recent?since=1777450376.349:0
+[430530184ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5003/api/crons/recent?since=1777450376.349:0
+[430560182ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5003/api/crons/recent?since=1777450376.349:0
+[430590183ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5003/api/crons/recent?since=1777450376.349:0
+[430620184ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5003/api/crons/recent?since=1777450376.349:0
+[430650183ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5003/api/crons/recent?since=1777450376.349:0
+[430680181ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5003/api/crons/recent?since=1777450376.349:0
