@@ -44,3 +44,9 @@ async function waitForManagedBackend(name, maxWaitMs = BACKEND_STARTUP_TIMEOUT_M
 
 async function ensureBackendHealthy(name, maxWaitMs = BACKEND_STARTUP_TIMEOUT_MS, options = {}) {
   const config = appConfigs[name];
+[2m2026-05-04T10:23:11.130920Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mwrite_stdin failed: stdin is closed for this session; rerun exec_command with tty=true to keep stdin open
+[2m2026-05-04T10:27:45.352347Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to find expected lines in /home/ubuntu/cloud-terminal-data/projects/hermes-webui/static/ops-legacy-projects.js:
+    function findProject(projectId){
+      return (OPS.projects||[]).find(project=>project.id===projectId)||null;
+    }
+[2m2026-05-04T10:29:53.718870Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to read /home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/readable-output/28fbbe4a-0d0c-4d43-a451-2f266e7d1dd7/message.md: No such file or directory (os error 2)

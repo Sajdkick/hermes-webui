@@ -11,6 +11,10 @@ from api import ops_projects, ops_sessions
 _PROJECTS_RE = re.compile(r"^/api/ops/projects/?$")
 _PROJECT_RE = re.compile(r"^/api/ops/projects/([^/]+)/?$")
 _PROJECT_UPDATE_RE = re.compile(r"^/api/ops/projects/([^/]+)/update/?$")
+_PROJECT_SETTINGS_RE = re.compile(r"^/api/ops/projects/([^/]+)/settings/?$")
+_PROJECT_ACTIVITY_RE = re.compile(r"^/api/ops/projects/([^/]+)/activity/?$")
+_PROJECT_DELETE_RE = re.compile(r"^/api/ops/projects/([^/]+)/delete/?$")
+_PROJECT_ENSURE_WORKSPACE_RE = re.compile(r"^/api/ops/projects/([^/]+)/ensure-workspace/?$")
 _PROJECT_TASKS_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/?$")
 _PROJECT_EPICS_RE = re.compile(r"^/api/ops/projects/([^/]+)/epics/?$")
 _PROJECT_TASK_UPDATE_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/([^/]+)/update/?$")
@@ -48,6 +52,26 @@ def handle_post(handler, parsed, body: dict) -> bool:
         match = _PROJECT_UPDATE_RE.match(parsed.path)
         if match:
             j(handler, ops_projects.update_ops_project(match.group(1), body))
+            return True
+
+        match = _PROJECT_SETTINGS_RE.match(parsed.path)
+        if match:
+            j(handler, ops_projects.update_ops_project(match.group(1), body))
+            return True
+
+        match = _PROJECT_ACTIVITY_RE.match(parsed.path)
+        if match:
+            j(handler, ops_projects.set_ops_project_activity(match.group(1), body.get("active")))
+            return True
+
+        match = _PROJECT_DELETE_RE.match(parsed.path)
+        if match:
+            j(handler, ops_projects.delete_ops_project(match.group(1)))
+            return True
+
+        match = _PROJECT_ENSURE_WORKSPACE_RE.match(parsed.path)
+        if match:
+            j(handler, ops_projects.ensure_ops_project_workspace(match.group(1)))
             return True
 
         match = _PROJECT_EPICS_RE.match(parsed.path)

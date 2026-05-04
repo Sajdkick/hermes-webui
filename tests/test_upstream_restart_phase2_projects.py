@@ -155,3 +155,61 @@ def test_phase2_shell_includes_projects_asset_and_payload():
     assert handle_get(script, urlparse("http://example.com/static/ops-projects.js")) is True
     assert script.status == 200
     assert (script.header("Content-Type") or "").startswith("application/javascript")
+
+
+def test_phase2_project_compatibility_routes_expose_legacy_ops_capabilities(monkeypatch, tmp_path, git_available):
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
+    repo = init_project_repo(tmp_path)
+
+    from api.routes import handle_get, handle_post
+
+    create = _FakeHandler({"name": "Compat Project", "path": str(repo), "coreBranch": "main"})
+    assert handle_post(create, urlparse("http://example.com/api/ops/projects")) is True
+    assert create.status == 201
+    project = _response_json(create)["project"]
+    project_id = project["id"]
+
+    assert project["opsCapabilities"]["ensureWorkspace"] is True
+    assert project["opsCapabilities"]["projectSettings"] is True
+    assert project["opsCapabilities"]["projectActivity"] is True
+    assert project["opsCapabilities"]["projectDeletion"] is True
+    assert project["opsCapabilities"]["dependencyHealth"] is False
+    assert project["opsCapabilities"]["deployment"] is False
+
+    ensure_workspace = _FakeHandler({})
+    assert handle_post(
+        ensure_workspace,
+        urlparse(f"http://example.com/api/ops/projects/{project_id}/ensure-workspace"),
+    ) is True
+    assert ensure_workspace.status == 200
+    assert _response_json(ensure_workspace)["ok"] is True
+
+    save_settings = _FakeHandler({"profile": ""})
+    assert handle_post(
+        save_settings,
+        urlparse(f"http://example.com/api/ops/projects/{project_id}/settings"),
+    ) is True
+    assert save_settings.status == 200
+    assert _response_json(save_settings)["project"]["profile"] is None
+
+    deactivate = _FakeHandler({"active": False})
+    assert handle_post(
+        deactivate,
+        urlparse(f"http://example.com/api/ops/projects/{project_id}/activity"),
+    ) is True
+    assert deactivate.status == 200
+    assert _response_json(deactivate)["project"]["active"] is False
+
+    listing = _FakeHandler()
+    assert handle_get(listing, urlparse("http://example.com/api/ops/projects")) is True
+    listed_projects = _response_json(listing)["projects"]
+    listed_project = next(item for item in listed_projects if item["id"] == project_id)
+    assert listed_project["active"] is False
+
+    delete = _FakeHandler({"confirm": "delete-project"})
+    assert handle_post(
+        delete,
+        urlparse(f"http://example.com/api/ops/projects/{project_id}/delete"),
+    ) is True
+    assert delete.status == 200
+    assert _response_json(delete)["projects"] == []

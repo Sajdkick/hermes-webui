@@ -112,6 +112,10 @@
       return (OPS.projects||[]).find(project=>project&&project.id===projectId)||null;
     }
 
+    function isNotFoundError(error){
+      return String(error&&error.message||'').trim().toLowerCase()==='not found';
+    }
+
     function sessionProjectId(session){
       return String(session&&session.ops_project_id||session&&session.projectId||'').trim();
     }
@@ -371,7 +375,9 @@
       try{
         await api(projectUrl(projectId,'/ensure-workspace'),{method:'POST',body:JSON.stringify({})});
       }catch(e){
-        showToast(e.message||'Workspace sync failed',3600);
+        if(!isNotFoundError(e)){
+          showToast(e.message||'Workspace sync failed',3600);
+        }
       }
       await loadProjectDetail(projectId);
       return renderProjectDetail();

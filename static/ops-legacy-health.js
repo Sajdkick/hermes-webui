@@ -20,6 +20,29 @@
       return {};
     }
 
+    const DEFAULT_PROJECT_CAPABILITIES={
+      ensureWorkspace:true,
+      projectSettings:true,
+      projectActivity:true,
+      projectDeletion:true,
+      dependencyHealth:false,
+      dependencyInstall:false,
+      inodeScan:false,
+      inodeCleanup:false,
+      deployment:false,
+    };
+
+    function projectCapabilities(projectId){
+      const id=String(projectId||'').trim();
+      const project=(typeof findProject==='function'&&findProject(id))
+        || (OPS.currentProject&&OPS.currentProject.id===id?OPS.currentProject:null)
+        || null;
+      const caps=project&&project.opsCapabilities&&typeof project.opsCapabilities==='object'
+        ? project.opsCapabilities
+        : {};
+      return {...DEFAULT_PROJECT_CAPABILITIES,...caps};
+    }
+
     async function loadMigrationHealth(options){
       OPS.migrationHealthBusy=true;
       try{
@@ -226,6 +249,18 @@
     async function loadProjectDependencyStatus(projectId,options){
       const id=String(projectId||'').trim();
       if(!id)return null;
+      const capabilities=projectCapabilities(id);
+      if(!capabilities.dependencyHealth){
+        const unsupported={
+          supported:false,
+          status:'unsupported',
+          message:'Dependency health is not available in this restart branch yet.',
+          installCommandText:'Dependency health is not available in this restart branch yet.',
+        };
+        OPS.projectHealthByProject[id]={...(OPS.projectHealthByProject[id]||{}),dependencies:unsupported};
+        if(!options||options.render!==false)renderCurrentOpsView();
+        return unsupported;
+      }
       OPS.projectHealthBusyByProject[id]='dependencies';
       try{
         const data=await api(projectUrl(id,'/dependencies'));
@@ -241,6 +276,17 @@
     async function scanProjectInodes(projectId,options){
       const id=String(projectId||'').trim();
       if(!id)return null;
+      const capabilities=projectCapabilities(id);
+      if(!capabilities.inodeScan){
+        const unsupported={
+          supported:false,
+          status:'unsupported',
+          message:'node_modules inode scanning is not available in this restart branch yet.',
+        };
+        OPS.projectHealthByProject[id]={...(OPS.projectHealthByProject[id]||{}),inodeScan:unsupported};
+        if(!options||options.render!==false)renderCurrentOpsView();
+        return unsupported;
+      }
       OPS.projectHealthBusyByProject[id]='inodes';
       try{
         const data=await api(projectUrl(id,'/inodes'));
@@ -256,6 +302,11 @@
     async function setProjectActivity(projectId,active){
       const id=String(projectId||'').trim();
       if(!id)return null;
+      const capabilities=projectCapabilities(id);
+      if(!capabilities.projectActivity){
+        showToast('Project activation is not available in this restart branch yet.',2600);
+        return null;
+      }
       OPS.projectHealthBusyByProject[id]='activity';
       try{
         const data=await api(projectUrl(id,'/activity'),{method:'POST',body:JSON.stringify({active:!!active})});
@@ -272,6 +323,11 @@
     async function installProjectDependencies(projectId){
       const id=String(projectId||'').trim();
       if(!id)return null;
+      const capabilities=projectCapabilities(id);
+      if(!capabilities.dependencyInstall){
+        showToast('Dependency install is not available in this restart branch yet.',2600);
+        return null;
+      }
       const ok=await (typeof showConfirmDialog==='function'
         ? showConfirmDialog({
             title:'Install dependencies',
@@ -298,6 +354,11 @@
     async function cleanupProjectNodeModules(projectId){
       const id=String(projectId||'').trim();
       if(!id)return null;
+      const capabilities=projectCapabilities(id);
+      if(!capabilities.inodeCleanup){
+        showToast('node_modules cleanup is not available in this restart branch yet.',2600);
+        return null;
+      }
       const ok=await (typeof showConfirmDialog==='function'
         ? showConfirmDialog({
             title:'Clean node_modules',
@@ -325,6 +386,11 @@
       const id=String(projectId||'').trim();
       const project=(typeof findProject==='function'&&findProject(id))||OPS.currentProject||{};
       if(!id)return null;
+      const capabilities=projectCapabilities(id);
+      if(!capabilities.projectDeletion){
+        showToast('Project deletion is not available in this restart branch yet.',2600);
+        return null;
+      }
       const ok=await (typeof showConfirmDialog==='function'
         ? showConfirmDialog({
             title:'Delete project',
@@ -535,27 +601,34 @@
 
     function renderProjectHealth(project){
       const health=projectHealthFor(project.id);
+      const capabilities=projectCapabilities(project.id);
       const dependencies=health.dependencies||{};
       const inodeScan=health.inodeScan||null;
       const cleanup=health.cleanup||null;
       const operation=health.dependencyOperation||(project.lastDependencyInstall||null);
       const busy=OPS.projectHealthBusyByProject[project.id]||'';
       const active=project.active!==false;
-      const manager=dependencies.manager||'none';
-      const dependencyStatus=dependencies.status||'unknown';
-      const command=dependencies.installCommandText||'No supported install command detected';
+      const manager=capabilities.dependencyHealth?(dependencies.manager||'none'):'unavailable';
+      const dependencyStatus=capabilities.dependencyHealth?(dependencies.status||'unknown'):'unsupported';
+      const command=capabilities.dependencyHealth
+        ? (dependencies.installCommandText||'No supported install command detected')
+        : (dependencies.message||'Dependency health is not available in this restart branch yet.');
       const totalInodes=inodeScan?inodeScan.totalInodes:project.lastNodeModulesInodes;
       const totalBytes=inodeScan?inodeScan.totalBytes:project.lastNodeModulesBytes;
       const directories=inodeScan&&Array.isArray(inodeScan.directories)?inodeScan.directories:[];
-      const directorySummary=directories.length
-        ? `${directories.length} node_modules director${directories.length===1?'y':'ies'}`
-        : totalInodes?'Stored scan data':'No node_modules scan loaded';
+      const directorySummary=!capabilities.inodeScan
+        ? 'node_modules scan is not available in this restart branch yet.'
+        : directories.length
+          ? `${directories.length} node_modules director${directories.length===1?'y':'ies'}`
+          : totalInodes?'Stored scan data':'No node_modules scan loaded';
       const installSummary=operation
         ? `${operation.status||'unknown'} ${operation.updatedAt||operation.finishedAt||''}`.trim()
-        : 'No install operation recorded';
-      const cleanupSummary=cleanup
-        ? `${cleanup.status||'unknown'} | removed ${Array.isArray(cleanup.removed)?cleanup.removed.length:0}`
-        : (project.lastNodeModulesCleanup?`${project.lastNodeModulesCleanup.status||'cleanup'} | removed ${project.lastNodeModulesCleanup.removedCount||0}`:'No cleanup recorded');
+        : (capabilities.dependencyInstall?'No install operation recorded':'Install is unavailable in this restart branch.');
+      const cleanupSummary=!capabilities.inodeCleanup
+        ? 'Cleanup is unavailable in this restart branch.'
+        : cleanup
+          ? `${cleanup.status||'unknown'} | removed ${Array.isArray(cleanup.removed)?cleanup.removed.length:0}`
+          : (project.lastNodeModulesCleanup?`${project.lastNodeModulesCleanup.status||'cleanup'} | removed ${project.lastNodeModulesCleanup.removedCount||0}`:'No cleanup recorded');
       return `
         <section class="ops-project-health-panel ${active?'active':'inactive'}">
           <div class="ops-project-health-header">
@@ -564,9 +637,9 @@
               <small>${esc(active?'Active project':'Inactive project')}</small>
             </div>
             <div class="ops-project-health-actions">
-              <button class="ops-btn" type="button" data-ops-action="toggle-project-activity" data-project-id="${esc(project.id)}" data-project-active="${active?'false':'true'}" ${busy==='activity'?'disabled':''}>${active?svg.close:svg.check}<span>${active?'Deactivate':'Activate'}</span></button>
-              <button class="ops-btn" type="button" data-ops-action="refresh-project-health" data-project-id="${esc(project.id)}" ${busy?'disabled':''}>${svg.refresh}<span>Refresh</span></button>
-              <button class="ops-btn" type="button" data-ops-action="scan-project-inodes" data-project-id="${esc(project.id)}" ${busy?'disabled':''}>${svg.grid}<span>Scan</span></button>
+              <button class="ops-btn" type="button" data-ops-action="toggle-project-activity" data-project-id="${esc(project.id)}" data-project-active="${active?'false':'true'}" ${busy==='activity'||!capabilities.projectActivity?'disabled':''}>${active?svg.close:svg.check}<span>${active?'Deactivate':'Activate'}</span></button>
+              <button class="ops-btn" type="button" data-ops-action="refresh-project-health" data-project-id="${esc(project.id)}" ${busy||!capabilities.dependencyHealth?'disabled':''}>${svg.refresh}<span>Refresh</span></button>
+              <button class="ops-btn" type="button" data-ops-action="scan-project-inodes" data-project-id="${esc(project.id)}" ${busy||!capabilities.inodeScan?'disabled':''}>${svg.grid}<span>Scan</span></button>
             </div>
           </div>
           <div class="ops-project-health-grid">
@@ -575,14 +648,14 @@
               <strong>${esc(manager)} ${esc(dependencyStatus)}</strong>
               <small>${esc(command)}</small>
               <small>${esc(installSummary)}</small>
-              <button class="ops-btn" type="button" data-ops-action="install-project-dependencies" data-project-id="${esc(project.id)}" ${busy||!dependencies.supported?'disabled':''}>${svg.play}<span>${busy==='install'?'Installing...':'Install'}</span></button>
+              <button class="ops-btn" type="button" data-ops-action="install-project-dependencies" data-project-id="${esc(project.id)}" ${busy||!capabilities.dependencyInstall||!dependencies.supported?'disabled':''}>${svg.play}<span>${busy==='install'?'Installing...':'Install'}</span></button>
             </div>
             <div>
               <span>node_modules</span>
               <strong>${esc(totalInodes!=null?`${totalInodes} inodes`:'Not scanned')}</strong>
               <small>${esc(totalBytes!=null?compactBytes(totalBytes):directorySummary)}</small>
               <small>${esc(cleanupSummary)}</small>
-              <button class="ops-btn danger" type="button" data-ops-action="cleanup-project-inodes" data-project-id="${esc(project.id)}" ${busy||!directories.length?'disabled':''}>${svg.trash}<span>${busy==='cleanup'?'Cleaning...':'Clean'}</span></button>
+              <button class="ops-btn danger" type="button" data-ops-action="cleanup-project-inodes" data-project-id="${esc(project.id)}" ${busy||!capabilities.inodeCleanup||!directories.length?'disabled':''}>${svg.trash}<span>${busy==='cleanup'?'Cleaning...':'Clean'}</span></button>
             </div>
           </div>
         </section>
@@ -615,6 +688,11 @@
     async function saveProjectSettings(projectId,data){
       const id=String(projectId||'').trim();
       if(!id)return null;
+      const capabilities=projectCapabilities(id);
+      if(!capabilities.projectSettings){
+        showToast('Project settings are not available in this restart branch yet.',2600);
+        return null;
+      }
       const response=await api(projectUrl(id,'/settings'),{
         method:'POST',
         body:JSON.stringify({profile:String(data&&data.profile||'').trim()}),

@@ -21,7 +21,7 @@
       return {};
     }
 
-    async function renderProjectPlayQuickAction(project){
+    function renderProjectPlayQuickAction(project){
       if(!project||!project.id)return '';
       const status=playStatusFor(project.id);
       const busy=String(OPS.playBusyByProject[project.id]||'').trim();

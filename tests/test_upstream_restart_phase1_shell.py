@@ -106,10 +106,23 @@ def test_ops_entry_uses_base_relative_shell_fetch():
 def test_legacy_ops_shell_keeps_restart_compatibility_contract():
     host_source = Path("static/ops-legacy-host.js").read_text(encoding="utf-8")
     bridge_source = Path("static/ops-legacy-agent-bridge.js").read_text(encoding="utf-8")
+    dashboard_source = Path("static/ops-legacy-dashboard.js").read_text(encoding="utf-8")
+    quick_actions_source = Path("static/ops-legacy-dashboard-quick-actions.js").read_text(encoding="utf-8")
+    health_source = Path("static/ops-legacy-health.js").read_text(encoding="utf-8")
+    deployments_source = Path("static/ops-legacy-deployments.js").read_text(encoding="utf-8")
 
     assert "window.projectUrl = projectUrl;" in host_source
     assert "api('/api/ops/notifications/pending')" in bridge_source
     assert "return api('/api/sessions').then(fallback=>({" in bridge_source
+    assert "function normalizeRunStatus(value){" in dashboard_source
+    assert "function runStatusLabel(status){" in dashboard_source
+    assert "function runStatusKind(status){" in dashboard_source
+    assert "function renderProjectPlayQuickAction(project){" in dashboard_source
+    assert "async function renderProjectPlayQuickAction(project){" not in dashboard_source
+    assert "function renderProjectPlayQuickAction(project){" in quick_actions_source
+    assert "async function renderProjectPlayQuickAction(project){" not in quick_actions_source
+    assert "if(!capabilities.dependencyHealth){" in health_source
+    assert "if(!capabilities.deployment){" in deployments_source
 
 
 def test_ops_shell_assets_are_served_by_static_route():

@@ -46,6 +46,35 @@
     }catch(e){}
   }
 
+  function normalizeRunStatus(value){
+    const normalized=String(value||'').trim().toLowerCase().replace(/[\s_]+/g,'-');
+    return RUN_STATUS_VALUES.includes(normalized)?normalized:'stale';
+  }
+
+  function runStatusLabel(status){
+    switch(normalizeRunStatus(status)){
+      case 'queued': return 'Queued';
+      case 'starting': return 'Starting';
+      case 'running': return 'Running';
+      case 'waiting-input': return 'Waiting input';
+      case 'waiting-approval': return 'Waiting approval';
+      case 'succeeded': return 'Succeeded';
+      case 'failed': return 'Failed';
+      case 'stopped': return 'Stopped';
+      default: return 'Stale';
+    }
+  }
+
+  function runStatusKind(status){
+    const normalized=normalizeRunStatus(status);
+    if(['failed','stale'].includes(normalized))return 'error';
+    if(['waiting-input','waiting-approval'].includes(normalized))return 'attention';
+    if(normalized==='succeeded')return 'success';
+    if(normalized==='stopped')return 'stopped';
+    if(RUN_ACTIVE_STATUS_VALUES.includes(normalized))return 'running';
+    return 'stale';
+  }
+
   const OPS={
     view:'home',
     projects:[],
@@ -872,7 +901,7 @@
   function setBusy(busy){OPS.loading=busy;const el=root();if(el)el.classList.toggle('is-loading',!!busy);}
   function showError(err){showToast(err&&err.message?err.message:String(err||'Failed'),4200);}
 
-  async function renderProjectPlayQuickAction(project){return DASHBOARD_QUICK_ACTIONS.renderProjectPlayQuickAction(project);}
+  function renderProjectPlayQuickAction(project){return DASHBOARD_QUICK_ACTIONS.renderProjectPlayQuickAction(project);}
 
   function renderProjectActivityQuickAction(project){return DASHBOARD_QUICK_ACTIONS.renderProjectActivityQuickAction(project);}
 

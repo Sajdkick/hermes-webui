@@ -14,9 +14,37 @@
       return {};
     }
 
+    const DEFAULT_PROJECT_CAPABILITIES={
+      deployment:false,
+    };
+
+    function projectCapabilities(projectId){
+      const id=String(projectId||'').trim();
+      const project=(OPS.projects||[]).find(entry=>entry&&entry.id===id)
+        || (OPS.currentProject&&OPS.currentProject.id===id?OPS.currentProject:null)
+        || null;
+      const caps=project&&project.opsCapabilities&&typeof project.opsCapabilities==='object'
+        ? project.opsCapabilities
+        : {};
+      return {...DEFAULT_PROJECT_CAPABILITIES,...caps};
+    }
+
     async function loadProjectDeployment(projectId,options){
       const id=String(projectId||'').trim();
       if(!id)return null;
+      const capabilities=projectCapabilities(id);
+      if(!capabilities.deployment){
+        const data={
+          supported:false,
+          summary:'Deployment tools are not available in this restart branch yet.',
+          artifacts:[],
+          logs:[],
+          deployment:null,
+        };
+        OPS.deploymentsByProject[id]=data;
+        if(!options||options.render!==false)renderCurrentOpsView();
+        return data;
+      }
       OPS.deploymentBusyByProject[id]=true;
       try{
         const data=await api(projectUrl(id,'/deployment'));
@@ -30,6 +58,11 @@
 
     async function recordProjectDeployment(projectId,action){
       const id=String(projectId||'').trim();
+      const capabilities=projectCapabilities(id);
+      if(!capabilities.deployment){
+        showToast('Deployment tools are not available in this restart branch yet.',2600);
+        return null;
+      }
       const normalized=String(action||'deploy').trim().toLowerCase();
       const path=normalized==='deploy'?'/deployment':`/deployment/${normalized}`;
       OPS.deploymentBusyByProject[id]=true;
@@ -50,6 +83,11 @@
       const id=String(projectId||'').trim();
       const normalized=String(action||'deploy').trim().toLowerCase();
       if(!id)return null;
+      const capabilities=projectCapabilities(id);
+      if(!capabilities.deployment){
+        showToast('Deployment tools are not available in this restart branch yet.',2600);
+        return null;
+      }
       const data=OPS.deploymentsByProject[id]||{};
       const artifacts=Array.isArray(data.artifacts)?data.artifacts:[];
       const hasDockerfile=artifacts.some(artifact=>artifact&&artifact.kind==='dockerfile');
@@ -88,6 +126,11 @@
 
     async function scaffoldProjectDeployment(projectId){
       const id=String(projectId||'').trim();
+      const capabilities=projectCapabilities(id);
+      if(!capabilities.deployment){
+        showToast('Deployment tools are not available in this restart branch yet.',2600);
+        return null;
+      }
       OPS.deploymentBusyByProject[id]=true;
       try{
         await api(projectUrl(id,'/deployment/artifacts/scaffold'),{
@@ -105,15 +148,20 @@
     function renderProjectDeployment(project){
       if(!project||!project.id)return '';
       const data=OPS.deploymentsByProject[project.id]||{};
+      const capabilities=projectCapabilities(project.id);
       const deployment=data.deployment||null;
       const artifacts=Array.isArray(data.artifacts)?data.artifacts:[];
       const logs=Array.isArray(data.logs)?data.logs:[];
       const busy=!!OPS.deploymentBusyByProject[project.id];
-      const status=deployment&&deployment.status?deployment.status:'not configured';
-      const summary=deployment&&deployment.summary?deployment.summary:'No deployment has been recorded for this project.';
+      const status=capabilities.deployment
+        ? (deployment&&deployment.status?deployment.status:'not configured')
+        : 'unsupported';
+      const summary=capabilities.deployment
+        ? (deployment&&deployment.summary?deployment.summary:'No deployment has been recorded for this project.')
+        : (data.summary||'Deployment tools are not available in this restart branch yet.');
       const artifactText=artifacts.length
         ? artifacts.slice(0,5).map(artifact=>artifact.relativePath||artifact.kind).join(' | ')
-        : 'No deployment artifacts detected.';
+        : (capabilities.deployment?'No deployment artifacts detected.':'No deployment artifacts are available in this restart branch.');
       const latestLog=logs.length?logs[logs.length-1].message:'No deployment logs yet.';
       const recordHref=deployment&&deployment.recordPath?`/api/media?path=${encodeURIComponent(deployment.recordPath)}`:'';
       return `
@@ -124,10 +172,10 @@
               <span>${esc(status)}</span>
             </div>
             <div class="ops-deployment-actions">
-              <button class="ops-btn" type="button" data-ops-action="refresh-deployment" data-project-id="${esc(project.id)}" ${busy?'disabled':''}>${svg.refresh}<span>${busy?'Refreshing...':'Refresh'}</span></button>
-              <button class="ops-btn" type="button" data-ops-action="scaffold-deployment" data-project-id="${esc(project.id)}" ${busy?'disabled':''}>${svg.plus}<span>Scaffold</span></button>
-              <button class="ops-btn primary" type="button" data-ops-action="record-deployment" data-deployment-action="deploy" data-project-id="${esc(project.id)}" ${busy?'disabled':''}>${svg.check}<span>Record</span></button>
-              <button class="ops-btn primary" type="button" data-ops-action="execute-deployment" data-deployment-action="deploy" data-project-id="${esc(project.id)}" ${busy?'disabled':''}>${svg.play}<span>Execute</span></button>
+              <button class="ops-btn" type="button" data-ops-action="refresh-deployment" data-project-id="${esc(project.id)}" ${busy||!capabilities.deployment?'disabled':''}>${svg.refresh}<span>${busy?'Refreshing...':'Refresh'}</span></button>
+              <button class="ops-btn" type="button" data-ops-action="scaffold-deployment" data-project-id="${esc(project.id)}" ${busy||!capabilities.deployment?'disabled':''}>${svg.plus}<span>Scaffold</span></button>
+              <button class="ops-btn primary" type="button" data-ops-action="record-deployment" data-deployment-action="deploy" data-project-id="${esc(project.id)}" ${busy||!capabilities.deployment?'disabled':''}>${svg.check}<span>Record</span></button>
+              <button class="ops-btn primary" type="button" data-ops-action="execute-deployment" data-deployment-action="deploy" data-project-id="${esc(project.id)}" ${busy||!capabilities.deployment?'disabled':''}>${svg.play}<span>Execute</span></button>
             </div>
           </div>
           <div class="ops-deployment-body">

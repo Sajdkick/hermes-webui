@@ -20,6 +20,17 @@ DEFAULT_TASK_GRADE = "green"
 TASK_GRADE_VALUES = {"green", "orange", "red"}
 TASKS_DIR_NAME = "project_tasks"
 LEGACY_TASKS_FILE_NAME = "project_tasks.json"
+LEGACY_OPS_CAPABILITIES = {
+    "ensureWorkspace": True,
+    "projectSettings": True,
+    "projectActivity": True,
+    "projectDeletion": True,
+    "dependencyHealth": False,
+    "dependencyInstall": False,
+    "inodeScan": False,
+    "inodeCleanup": False,
+    "deployment": False,
+}
 
 
 class OpsProjectError(Exception):
@@ -393,6 +404,7 @@ def _task_counts(project: dict) -> dict:
 def _serialize_project(project: dict) -> dict:
     serialized = dict(project)
     serialized["resolvedPath"] = str(_project_path(project, strict=False))
+    serialized["opsCapabilities"] = dict(LEGACY_OPS_CAPABILITIES)
     serialized.update(_task_counts(project))
     return serialized
 
@@ -423,6 +435,12 @@ def _ensure_workspace(project_path: Path, name: str) -> None:
         return
     workspaces.append({"path": str(project_path), "name": name})
     save_workspaces(workspaces)
+
+
+def ensure_ops_project_workspace(project_id: str) -> dict:
+    project = get_ops_project(project_id)
+    _ensure_workspace(_project_path(project), str(project.get("name") or project.get("id") or "Project"))
+    return {"ok": True, "project": get_ops_project(project_id)}
 
 
 def _validate_project_profile(profile: str | None) -> str | None:
@@ -500,6 +518,32 @@ def update_ops_project(project_id: str, body: dict | None) -> dict:
     projects[index] = updated
     _write_projects(projects)
     return {"project": _serialize_project(updated)}
+
+
+def set_ops_project_activity(project_id: str, active: bool) -> dict:
+    project = get_ops_project(project_id)
+    projects = _read_projects()
+    index = next((idx for idx, entry in enumerate(projects) if entry.get("id") == project["id"]), -1)
+    if index < 0:
+        raise OpsProjectError("Project not found.", 404)
+
+    updated = dict(projects[index])
+    updated["active"] = bool(active)
+    updated["updatedAt"] = _now_iso()
+    projects[index] = updated
+    _write_projects(projects)
+    serialized = _serialize_project(updated)
+    return {"ok": True, "project": serialized, "activity": {"active": serialized["active"]}}
+
+
+def delete_ops_project(project_id: str) -> dict:
+    project = get_ops_project(project_id)
+    projects = _read_projects()
+    remaining = [entry for entry in projects if entry.get("id") != project["id"]]
+    if len(remaining) == len(projects):
+        raise OpsProjectError("Project not found.", 404)
+    _write_projects(remaining)
+    return {"ok": True, "projects": [_serialize_project(entry) for entry in remaining]}
 
 
 def read_ops_project_tasks(project_id: str) -> dict:
