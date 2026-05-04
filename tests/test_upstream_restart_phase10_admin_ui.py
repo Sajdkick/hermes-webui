@@ -166,6 +166,7 @@ def test_main_shell_exposes_ops_navigation_entry():
     assert "function openOpsDashboard()" in js
     assert "const base=(typeof document!=='undefined' && document.baseURI)" in js
     assert "return new URL(rel, base).href;" in js
+    assert "_appRelativeUrl('session/ops')" in js
 
 
 def test_main_shell_exposes_codex_and_maintenance_settings_entries():

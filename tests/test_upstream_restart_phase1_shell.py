@@ -54,6 +54,21 @@ def test_ops_shell_route_is_registered_and_serves_html():
     assert 'href="api/ops/shell"' in html
 
 
+def test_session_prefixed_ops_aliases_are_registered():
+    from api.routes import handle_get
+
+    shell_handler = _FakeHandler()
+    assert handle_get(shell_handler, urlparse("http://example.com/session/ops")) is True
+    assert shell_handler.status == 200
+    assert 'data-ops-shell="cloud-terminal"' in bytes(shell_handler.body).decode("utf-8")
+
+    api_handler = _FakeHandler()
+    assert handle_get(api_handler, urlparse("http://example.com/session/api/ops/shell")) is True
+    assert api_handler.status == 200
+    payload = json.loads(bytes(api_handler.body).decode("utf-8"))
+    assert payload["route"] == "/ops"
+
+
 def test_ops_shell_bootstrap_api_is_registered():
     from api.routes import handle_get
 

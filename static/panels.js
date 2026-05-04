@@ -2704,7 +2704,7 @@ function _appRelativeUrl(path){
 
 function openOpsDashboard(){
   if(typeof window==='undefined' || !window.location) return;
-  const target=_appRelativeUrl('ops');
+  const target=_appRelativeUrl('session/ops');
   if(typeof window.location.assign==='function'){
     window.location.assign(target);
     return;
