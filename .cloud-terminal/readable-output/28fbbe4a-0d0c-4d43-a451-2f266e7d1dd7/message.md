@@ -1,6 +1,6 @@
 # `/ops` diagnosis
 
-`/session/ops` was the wrong workaround. The clean URL should still be plain `/ops`.
+`/session/ops` was the wrong workaround. I removed that detour from the repo again. The intended route stays plain `/ops`.
 
 ## Clarification
 
@@ -21,6 +21,13 @@ The response header from that process was:
 
 So even if the public proxy is switched to `hermes` during your test, the Hermes target behind it is still serving an older/stale runtime that does not know about the new `/ops` route.
 
+## Repo status
+
+- `/session/ops` alias removed again
+- main UI points back to plain `/ops`
+- regression suite passed:
+  - `21 passed`
+
 ## Conclusion
 
 This is not a URL-shape problem anymore.
@@ -32,6 +39,5 @@ It is a runtime problem:
 ## Clean fix
 
 - keep the intended URL as plain `/ops`
-- stop trying to use `/session/ops`
 - restart the actual Hermes target on `5003`
 - then test `/ops` again while the public proxy is switched to `hermes`

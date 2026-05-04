@@ -1118,13 +1118,6 @@ def handle_get(handler, parsed) -> bool:
         stripped = parsed._replace(path=parsed.path[len("/session"):])
         return _serve_static(handler, stripped)
 
-    if (
-        parsed.path in ("/session/ops", "/session/ops/")
-        or parsed.path.startswith("/session/api/ops/")
-        or parsed.path.startswith("/session/play-project/")
-    ):
-        parsed = parsed._replace(path=parsed.path[len("/session"):])
-
     if parsed.path in ("/", "/index.html") or parsed.path.startswith("/session/"):
         from urllib.parse import quote
         from api.updates import WEBUI_VERSION
@@ -1845,9 +1838,6 @@ def handle_post(handler, parsed) -> bool:
 
     if parsed.path == "/api/transcribe":
         return handle_transcribe(handler)
-
-    if parsed.path.startswith("/session/api/ops/") or parsed.path.startswith("/session/play-project/"):
-        parsed = parsed._replace(path=parsed.path[len("/session"):])
 
     body = read_body(handler)
 
