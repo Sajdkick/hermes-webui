@@ -536,6 +536,14 @@ _FALLBACK_MODELS = [
     {"provider": "Z.AI",      "id": "zai/glm-4.7",                      "label": "GLM-4.7"},
     {"provider": "Z.AI",      "id": "zai/glm-4.5",                      "label": "GLM-4.5"},
     {"provider": "Z.AI",      "id": "zai/glm-4.5-flash",                "label": "GLM-4.5 Flash"},
+    # OpenRouter free-tier models — must appear in fallback list so they
+    # are visible even when the tool-support filter in hermes_cli strips
+    # them out of the live catalog (see #1426).
+    {"provider": "OpenRouter", "id": "openrouter/elephant-alpha",                   "label": "Elephant Alpha (free)"},
+    {"provider": "OpenRouter", "id": "openrouter/owl-alpha",                        "label": "Owl Alpha (free)"},
+    {"provider": "OpenRouter", "id": "tencent/hy3-preview:free",                    "label": "Hy3 Preview (free)"},
+    {"provider": "OpenRouter", "id": "nvidia/nemotron-3-super-120b-a12b:free",      "label": "Nemotron 3 Super (free)"},
+    {"provider": "OpenRouter", "id": "arcee-ai/trinity-large-preview:free",         "label": "Trinity Large Preview (free)"},
 ]
 
 # Provider display names for known Hermes provider IDs
@@ -643,6 +651,48 @@ def _resolve_provider_alias(name: str) -> str:
     except Exception:
         pass
     return _PROVIDER_ALIASES.get(raw, name)
+
+
+def _canonicalise_provider_id(name: object) -> str:
+    """Normalise a provider id slug into a stable lowercase-hyphenated form.
+
+    Folds underscores to hyphens and lowercases the result, so a user with
+    ``providers.opencode_go.api_key`` in ``config.yaml`` and
+    ``model.provider: opencode-go`` sees ONE provider group, not two
+    (#1568). Then attempts alias resolution but only if the alias target
+    is itself a known canonical id in ``_PROVIDER_DISPLAY`` —  this avoids
+    converting ``x-ai`` (canonical in WebUI's data structures) to ``xai``
+    (the hermes_cli alias target which the WebUI doesn't index by).
+
+    Examples::
+
+        opencode-go     -> opencode-go     (canonical, no change)
+        opencode_go     -> opencode-go     (underscore folded)
+        OpenCode-Go     -> opencode-go     (case folded)
+        OPENCODE_GO     -> opencode-go     (both folded)
+        z_ai            -> zai             (alias-resolved — zai is canonical)
+        x-ai            -> x-ai            (preserved — x-ai is canonical)
+
+    Empty input passes through as the empty string. Unknown ids preserve
+    their normalised form.
+    """
+    if not name:
+        return ""
+    raw = str(name).strip().lower().replace("_", "-")
+    if not raw:
+        return ""
+    # Already a canonical id known to _PROVIDER_DISPLAY/_PROVIDER_MODELS:
+    # keep as-is to avoid round-tripping through aliases (e.g. x-ai → xai).
+    if raw in _PROVIDER_DISPLAY or raw in _PROVIDER_MODELS:
+        return raw
+    # Try alias resolution. Only accept the result if it's itself a
+    # canonical id in _PROVIDER_DISPLAY — that prevents aliases pointing
+    # at non-canonical strings (legacy, hermes_cli-specific) from leaking
+    # in. Falls back to the normalised input otherwise.
+    resolved = _resolve_provider_alias(raw)
+    if resolved and resolved.lower() in _PROVIDER_DISPLAY:
+        return resolved.lower()
+    return raw
 
 
 # Well-known models per provider (used to populate dropdown for direct API providers)
@@ -858,6 +908,153 @@ def _format_ollama_label(mid: str) -> str:
     if variant:
         label += f" ({_fmt(variant)})"
     return label
+
+
+def _format_nous_label(mid: str) -> str:
+    """Turn a Nous Portal model id into a readable display label.
+
+    Nous IDs are ``<vendor>/<model>[:<variant>]`` (e.g. ``anthropic/claude-opus-4.7``);
+    drop the vendor namespace, prettify the model name with the same token
+    rules as :func:`_format_ollama_label` (short acronyms uppercase, size
+    suffixes uppercase, capitalize the rest), then append ``" (via Nous)"``
+    so the entry is visually distinct from same-named models in other
+    provider groups (e.g. direct Anthropic).
+
+    Examples (matches the helper's actual output — labels are produced by
+    :func:`_format_ollama_label`'s token rules, so 3-letter tokens like
+    ``GPT`` and ``PRO`` render uppercase)::
+
+        anthropic/claude-opus-4.7         -> Claude Opus 4.7 (via Nous)
+        openai/gpt-5.4-mini               -> GPT 5.4 Mini (via Nous)
+        google/gemini-3.1-pro-preview     -> Gemini 3.1 PRO Preview (via Nous)
+        moonshotai/kimi-k2.6              -> Kimi K2.6 (via Nous)
+        qwen/qwen3.5-plus-02-15           -> Qwen3.5 Plus 02 15 (via Nous)
+        nvidia/nemotron-3-super-120b-a12b -> Nemotron 3 Super 120B A12b (via Nous)
+        minimax/minimax-m2.5:free         -> MiniMax M2.5 (Free) (via Nous)
+    """
+    name_part = mid.split("/", 1)[-1] if "/" in mid else mid
+    # MiniMax-CN ids come back lowercase on the live wire (`minimax-m2.5`) but
+    # the curated label convention is mixed-case "MiniMax M2.5" — match that.
+    if name_part.lower().startswith("minimax"):
+        name_part = "MiniMax" + name_part[len("minimax"):]
+    base = _format_ollama_label(name_part)
+    return f"{base} (via Nous)"
+
+
+# Soft cap on how many Nous Portal models surface in the picker dropdown.
+# Above this count, _build_nous_featured_set() trims the visible list to
+# ~_NOUS_FEATURED_TARGET entries; the full catalog is still returned to the
+# client under ``extra_models`` so /model autocomplete covers everything.
+# Caps reflect human scannability — a 25-row dropdown is the practical UX
+# ceiling, and per-vendor sampling at 15 keeps the flagship shape visible
+# without one vendor dominating.
+_NOUS_FEATURED_THRESHOLD = 25
+_NOUS_FEATURED_TARGET = 15
+
+# Vendor-prefix priority order for featured selection. Lower index = picked
+# earlier when sampling the live catalog. Reflects which vendors users have
+# historically reached for first via Nous Portal (driven by the curated
+# static list maintained in _PROVIDER_MODELS["nous"] and Discord feedback).
+_NOUS_VENDOR_PRIORITY = (
+    "anthropic", "openai", "google", "moonshotai", "z-ai",
+    "minimax", "qwen", "x-ai", "deepseek", "stepfun",
+    "xiaomi", "tencent", "nvidia", "arcee-ai",
+)
+
+
+def _build_nous_featured_set(
+    live_ids: list[str],
+    *,
+    selected_model_id: str | None = None,
+    target: int = _NOUS_FEATURED_TARGET,
+) -> tuple[list[str], list[str]]:
+    """Trim a Nous Portal catalog into a (featured, extras) split.
+
+    ``featured`` is what the picker dropdown renders. ``extras`` is everything
+    else — kept available so the slash-command `/model` autocomplete and the
+    ``_dynamicModelLabels`` map cover the full catalog.
+
+    Selection rules (in order, deterministic):
+
+    1. Always include the user's currently-selected model if it's in the
+       catalog (preserves selection stickiness — no orphan IDs in the
+       dropdown after a refresh).
+    2. Always include every entry from the curated static
+       ``_PROVIDER_MODELS["nous"]`` list whose id maps onto a live id —
+       those four are explicitly maintained as flagship picks.
+    3. Top up to ``target`` by walking ``_NOUS_VENDOR_PRIORITY`` round-robin
+       (one model per vendor each pass) so no vendor monopolises the slot
+       budget. Within a vendor, the original ``live_ids`` order is preserved
+       — that's the order Nous Portal returned, which approximates recency.
+
+    Returns ``(featured_ids, extras_ids)`` — both lists are subsets of
+    ``live_ids`` with disjoint membership and union equal to ``live_ids``.
+
+    For catalogs ≤ ``_NOUS_FEATURED_THRESHOLD`` entries the function is a
+    no-op: ``featured == live_ids``, ``extras == []``.
+    """
+    if not live_ids:
+        return [], []
+    if len(live_ids) <= _NOUS_FEATURED_THRESHOLD:
+        return list(live_ids), []
+
+    chosen: list[str] = []  # preserves insertion order
+    chosen_set: set[str] = set()
+
+    def _add(mid: str) -> None:
+        if mid and mid not in chosen_set:
+            chosen.append(mid)
+            chosen_set.add(mid)
+
+    # Rule 1: sticky selection. Strip "@nous:" prefix if present so we can
+    # match against the live id space (which is bare "vendor/model").
+    if selected_model_id:
+        sel = selected_model_id
+        if sel.startswith("@nous:"):
+            sel = sel[len("@nous:"):]
+        if sel in live_ids:
+            _add(sel)
+
+    # Rule 2: curated flagships. Extract the bare ids from the static list
+    # entries (which are stored as "@nous:vendor/model").
+    for static in _PROVIDER_MODELS.get("nous", []):
+        sid = static.get("id", "")
+        if sid.startswith("@nous:"):
+            sid = sid[len("@nous:"):]
+        if sid in live_ids:
+            _add(sid)
+
+    # Rule 3: vendor-priority round-robin top-up.
+    by_vendor: dict[str, list[str]] = {}
+    for mid in live_ids:
+        if mid in chosen_set:
+            continue
+        vendor = mid.split("/", 1)[0] if "/" in mid else ""
+        by_vendor.setdefault(vendor, []).append(mid)
+
+    # Walk vendors in priority order, then any leftover vendors alphabetically.
+    priority = list(_NOUS_VENDOR_PRIORITY)
+    leftover = sorted(v for v in by_vendor if v not in set(priority))
+    vendor_order = priority + leftover
+
+    # Round-robin: one model per vendor per pass until we hit the target or
+    # exhaust every bucket.
+    while len(chosen) < target:
+        added_this_pass = 0
+        for vendor in vendor_order:
+            if len(chosen) >= target:
+                break
+            bucket = by_vendor.get(vendor)
+            if not bucket:
+                continue
+            _add(bucket.pop(0))
+            added_this_pass += 1
+        if added_this_pass == 0:
+            break  # all buckets empty
+
+    # Anything not chosen becomes extras (full-catalog completion surface).
+    extras = [m for m in live_ids if m not in chosen_set]
+    return chosen, extras
 
 
 def _apply_provider_prefix(
@@ -1413,6 +1610,18 @@ def invalidate_models_cache():
     _delete_models_cache_on_disk()
 
 
+def invalidate_credential_pool_cache(provider_id: str):
+    """Invalidate the credential pool cache for a specific provider.
+
+    Used by the streaming layer's credential self-heal logic (#1401) to
+    force a fresh credential pool load after re-reading auth.json.
+    """
+    global _CREDENTIAL_POOL_CACHE
+    with _available_models_cache_lock:
+        _CREDENTIAL_POOL_CACHE.pop(provider_id, None)
+        _CREDENTIAL_POOL_CACHE.pop(_resolve_provider_alias(provider_id), None)
+
+
 def invalidate_provider_models_cache(provider_id: str):
     """Invalidate cached models for a single provider.
 
@@ -1716,6 +1925,22 @@ def get_available_models() -> dict:
                     logger.debug("Failed to get key source for provider %s", _p.get("id", "unknown"))
                 detected_providers.add(_p["id"])
             _hermes_auth_used = True
+
+            # Belt-and-braces: list_available_providers() is the primary signal
+            # for OAuth providers, but its `authenticated` field can disagree
+            # with `get_auth_status(<id>).logged_in` on some hermes_cli versions
+            # (the two fields are computed via different code paths). When the
+            # disagreement happens for Nous Portal, the Settings → Providers
+            # card renders the live catalog (because api/providers.py iterates
+            # all OAuth providers regardless of authentication state) but the
+            # picker dropdown comes up empty — a confusing asymmetry reported
+            # in #1567. Add Nous explicitly when get_auth_status agrees so the
+            # picker stays in sync with the providers card.
+            try:
+                if _gas("nous").get("logged_in"):
+                    detected_providers.add("nous")
+            except Exception:
+                logger.debug("Failed to check Nous Portal auth status")
         except Exception:
             logger.debug("Failed to detect auth providers from hermes")
 
@@ -1793,14 +2018,77 @@ def get_available_models() -> dict:
         # Also detect providers explicitly listed in config.yaml providers section.
         # A user may configure a provider key via config.yaml providers.<name>.api_key
         # without setting the corresponding env var. (#604)
+        #
+        # Canonicalise the id slug here so a user with ``providers.opencode_go``
+        # (underscore variant) doesn't see TWO provider groups in the picker —
+        # one for the canonical ``opencode-go`` from active_provider detection
+        # and a phantom ``Opencode_Go`` group for the config-key form (#1568).
+        # The same applies to mixed-case ids like ``OpenCode-Go`` and to
+        # legitimate aliases like ``z-ai`` → ``zai``.
         _cfg_providers = cfg.get("providers", {})
         if isinstance(_cfg_providers, dict):
             for _pid_key in _cfg_providers:
-                if _pid_key in _PROVIDER_MODELS or _pid_key in cfg.get("providers", {}):
-                    detected_providers.add(_pid_key)
+                _canonical = _canonicalise_provider_id(_pid_key)
+                if not _canonical:
+                    continue
+                if _canonical in _PROVIDER_MODELS or _canonical in _cfg_providers or _pid_key in _cfg_providers:
+                    detected_providers.add(_canonical)
+
+        def _normalize_base_url_for_match(value: object) -> str:
+            url = str(value or "").strip().rstrip("/")
+            if not url:
+                return ""
+            parsed_url = urlparse(url if "://" in url else f"http://{url}")
+            scheme = (parsed_url.scheme or "http").lower()
+            netloc = (parsed_url.netloc or parsed_url.path).lower().rstrip("/")
+            path = parsed_url.path.rstrip("/")
+            if not parsed_url.netloc:
+                path = ""
+            return f"{scheme}://{netloc}{path}"
+
+        def _configured_provider_for_base_url(base_url: object) -> str:
+            target = _normalize_base_url_for_match(base_url)
+            if not target:
+                return ""
+
+            if isinstance(model_cfg, dict):
+                model_base_url = _normalize_base_url_for_match(model_cfg.get("base_url"))
+                if model_base_url == target:
+                    provider_hint = _resolve_provider_alias(model_cfg.get("provider"))
+                    if provider_hint:
+                        return str(provider_hint).strip().lower()
+
+            providers_cfg = cfg.get("providers", {})
+            if isinstance(providers_cfg, dict):
+                for provider_key, provider_cfg in providers_cfg.items():
+                    if not isinstance(provider_cfg, dict):
+                        continue
+                    provider_base_url = _normalize_base_url_for_match(
+                        provider_cfg.get("base_url")
+                    )
+                    if provider_base_url == target:
+                        provider_hint = _resolve_provider_alias(provider_key)
+                        if provider_hint:
+                            return str(provider_hint).strip().lower()
+
+            custom_providers_cfg = cfg.get("custom_providers", [])
+            if isinstance(custom_providers_cfg, list):
+                for entry in custom_providers_cfg:
+                    if not isinstance(entry, dict):
+                        continue
+                    entry_base_url = _normalize_base_url_for_match(entry.get("base_url"))
+                    if entry_base_url != target:
+                        continue
+                    entry_name = str(entry.get("name") or "").strip()
+                    if entry_name:
+                        return "custom:" + entry_name.lower().replace(" ", "-")
+                    return "custom"
+
+            return ""
 
         # 4. Fetch models from custom endpoint if base_url is configured
         auto_detected_models = []
+        auto_detected_models_by_provider: dict[str, list[dict]] = {}
         if cfg_base_url:
             try:
                 import ipaddress
@@ -1812,11 +2100,13 @@ def get_available_models() -> dict:
                 else:
                     endpoint_url = base_url.rstrip("/") + "/v1/models"
 
-                provider = "custom"
+                configured_provider = _configured_provider_for_base_url(base_url)
+                provider = configured_provider or "custom"
+                provider_from_config = bool(configured_provider)
                 parsed = urlparse(base_url if "://" in base_url else f"http://{base_url}")
                 host = (parsed.netloc or parsed.path).lower()
 
-                if parsed.hostname:
+                if parsed.hostname and not provider_from_config:
                     try:
                         addr = ipaddress.ip_address(parsed.hostname)
                         if addr.is_private or addr.is_loopback or addr.is_link_local:
@@ -1939,8 +2229,11 @@ def get_available_models() -> dict:
                     model_name = model.get("name", "") or model.get("model", "") or model_id
                     if model_id and model_name:
                         label = _format_ollama_label(model_id) if provider in ("ollama", "ollama-cloud") else model_name
-                        auto_detected_models.append({"id": model_id, "label": label})
-                        detected_providers.add(provider.lower())
+                        auto_model = {"id": model_id, "label": label}
+                        auto_detected_models.append(auto_model)
+                        provider_key = provider.lower()
+                        auto_detected_models_by_provider.setdefault(provider_key, []).append(auto_model)
+                        detected_providers.add(provider_key)
             except Exception:
                 logger.debug("Custom endpoint unreachable or misconfigured for provider: %s", provider)
 
@@ -2006,9 +2299,29 @@ def get_available_models() -> dict:
                 configured_providers.add(active_provider)
             cfg_providers = cfg.get("providers", {})
             if isinstance(cfg_providers, dict):
-                configured_providers.update(cfg_providers.keys())
+                # Canonicalise here too — same rationale as #1568 detection
+                # path. Without this, only_show_configured mode could
+                # exclude detected ``opencode-go`` because configured_providers
+                # only has the underscore-variant key from config.yaml.
+                configured_providers.update(
+                    _canonicalise_provider_id(k) or k for k in cfg_providers.keys()
+                )
             # Only show providers that are both detected and configured
             detected_providers = detected_providers.intersection(configured_providers)
+
+        # Post-collection dedup: re-canonicalise every entry so any path that
+        # added a non-canonical id (mixed-case from auth-store, raw config-key,
+        # legacy alias) gets folded onto the canonical key. Belt-and-braces for
+        # #1568 — protects against future regressions in any of the ~25
+        # `detected_providers.add(...)` callsites without auditing each one.
+        # The fold is idempotent for already-canonical ids, so safe to run
+        # unconditionally.
+        if detected_providers:
+            _canonicalised_detected = set()
+            for _pid in detected_providers:
+                _c = _canonicalise_provider_id(_pid) or _pid
+                _canonicalised_detected.add(_c)
+            detected_providers = _canonicalised_detected
 
         # 5. Build model groups
         if detected_providers:
@@ -2020,14 +2333,94 @@ def get_available_models() -> dict:
                     continue
                 provider_name = _PROVIDER_DISPLAY.get(pid, pid.title())
                 if pid == "openrouter":
+                    # OpenRouter has two model surfaces:
+                    #   (1) curated tool-supporting catalog via hermes_cli.models.fetch_openrouter_models()
+                    #       — the canonical agent-ready list, applies a tool-support filter
+                    #       (Kilo-Org/kilocode#9068) that hides image/completion-only models
+                    #   (2) free-tier `:free` variants — newly-added models OpenRouter ships
+                    #       experimentally that may not yet advertise `tools` in supported_parameters
+                    #       (see #1426). These get filtered out of (1) but users want them visible.
+                    #
+                    # Strategy: take the live curated list as the base, then augment with a
+                    # separate live-fetch of OpenRouter's /v1/models filtered to free-tier-only.
+                    # Free-tier entries get a "(free)" label suffix so the picker is honest about
+                    # what the user is selecting. Falls back to the static _FALLBACK_MODELS list
+                    # when both live fetches fail (offline, transient API error, test env).
+                    raw_models = []
+                    seen_ids = set()
+                    try:
+                        from hermes_cli.models import (
+                            fetch_openrouter_models as _fetch_or_models,
+                        )
+                        live_curated = _fetch_or_models() or []
+                        for mid, _desc in live_curated:
+                            if mid and mid not in seen_ids:
+                                seen_ids.add(mid)
+                                raw_models.append({"id": mid, "label": mid})
+                    except Exception:
+                        logger.warning("Failed to load OpenRouter curated catalog from hermes_cli")
+
+                    # Free-tier live fetch — bypasses the tool-support filter so models
+                    # OpenRouter has flagged free but hasn't yet annotated with tools=[]
+                    # (or that have tools=[] but the user explicitly wants to try) appear.
+                    try:
+                        import urllib.request as _urlreq
+                        _req = _urlreq.Request(
+                            "https://openrouter.ai/api/v1/models",
+                            headers={"Accept": "application/json"},
+                        )
+                        with _urlreq.urlopen(_req, timeout=8.0) as _resp:
+                            _payload = json.loads(_resp.read().decode())
+                        _free_count = 0
+                        _free_cap = 30  # don't drown the picker — top 30 free tier
+                        for _item in _payload.get("data", []) or []:
+                            if not isinstance(_item, dict):
+                                continue
+                            _mid = str(_item.get("id") or "").strip()
+                            if not _mid or _mid in seen_ids:
+                                continue
+                            _pricing = _item.get("pricing") or {}
+                            try:
+                                _is_free = (
+                                    float(_pricing.get("prompt", "0") or "0") == 0
+                                    and float(_pricing.get("completion", "0") or "0") == 0
+                                )
+                            except (TypeError, ValueError):
+                                _is_free = False
+                            # Also include explicit `:free` suffix variants
+                            _is_free = _is_free or _mid.endswith(":free")
+                            if not _is_free:
+                                continue
+                            _name = (
+                                str(_item.get("name") or "").strip() or _mid
+                            )
+                            # Strip provider prefix from name for display, append (free)
+                            _label = _name.split("/")[-1] if "/" in _name else _name
+                            if "(free)" not in _label.lower():
+                                _label = f"{_label} (free)"
+                            seen_ids.add(_mid)
+                            raw_models.append({"id": _mid, "label": _label})
+                            _free_count += 1
+                            if _free_count >= _free_cap:
+                                break
+                    except Exception:
+                        logger.debug("OpenRouter free-tier live fetch unavailable; using fallback")
+
+                    if not raw_models:
+                        # Both live fetches failed — fall back to the curated static list.
+                        # Deepcopy so dedup/prefix mutation downstream does not bleed
+                        # into the module-level catalog.
+                        raw_models = [
+                            {"id": m["id"], "label": m["label"]}
+                            for m in _FALLBACK_MODELS
+                            if m.get("provider") == "OpenRouter"
+                        ]
+
                     groups.append(
                         {
                             "provider": "OpenRouter",
                             "provider_id": "openrouter",
-                            "models": [
-                                {"id": m["id"], "label": m["label"]}
-                                for m in _FALLBACK_MODELS
-                            ],
+                            "models": raw_models,
                         }
                     )
                 elif pid == "ollama-cloud":
@@ -2051,8 +2444,108 @@ def get_available_models() -> dict:
                                 "models": models,
                             }
                         )
+                elif pid == "nous":
+                    # Nous Portal exposes a curated catalog (~30 models on most
+                    # accounts, up to several hundred for enterprise tiers) via
+                    # inference-api.nousresearch.com. Like ollama-cloud, we
+                    # live-fetch through hermes_cli.models.provider_model_ids()
+                    # rather than relying on the static four-entry list, which
+                    # chronically drifts out of date (#1538).
+                    #
+                    # When the catalog exceeds _NOUS_FEATURED_THRESHOLD (~25)
+                    # the picker dropdown gets a curated subset to stay
+                    # scannable — the full list is still returned under
+                    # "extra_models" for the slash-command autocomplete and
+                    # the dynamic-label map (#1567). The optgroup label is
+                    # decorated with the truncation count so users know more
+                    # exists.
+                    raw_models = []
+                    extra_models: list[dict] = []
+                    truncated_label_suffix = ""
+                    live_fetch_failed = False
+                    try:
+                        from hermes_cli.models import provider_model_ids as _provider_model_ids
+
+                        live_ids = _provider_model_ids("nous") or []
+                    except Exception:
+                        logger.warning("Failed to load Nous Portal models from hermes_cli")
+                        live_ids = []
+                        live_fetch_failed = True
+
+                    if live_ids:
+                        # Sticky-selection signal: prefer the explicitly-active
+                        # model from cfg["model"]["model"] (what the user is
+                        # currently using) over cfg["model"]["default"] (the
+                        # configured default suggestion). Falls back to the
+                        # latter so first-load before any selection still works.
+                        _model_cfg = cfg.get("model", {})
+                        _selected = (
+                            (isinstance(_model_cfg, dict) and _model_cfg.get("model"))
+                            or default_model
+                            or None
+                        )
+                        featured_ids, extras_ids = _build_nous_featured_set(
+                            live_ids,
+                            selected_model_id=_selected,
+                        )
+                        # Prefix every live id with "@nous:" so routing matches
+                        # the explicit-provider-hint branch of resolve_model_provider
+                        # (same convention as the curated static list — see
+                        # tests/test_nous_portal_routing.py for the invariant).
+                        raw_models = [
+                            {"id": f"@nous:{mid}", "label": _format_nous_label(mid)}
+                            for mid in featured_ids
+                        ]
+                        extra_models = [
+                            {"id": f"@nous:{mid}", "label": _format_nous_label(mid)}
+                            for mid in extras_ids
+                        ]
+                        if extras_ids:
+                            # Show "(15 of 397)" so the user understands the picker
+                            # is showing a featured subset, not a broken short list.
+                            truncated_label_suffix = (
+                                f" ({len(featured_ids)} of {len(live_ids)})"
+                            )
+                    elif not live_fetch_failed:
+                        # Live-fetch returned an empty list AND did not raise —
+                        # the user is gated as authenticated by detection above
+                        # but the catalog endpoint replied with no models.
+                        # Showing the static 4-entry curated list here would
+                        # contradict the providers card (which always shows
+                        # the live catalog) — exactly the asymmetry #1567
+                        # reports. Omit the Nous group entirely; the providers
+                        # card already tells the truth, and a transient empty
+                        # response will self-heal on the next cache rebuild.
+                        logger.warning(
+                            "Nous Portal authenticated but live-fetch returned empty — "
+                            "omitting from picker (will retry on next cache rebuild)"
+                        )
+                    else:
+                        # hermes_cli unavailable / raised — fall back to the
+                        # curated 4-entry static list so the picker is never
+                        # empty in this degraded state. This matches pre-#1538
+                        # behaviour for environments without hermes_cli (test
+                        # envs, package mismatches, isolated WebUI builds).
+                        raw_models = copy.deepcopy(_PROVIDER_MODELS.get("nous", []))
+
+                    if raw_models:
+                        models = _apply_provider_prefix(raw_models, pid, active_provider)
+                        # Apply the same prefix transform to extras so /model
+                        # autocomplete sees consistent IDs across the two lists.
+                        extras = _apply_provider_prefix(extra_models, pid, active_provider) if extra_models else []
+                        group_entry = {
+                            "provider": provider_name + truncated_label_suffix,
+                            "provider_id": pid,
+                            "models": models,
+                        }
+                        if extras:
+                            group_entry["extra_models"] = extras
+                        groups.append(group_entry)
                 elif pid in _PROVIDER_MODELS or pid in cfg.get("providers", {}):
                     raw_models = copy.deepcopy(_PROVIDER_MODELS.get(pid, []))
+                    detected_models = auto_detected_models_by_provider.get(pid, [])
+                    if detected_models and not raw_models:
+                        raw_models = copy.deepcopy(detected_models)
 
                     provider_cfg = cfg.get("providers", {}).get(pid, {})
                     if isinstance(provider_cfg, dict) and "models" in provider_cfg:
@@ -2070,7 +2563,14 @@ def get_available_models() -> dict:
                         }
                     )
                 else:
-                    if auto_detected_models:
+                    detected_models = auto_detected_models_by_provider.get(pid)
+                    if detected_models:
+                        models_for_group = copy.deepcopy(detected_models)
+                    elif auto_detected_models:
+                        models_for_group = copy.deepcopy(auto_detected_models)
+                    else:
+                        models_for_group = []
+                    if models_for_group:
                         # Per-group deep copy so subsequent mutation by
                         # _deduplicate_model_ids() (which prefixes ids with
                         # @provider_id:) does not bleed into other groups
@@ -2084,7 +2584,7 @@ def get_available_models() -> dict:
                             {
                                 "provider": provider_name,
                                 "provider_id": pid,
-                                "models": copy.deepcopy(auto_detected_models),
+                                "models": models_for_group,
                             }
                         )
         else:
@@ -2095,33 +2595,68 @@ def get_available_models() -> dict:
                 )
 
         if default_model:
-            all_ids_norm = {_norm_model_id(m["id"]) for g in groups for m in g.get("models", [])}
-            if _norm_model_id(default_model) not in all_ids_norm:
-                label = _get_label_for_model(default_model, groups)
-                target_display = (
-                    _PROVIDER_DISPLAY.get(active_provider, active_provider or "").lower()
-                    if active_provider
-                    else ""
+            # Guard against provider-id values mistakenly stored in
+            # ``model.default``. The injection logic below puts ANY string
+            # into the picker as a fake option, so a stray provider id
+            # surfaces as a self-referential phantom model labelled e.g.
+            # ``Opencode GO`` — a 15th entry under the OpenCode Go group
+            # (#1568). The user's misconfig is real, but the picker is
+            # the wrong surface to surface it; we'd rather skip injection
+            # and emit a warning so the underlying config issue is logged.
+            _looks_like_provider_id = (
+                str(default_model).strip().lower().replace("_", "-") in _PROVIDER_DISPLAY
+                or _canonicalise_provider_id(default_model) in _PROVIDER_DISPLAY
+            )
+            if _looks_like_provider_id:
+                logger.warning(
+                    "Suspicious model.default value %r — looks like a provider id, "
+                    "not a model id. Skipping picker injection. Check `model.default` "
+                    "in config.yaml.",
+                    default_model,
                 )
-                injected = False
-                for g in groups:
-                    if target_display and g.get("provider", "").lower() == target_display:
-                        g["models"].insert(0, {"id": default_model, "label": label})
-                        injected = True
-                        break
-                if not injected and groups:
-                    groups.append(
-                        {
-                            "provider": "Default",
-                            "provider_id": active_provider or "default",
-                            "models": [{"id": default_model, "label": label}],
-                        }
+            else:
+                all_ids_norm = {_norm_model_id(m["id"]) for g in groups for m in g.get("models", [])}
+                if _norm_model_id(default_model) not in all_ids_norm:
+                    label = _get_label_for_model(default_model, groups)
+                    target_display = (
+                        _PROVIDER_DISPLAY.get(active_provider, active_provider or "").lower()
+                        if active_provider
+                        else ""
                     )
+                    injected = False
+                    for g in groups:
+                        if target_display and g.get("provider", "").lower() == target_display:
+                            g["models"].insert(0, {"id": default_model, "label": label})
+                            injected = True
+                            break
+                    if not injected and groups:
+                        groups.append(
+                            {
+                                "provider": "Default",
+                                "provider_id": active_provider or "default",
+                                "models": [{"id": default_model, "label": label}],
+                            }
+                        )
 
         # Post-process: ensure model IDs are globally unique across groups.
         # When multiple providers expose the same bare model ID, prefix
         # collisions with @provider_id: so the frontend can distinguish them.
         _deduplicate_model_ids(groups)
+
+        # Defense-in-depth: drop any optgroup that ended up with zero models
+        # — those are pure UI noise. A zero-model group typically means a
+        # detection path added an id that has no static catalog AND the
+        # live-fetch returned empty (#1568 — the user's
+        # ``providers.opencode_go`` config-key path produced an empty
+        # ``Opencode_Go`` group at the end of the picker before this fix).
+        # Custom providers from ``custom_providers`` config are exempt —
+        # they may legitimately render with zero entries when the user
+        # hasn't filled in models yet but wants the card visible.
+        groups = [
+            g for g in groups
+            if g.get("models")
+            or (g.get("provider_id") or "").startswith("custom:")
+        ]
 
         return {
             "active_provider": active_provider,

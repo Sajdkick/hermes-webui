@@ -88,6 +88,22 @@ let _slashPersonalityCachePromise=null;
 let _agentCommandCache=null;
 let _agentCommandCachePromise=null;
 
+// Invalidate the /api/models slash-suggestion cache. Called by panels.js
+// after a provider is added or removed so the next /model autocomplete
+// rebuilds from a fresh /api/models response (#1539). Returning a function
+// rather than letting callers poke the module-local lets/promises directly
+// keeps the cache shape encapsulated to this module.
+function _invalidateSlashModelCache(){
+  _slashModelCache=null;
+  _slashModelCachePromise=null;
+}
+// Expose on window when available. Guarded by typeof so the module is
+// importable in headless test contexts (vm.runInContext) that don't
+// define a window global — see tests/test_cli_only_slash_commands.py.
+if(typeof window!=='undefined'){
+  window._invalidateSlashModelCache=_invalidateSlashModelCache;
+}
+
 function _normalizeSlashSubArg(value){
   return String(value||'').trim();
 }
@@ -117,6 +133,15 @@ async function _loadSlashModelSubArgs(force=false){
       const values=[];
       for(const group of (data&&data.groups)||[]){
         for(const model of (group&&group.models)||[]){
+          const id=_normalizeSlashSubArg(model&&model.id);
+          if(id) values.push(id);
+        }
+        // Include extra_models (the catalog tail that doesn't render as
+        // <option> entries when the picker is capped) so /model autocomplete
+        // covers the full catalog. The trimming is purely a dropdown
+        // scannability concern — the slash command exists precisely so
+        // power users can reach any model by typing its name. #1567.
+        for(const model of (group&&group.extra_models)||[]){
           const id=_normalizeSlashSubArg(model&&model.id);
           if(id) values.push(id);
         }

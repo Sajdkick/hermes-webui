@@ -214,9 +214,9 @@ def read_importable_agent_session_rows(
     db_path: Path,
     limit: int = 200,
     log=None,
-    exclude_sources: tuple[str, ...] | None = ("cron",),
+    exclude_sources: tuple[str, ...] | None = ("cron", "webui"),
 ) -> list[dict]:
-    """Return non-WebUI agent sessions projected as importable conversations.
+    """Return agent sessions projected as importable conversations.
 
     Hermes Agent can create rows in ``state.db.sessions`` before a session has
     any messages, and long conversations can be split into compression-linked
@@ -255,8 +255,16 @@ def read_importable_agent_session_rows(
         parent_expr = _optional_col('parent_session_id', session_cols)
         ended_expr = _optional_col('ended_at', session_cols)
         end_reason_expr = _optional_col('end_reason', session_cols)
+        user_id_expr = _optional_col('user_id', session_cols)
+        chat_id_expr = _optional_col('chat_id', session_cols)
+        chat_type_expr = _optional_col('chat_type', session_cols)
+        thread_id_expr = _optional_col('thread_id', session_cols)
+        session_key_expr = _optional_col('session_key', session_cols)
+        origin_chat_id_expr = _optional_col('origin_chat_id', session_cols)
+        origin_user_id_expr = _optional_col('origin_user_id', session_cols)
+        platform_expr = _optional_col('platform', session_cols)
 
-        where_clauses = ["s.source IS NOT NULL", "s.source != 'webui'"]
+        where_clauses = ["s.source IS NOT NULL"]
         params: list[str] = []
         if exclude_sources:
             excluded = tuple(str(source) for source in exclude_sources if source)
@@ -269,6 +277,14 @@ def read_importable_agent_session_rows(
             f"""
             SELECT s.id, s.title, s.model, s.message_count,
                    s.started_at, s.source,
+                   {user_id_expr},
+                   {chat_id_expr},
+                   {chat_type_expr},
+                   {thread_id_expr},
+                   {session_key_expr},
+                   {origin_chat_id_expr},
+                   {origin_user_id_expr},
+                   {platform_expr},
                    {parent_expr},
                    {ended_expr},
                    {end_reason_expr},

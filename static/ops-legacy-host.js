@@ -73,17 +73,31 @@
     }, Number.isFinite(Number(ms)) ? Number(ms) : 2600);
   }
 
+  const appPromptDialog = typeof window.showPromptDialog === 'function'
+    ? window.showPromptDialog.bind(window)
+    : (window.parent && window.parent !== window && typeof window.parent.showPromptDialog === 'function'
+      ? window.parent.showPromptDialog.bind(window.parent)
+      : null);
+  const appConfirmDialog = typeof window.showConfirmDialog === 'function'
+    ? window.showConfirmDialog.bind(window)
+    : (window.parent && window.parent !== window && typeof window.parent.showConfirmDialog === 'function'
+      ? window.parent.showConfirmDialog.bind(window.parent)
+      : null);
+
   async function showPromptDialog(options){
-    const config = options && typeof options === 'object' ? options : {};
-    const text = [config.title, config.message].filter(Boolean).join('\n\n') || 'Enter a value';
-    const value = window.prompt(text, String(config.defaultValue || ''));
-    return value == null ? null : String(value);
+    if(appPromptDialog){
+      return appPromptDialog(options);
+    }
+    showToast('Input dialog is unavailable', 3200);
+    return null;
   }
 
   async function showConfirmDialog(options){
-    const config = options && typeof options === 'object' ? options : {};
-    const text = [config.title, config.message].filter(Boolean).join('\n\n') || 'Continue?';
-    return !!window.confirm(text);
+    if(appConfirmDialog){
+      return appConfirmDialog(options);
+    }
+    showToast('Confirmation dialog is unavailable', 3200);
+    return false;
   }
 
   function sessionUrlForSid(sid){

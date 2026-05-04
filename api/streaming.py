@@ -1343,6 +1343,61 @@ def _last_resort_sync_from_core(session, stream_id, agent_lock):
         )
 
 
+def _attempt_credential_self_heal(
+    provider_id, session_id, _agent_lock_ref,
+):
+    """Try to silently refresh credentials after a 401/auth error (#1401).
+
+    Returns a new ``(agent, rt_dict)`` tuple on success so the caller can
+    retry the conversation.  Returns ``None`` when self-heal is not
+    applicable (e.g. auth.json unchanged, provider unresolvable).
+
+    Steps:
+    1. Re-read ``~/.hermes/auth.json`` to pick up fresh credentials that
+       may have been written by a concurrent ``hermes model`` CLI invocation.
+    2. Evict the session's cached agent so it is rebuilt with fresh keys.
+    3. Evict the provider's credential-pool cache entry.
+    4. Re-resolve the runtime provider.
+    5. Return a new agent + resolved-provider dict (the caller must
+       re-invoke ``run_conversation`` with these).
+    """
+    try:
+        from api.oauth import read_auth_json
+        from api.config import (
+            SESSION_AGENT_CACHE, SESSION_AGENT_CACHE_LOCK,
+            invalidate_credential_pool_cache,
+        )
+        from hermes_cli.runtime_provider import resolve_runtime_provider
+
+        # 1. Re-read auth.json (triggers a fresh credential scan)
+        _fresh_auth = read_auth_json()
+        if not _fresh_auth:
+            logger.debug('[webui] self-heal: auth.json empty or missing, skipping')
+            return None
+
+        # 2. Evict the cached agent for this session
+        with SESSION_AGENT_CACHE_LOCK:
+            SESSION_AGENT_CACHE.pop(session_id, None)
+
+        # 3. Invalidate the credential pool for this provider
+        invalidate_credential_pool_cache(provider_id)
+
+        # 4. Re-resolve runtime provider with fresh credentials
+        _new_rt = resolve_runtime_provider(requested=provider_id)
+
+        logger.info(
+            '[webui] self-heal: credential refresh succeeded for provider=%s session=%s',
+            provider_id, session_id,
+        )
+        return _new_rt
+    except Exception as _heal_err:
+        logger.warning(
+            '[webui] self-heal: failed for provider=%s session=%s: %s',
+            provider_id, session_id, _heal_err,
+        )
+        return None
+
+
 def _run_agent_streaming(
     session_id,
     msg_text,
@@ -1561,6 +1616,7 @@ def _run_agent_streaming(
 
         try:
             _token_sent = False  # tracks whether any streamed tokens were sent
+            _self_healed = False  # (#1401) prevents infinite self-heal retries
             _reasoning_text = ''  # accumulates reasoning/thinking trace for persistence
             _live_tool_calls = []  # tool progress fallback when final messages omit tool IDs
 
@@ -1792,13 +1848,32 @@ def _run_agent_streaming(
             import inspect as _inspect
             _agent_params = set(_inspect.signature(_AIAgent.__init__).parameters)
 
+            # CLI-parity max output cap: read config.yaml's max_tokens and pass
+            # it to AIAgent when supported. Without this WebUI-created agents use
+            # provider-native output ceilings (e.g. Claude via OpenRouter can
+            # request 64k), which may turn an otherwise usable fallback into a
+            # 402 "more credits / fewer max_tokens" failure.
+            _max_tokens_cfg = None
+            try:
+                _raw_max_tokens = _cfg.get('max_tokens')
+                if _raw_max_tokens is None:
+                    _agent_cfg_for_tokens = _cfg.get('agent', {})
+                    if isinstance(_agent_cfg_for_tokens, dict):
+                        _raw_max_tokens = _agent_cfg_for_tokens.get('max_tokens')
+                if _raw_max_tokens is not None:
+                    _parsed_max_tokens = int(_raw_max_tokens)
+                    if _parsed_max_tokens > 0:
+                        _max_tokens_cfg = _parsed_max_tokens
+            except Exception:
+                _max_tokens_cfg = None
+
             # CLI-parity reasoning effort: read agent.reasoning_effort from the
             # active profile's config.yaml (the same key the CLI writes via
             # `/reasoning <level>`) and hand the parsed dict to AIAgent.  When
             # the key is absent or invalid, pass None → agent uses its default.
             try:
                 from api.config import parse_reasoning_effort as _parse_reff
-                _effort_cfg = _cfg.cfg.get('agent', {}) if isinstance(_cfg.cfg, dict) else {}
+                _effort_cfg = _cfg.get('agent', {}) if isinstance(_cfg, dict) else {}
                 _effort_raw = _effort_cfg.get('reasoning_effort') if isinstance(_effort_cfg, dict) else None
                 _reasoning_config = _parse_reff(_effort_raw)
             except Exception:
@@ -1830,6 +1905,8 @@ def _run_agent_streaming(
             # but guard defensively to avoid TypeError on an older agent build.
             if 'reasoning_config' in _agent_params and _reasoning_config is not None:
                 _agent_kwargs['reasoning_config'] = _reasoning_config
+            if 'max_tokens' in _agent_params and _max_tokens_cfg is not None:
+                _agent_kwargs['max_tokens'] = _max_tokens_cfg
             # Params added in newer hermes-agent — skip if not supported
             if 'api_mode' in _agent_params:
                 _agent_kwargs['api_mode'] = _rt.get('api_mode')
@@ -1861,7 +1938,10 @@ def _run_agent_streaming(
                     _hashlib.sha256((resolved_api_key or '').encode()).hexdigest()[:16],
                     resolved_base_url or '',
                     resolved_provider or '',
+                    _max_tokens_cfg or '',
+                    _fallback_resolved or {},
                     sorted(_toolsets) if _toolsets else [],
+                    _reasoning_config or {},
                 ], sort_keys=True)
                 _agent_sig = _hashlib.sha256(_sig_blob.encode()).hexdigest()[:16]
 
@@ -1972,6 +2052,10 @@ def _run_agent_streaming(
             # Pass personality via ephemeral_system_prompt (agent's own mechanism)
             if _personality_prompt:
                 agent.ephemeral_system_prompt = _personality_prompt
+            _pending_started_at = getattr(s, 'pending_started_at', None)
+            # Normal chat-start sets pending_started_at before spawning this thread;
+            # fallback to now only for recovered/legacy flows where that marker is absent.
+            _turn_started_at = _pending_started_at if _pending_started_at is not None else time.time()
             _previous_messages = list(s.messages or [])
             _previous_context_messages = list(_session_context_messages(s))
             _pre_compression_count = getattr(
@@ -2098,6 +2182,9 @@ def _run_agent_streaming(
                         'insufficient credit' in _err_lower
                         or 'credit balance' in _err_lower
                         or 'credits exhausted' in _err_lower
+                        or 'more credits' in _err_lower
+                        or 'can only afford' in _err_lower
+                        or 'fewer max_tokens' in _err_lower
                         or 'quota_exceeded' in _err_lower
                         or 'quota exceeded' in _err_lower
                         or 'exceeded your current quota' in _err_lower
@@ -2116,6 +2203,95 @@ def _run_agent_streaming(
                         _err_label = 'Out of credits'
                         _err_type = 'quota_exhausted'
                         _err_hint = 'Your provider account is out of credits. Top up your balance or switch providers via `hermes model`.'
+                    elif _is_auth and not _self_healed:
+                        # ── Credential self-heal on 401 (#1401) ──
+                        # Before emitting the error, try re-reading credentials
+                        # and retrying once with a fresh agent.
+                        _heal_result = None
+                        _heal_rt = _attempt_credential_self_heal(
+                            resolved_provider or '', session_id, _agent_lock,
+                        )
+                        if _heal_rt is not None:
+                            logger.info('[webui] self-heal: retrying stream after credential refresh')
+                            # Rebuild runtime variables from the refreshed resolve
+                            _rt = _heal_rt
+                            resolved_api_key = _heal_rt.get('api_key')
+                            if not resolved_provider:
+                                resolved_provider = _heal_rt.get('provider')
+                            if not resolved_base_url:
+                                resolved_base_url = _heal_rt.get('base_url')
+                            # Rebuild agent kwargs and create a fresh agent
+                            _agent_kwargs['api_key'] = resolved_api_key
+                            _agent_kwargs['base_url'] = resolved_base_url
+                            _agent_kwargs['model'] = resolved_model
+                            _agent_kwargs['provider'] = resolved_provider
+                            if 'credential_pool' in _agent_params:
+                                _agent_kwargs['credential_pool'] = _heal_rt.get('credential_pool')
+                            agent = _AIAgent(**_agent_kwargs)
+                            with STREAMS_LOCK:
+                                AGENT_INSTANCES[stream_id] = agent
+                            from api.config import SESSION_AGENT_CACHE as _SAC, SESSION_AGENT_CACHE_LOCK as _SAC_L
+                            with _SAC_L:
+                                _SAC[session_id] = (agent, _agent_sig)
+                                _SAC.move_to_end(session_id)
+                            # Retry the conversation once with fresh credentials
+                            _self_healed = True
+                            _token_sent = False
+                            try:
+                                _heal_result = agent.run_conversation(
+                                    user_message=user_message,
+                                    system_message=workspace_system_msg,
+                                    conversation_history=_sanitize_messages_for_api(_previous_context_messages),
+                                    task_id=session_id,
+                                    persist_user_message=msg_text,
+                                )
+                                _heal_ok = any(
+                                    m.get('role') == 'assistant' and str(m.get('content') or '').strip()
+                                    for m in (_heal_result.get('messages') or [])
+                                ) or _token_sent
+                            except Exception as _retry_exc:
+                                logger.warning(
+                                    '[webui] self-heal: retry also failed: %s', _retry_exc,
+                                )
+                                _heal_ok = False
+                            if _heal_ok and _heal_result is not None:
+                                # Retry succeeded — replace result and skip error
+                                result = _heal_result
+                                # Fall through past the error-emission block;
+                                # the post-result persistence code below will
+                                # process ``result`` normally.  We jump past
+                                # the ``put('apperror', ...)`` + ``return`` by
+                                # NOT entering the ``if not _assistant_added``
+                                # guard again — but we are already inside it.
+                                # Solution: set _assistant_added so the guard
+                                # evaluates False on next conceptual pass.
+                                # Since we're in a flat block, directly run the
+                                # post-result merge logic here.
+                                _result_messages = result.get('messages') or _previous_context_messages
+                                _next_context_messages = _restore_reasoning_metadata(
+                                    _previous_context_messages,
+                                    _result_messages,
+                                )
+                                s.context_messages = _next_context_messages
+                                s.messages = _merge_display_messages_after_agent_result(
+                                    _previous_messages,
+                                    _previous_context_messages,
+                                    _restore_reasoning_metadata(_previous_messages, _result_messages),
+                                    msg_text,
+                                )
+                                # Skip the error block — jump directly to the
+                                # normal post-result persistence path by
+                                # leaving _assistant_added truthy (set below).
+                                _assistant_added = True  # prevent re-entering guard
+                        if not _assistant_added:
+                            # Self-heal didn't apply or retry failed — emit error
+                            _err_label = 'Authentication failed'
+                            _err_type = 'auth_mismatch'
+                            _err_hint = (
+                                'The selected model may not be supported by your configured provider or '
+                                'your API key is invalid. Run `hermes model` in your terminal to '
+                                'update credentials, then restart the WebUI.'
+                            )
                     elif _is_auth:
                         _err_label = 'Authentication failed'
                         _err_type = 'auth_mismatch'
@@ -2128,31 +2304,38 @@ def _run_agent_streaming(
                         _err_label = 'No response received'
                         _err_type = 'no_response'
                         _err_hint = 'Verify your API key is valid and the selected model is available for your account.'
-                    put('apperror', {
-                        'message': _err_str or f'{_err_label}.',
-                        'type': _err_type,
-                        'hint': _err_hint,
-                    })
-                    # Clear stream/pending state so the session does not appear
-                    # "agent_running" on reload after a silent failure.
-                    # Persist the error so it survives page reload.
-                    # _error=True ensures _sanitize_messages_for_api excludes it from
-                    # subsequent API calls so the LLM never sees its own error as prior context.
-                    s.active_stream_id = None
-                    s.pending_user_message = None
-                    s.pending_attachments = []
-                    s.pending_started_at = None
-                    s.messages.append({
-                        'role': 'assistant',
-                        'content': f'**{_err_label}:** {_err_str or _err_label}\n\n*{_err_hint}*',
-                        'timestamp': int(time.time()),
-                        '_error': True,
-                    })
-                    try:
-                        s.save()
-                    except Exception:
+                    # Skip error emission if credential self-heal succeeded
+                    # (#1401) — _assistant_added is set True on successful retry.
+                    if _assistant_added:
+                        # Self-heal succeeded: messages are already merged into s,
+                        # fall through to normal post-result persistence below.
                         pass
-                    return  # apperror already closes the stream on the client side
+                    else:
+                        put('apperror', {
+                            'message': _err_str or f'{_err_label}.',
+                            'type': _err_type,
+                            'hint': _err_hint,
+                        })
+                        # Clear stream/pending state so the session does not appear
+                        # "agent_running" on reload after a silent failure.
+                        # Persist the error so it survives page reload.
+                        # _error=True ensures _sanitize_messages_for_api excludes it from
+                        # subsequent API calls so the LLM never sees its own error as prior context.
+                        s.active_stream_id = None
+                        s.pending_user_message = None
+                        s.pending_attachments = []
+                        s.pending_started_at = None
+                        s.messages.append({
+                            'role': 'assistant',
+                            'content': f'**{_err_label}:** {_err_str or _err_label}\n\n*{_err_hint}*',
+                            'timestamp': int(time.time()),
+                            '_error': True,
+                        })
+                        try:
+                            s.save()
+                        except Exception:
+                            pass
+                        return  # apperror already closes the stream on the client side
 
                 # ── Handle context compression side effects ──
                 # If compression fired inside run_conversation, the agent may have
@@ -2270,6 +2453,15 @@ def _run_agent_streaming(
                         if isinstance(_rm, dict) and _rm.get('role') == 'assistant':
                             _rm['reasoning'] = _reasoning_text
                             break
+                try:
+                    _turn_duration_seconds = max(0.0, time.time() - float(_turn_started_at))
+                except Exception:
+                    _turn_duration_seconds = 0.0
+                if s.messages:
+                    for _dm in reversed(s.messages):
+                        if isinstance(_dm, dict) and _dm.get('role') == 'assistant':
+                            _dm['_turnDuration'] = round(_turn_duration_seconds, 3)
+                            break
                 # Persist context window data on the session so the context-ring
                 # indicator survives a page reload (#1318). Must run BEFORE
                 # s.save() for the same reason as the reasoning trace above.
@@ -2317,7 +2509,12 @@ def _run_agent_streaming(
                     )
             except Exception:
                 logger.debug("Failed to sync session to insights")
-            usage = {'input_tokens': input_tokens, 'output_tokens': output_tokens, 'estimated_cost': estimated_cost}
+            usage = {
+                'input_tokens': input_tokens,
+                'output_tokens': output_tokens,
+                'estimated_cost': estimated_cost,
+                'duration_seconds': round(_turn_duration_seconds, 3),
+            }
             # Include context window data from the agent's compressor for the UI indicator.
             # The session-level persistence happens above (before s.save()) so the values
             # survive a page reload; this block only populates the live SSE usage payload.
@@ -2433,6 +2630,9 @@ def _run_agent_streaming(
             'insufficient credit' in _exc_lower
             or 'credit balance' in _exc_lower
             or 'credits exhausted' in _exc_lower
+            or 'more credits' in _exc_lower
+            or 'can only afford' in _exc_lower
+            or 'fewer max_tokens' in _exc_lower
             or 'quota_exceeded' in _exc_lower
             or 'quota exceeded' in _exc_lower
             or 'exceeded your current quota' in _exc_lower
@@ -2469,6 +2669,72 @@ def _run_agent_streaming(
                 'Rate limit reached. The fallback model (if configured) was also exhausted. Try again in a moment.',
             )
         elif _exc_is_auth:
+            if not _self_healed:
+                # ── Credential self-heal on 401 (#1401) ──
+                _heal_rt = _attempt_credential_self_heal(
+                    resolved_provider or '', session_id, _agent_lock,
+                )
+                if _heal_rt is not None:
+                    logger.info('[webui] self-heal (except path): retrying stream after credential refresh')
+                    _self_healed = True
+                    # Rebuild runtime variables
+                    _rt = _heal_rt
+                    resolved_api_key = _heal_rt.get('api_key')
+                    if not resolved_provider:
+                        resolved_provider = _heal_rt.get('provider')
+                    if not resolved_base_url:
+                        resolved_base_url = _heal_rt.get('base_url')
+                    # Build a fresh agent with the new credentials
+                    _heal_kwargs = dict(_agent_kwargs) if '_agent_kwargs' in dir() else {}
+                    _heal_kwargs['api_key'] = resolved_api_key
+                    _heal_kwargs['base_url'] = resolved_base_url
+                    _heal_kwargs['model'] = resolved_model
+                    _heal_kwargs['provider'] = resolved_provider
+                    if 'credential_pool' in _agent_params:
+                        _heal_kwargs['credential_pool'] = _heal_rt.get('credential_pool')
+                    _heal_agent = _AIAgent(**_heal_kwargs)
+                    with STREAMS_LOCK:
+                        AGENT_INSTANCES[stream_id] = _heal_agent
+                    from api.config import SESSION_AGENT_CACHE as _SAC2, SESSION_AGENT_CACHE_LOCK as _SAC2_L
+                    with _SAC2_L:
+                        _SAC2[session_id] = (_heal_agent, _agent_sig)
+                        _SAC2.move_to_end(session_id)
+                    # Retry the conversation
+                    _token_sent = False
+                    try:
+                        _heal_result = _heal_agent.run_conversation(
+                            user_message=user_message,
+                            system_message=workspace_system_msg,
+                            conversation_history=_sanitize_messages_for_api(_previous_context_messages),
+                            task_id=session_id,
+                            persist_user_message=msg_text,
+                        )
+                        # Retry succeeded — persist the result normally
+                        if s is not None:
+                            if _checkpoint_stop is not None:
+                                _checkpoint_stop.set()
+                            if _ckpt_thread is not None:
+                                _ckpt_thread.join(timeout=15)
+                            _lock_ctx = _agent_lock if _agent_lock is not None else contextlib.nullcontext()
+                            with _lock_ctx:
+                                _result_messages = _heal_result.get('messages') or _previous_context_messages
+                                _next_context_messages = _restore_reasoning_metadata(
+                                    _previous_context_messages, _result_messages,
+                                )
+                                s.context_messages = _next_context_messages
+                                s.messages = _merge_display_messages_after_agent_result(
+                                    _previous_messages,
+                                    _previous_context_messages,
+                                    _restore_reasoning_metadata(_previous_messages, _result_messages),
+                                    msg_text,
+                                )
+                                s.save()
+                        logger.info('[webui] self-heal (except path): retry succeeded')
+                        return  # skip error emission
+                    except Exception as _retry_exc2:
+                        logger.warning('[webui] self-heal (except path): retry failed: %s', _retry_exc2)
+                        # Fall through to emit the original error
+            # Self-heal didn't apply or retry failed — emit the auth error
             _exc_label, _exc_type, _exc_hint = (
                 'Authentication error', 'auth_mismatch',
                 'The selected model may not be supported by your configured provider. '

@@ -559,6 +559,7 @@
   /* Terminal flyout reserves transcript space so recent messages stay readable above it. */
   .messages.terminal-open{padding-bottom:var(--terminal-card-height,320px);scroll-padding-bottom:var(--terminal-card-height,320px);transition:padding-bottom .26s cubic-bezier(.2,.8,.2,1);}
   .messages.terminal-collapsed{padding-bottom:var(--terminal-dock-height,72px);scroll-padding-bottom:var(--terminal-dock-height,72px);transition:padding-bottom .22s cubic-bezier(.2,.8,.2,1);}
+  .messages.handoff-dock-visible{padding-bottom:var(--handoff-dock-height,72px);scroll-padding-bottom:var(--handoff-dock-height,72px);transition:padding-bottom .22s cubic-bezier(.2,.8,.2,1);}
   .messages.terminal-expanding-from-dock{transition:none!important;}
   .queue-card-inner{background:var(--surface);border:1px solid var(--border);border-bottom:none;border-radius:14px 14px 0 0;contain:paint;transform:translateY(100%);opacity:0;transition:transform .35s cubic-bezier(.32,.72,.16,1),opacity .2s ease;overflow:hidden;max-height:240px;overflow-y:auto;padding-bottom:4px;}
   .queue-card.visible .queue-card-inner{transform:translateY(0);opacity:1;}
@@ -735,6 +736,8 @@
   .msg-body pre code{background:none;padding:0;border-radius:0;color:var(--pre-text);font-size:13px;line-height:1.6;}
   /* Keep original theme background — prevent prism-tomorrow from overriding --code-bg */
   .msg-body pre[class*="language-"],.msg-body pre code[class*="language-"]{background:var(--code-bg) !important;}
+  /* Fix #1463: Prism YAML grammar collapses newlines inside token spans — force pre */
+  .msg-body pre code.language-yaml .token{white-space:pre !important;}
   .pre-header{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:8px 16px 8px;background:var(--input-bg);border-radius:10px 10px 0 0;border:1px solid var(--border);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;}
   .pre-header::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--muted);opacity:.4;}
   .pre-header+pre{border-radius:0 0 10px 10px;border-top:none;margin-top:0;}
@@ -1035,6 +1038,21 @@
   .composer-terminal-dock[hidden]{display:none!important;}
   .composer-terminal-dock-title{min-width:0;display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;}
   .composer-terminal-dock-dot{width:7px;height:7px;border-radius:999px;background:var(--success);box-shadow:0 0 0 3px color-mix(in srgb,var(--success) 16%,transparent);flex:0 0 auto;}
+
+  /* ── Handoff hint bar ── */
+  .handoff-hint-container{position:absolute;left:0;right:0;bottom:-2px;width:min(calc(100% - 112px),560px);margin:0 auto;box-sizing:border-box;overflow:visible;pointer-events:none;z-index:3;}
+  .handoff-hint-container.is-visible{pointer-events:auto;}
+  .handoff-hint-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:42px;border:1px solid var(--border);border-bottom:none;border-radius:13px 13px 0 0;background:color-mix(in srgb,var(--surface) 86%,transparent);box-shadow:0 8px 22px rgba(0,0,0,.16);backdrop-filter:blur(10px);padding:7px 12px 9px;cursor:pointer;transform:translateY(100%);opacity:0;transition:transform .32s cubic-bezier(.32,.72,.16,1),opacity .2s ease,background .15s ease,border-color .15s ease;}
+  .handoff-hint-container.is-visible .handoff-hint-bar{transform:translateY(0);opacity:.94;}
+  .handoff-hint-bar:hover{background:color-mix(in srgb,var(--surface) 92%,transparent);border-color:color-mix(in srgb,var(--border) 70%,var(--accent));}
+  .handoff-hint-bar[hidden]{display:none!important;}
+  .handoff-hint-text{min-width:0;display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;font-weight:700;line-height:1.2;letter-spacing:.02em;text-transform:uppercase;}
+  .handoff-hint-dot{width:7px;height:7px;border-radius:999px;background:var(--success);box-shadow:0 0 0 3px color-mix(in srgb,var(--success) 16%,transparent);flex:0 0 auto;}
+  .handoff-hint-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);text-transform:none;letter-spacing:0;font-weight:700;font-size:12px;}
+  .handoff-hint-meta{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);text-transform:none;letter-spacing:0;font-weight:600;font-size:12px;}
+  .handoff-hint-actions{display:flex;align-items:center;gap:8px;flex:0 0 auto;}
+  .handoff-hint-action,.handoff-hint-dismiss{border:none;background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:700;line-height:1.2;padding:4px 6px;border-radius:8px;cursor:pointer;transition:background .15s ease,color .15s ease;}
+  .handoff-hint-action:hover,.handoff-hint-dismiss:hover{background:color-mix(in srgb,var(--muted) 12%,transparent);color:var(--text);}
   #terminalDockWorkspaceLabel{min-width:0;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);text-transform:none;letter-spacing:0;font-weight:600;}
   .composer-terminal-resize-handle{height:12px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;cursor:ns-resize;touch-action:none;background:linear-gradient(to bottom,rgba(255,255,255,.04),transparent);}
   .composer-terminal-resize-handle::before{content:"";width:52px;height:4px;border-radius:999px;background:var(--border2);opacity:.72;transition:opacity .15s,background .15s;}
@@ -1128,6 +1146,8 @@
   .preview-md pre code{background:none;padding:0;color:var(--pre-text);font-size:11.5px;line-height:1.55;}
   /* Keep original theme background — prevent prism-tomorrow from overriding --code-bg */
   .preview-md pre[class*="language-"],.preview-md pre code[class*="language-"]{background:var(--code-bg) !important;}
+  /* Fix #1463: Prism YAML grammar collapses newlines inside token spans — force pre */
+  .preview-md pre code.language-yaml .token{white-space:pre !important;}
   .preview-md blockquote{border-left:3px solid var(--blue);padding-left:12px;color:var(--muted);font-style:italic;margin:8px 0;}
   .preview-md blockquote p{margin:0;}
   .preview-md strong{color:var(--strong);font-weight:600;}.preview-md em{color:var(--em);}
@@ -1314,6 +1334,7 @@
     .ctx-tooltip{right:-4px;min-width:190px;max-width:220px;}
     .composer-terminal-panel{width:calc(100% - 20px);}
     .composer-terminal-panel.is-collapsed{bottom:-1px;width:calc(100% - 28px);}
+    .handoff-hint-container{bottom:-2px;width:calc(100% - 28px);}
     .composer-terminal-inner{height:var(--composer-terminal-height,190px);min-height:140px;max-height:min(300px,44vh);border-radius:12px;padding-bottom:28px;}
     .composer-terminal-dock{min-height:40px;padding:6px 7px 6px 10px;border-radius:12px;gap:8px;}
     .composer-terminal-dock-title{font-size:11px;}
@@ -1413,6 +1434,13 @@
 .ws-divider{height:1px;background:var(--border);margin:4px 0;}
 .ws-manage{color:var(--muted);font-size:12px;}
 .ws-opt-action{display:flex;flex-direction:row;align-items:center;gap:8px;}
+.ws-search-row{display:flex;align-items:center;gap:6px;padding:8px 10px 10px;}
+.ws-search-input{flex:1;background:var(--code-bg);border:1px solid var(--border2);border-radius:6px;color:var(--text);padding:6px 8px;font-size:12px;outline:none;font-family:inherit;min-width:0;}
+.ws-search-input:focus{border-color:var(--accent);}
+.ws-search-clear{flex-shrink:0;width:22px;height:22px;border:1px solid var(--border2);border-radius:50%;background:transparent;color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:color .12s,border-color .12s;font-size:10px;}
+.ws-search-clear:hover{color:var(--text);border-color:var(--border);}
+.ws-list-container{overflow-y:auto;max-height:260px;}
+.ws-no-results{padding:12px 14px;text-align:center;color:var(--muted);font-size:12px;}
 .ws-opt-icon{display:inline-flex;align-items:center;justify-content:center;opacity:.82;flex-shrink:0;}
 .ws-opt-meta{font-size:11px;color:var(--muted);}
 /* ── Workspace management panel ── */
@@ -1691,7 +1719,8 @@ body.resizing{user-select:none;cursor:col-resize;}
 .tool-call-group-summary:hover{background:var(--surface-subtle-hover);color:var(--text);}
 .tool-call-group-label{font-weight:600;color:var(--muted);}
 .tool-call-group-list{opacity:.72;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.tool-call-group-count{margin-left:auto;opacity:.56;font-variant-numeric:tabular-nums;}
+.tool-call-group-duration{margin-left:auto;opacity:.62;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.tool-call-group-count{opacity:.56;font-variant-numeric:tabular-nums;}
 .tool-call-group-chevron{opacity:.45;display:inline-flex;transition:transform .16s ease;}
 .tool-call-group:not(.tool-call-group-collapsed) .tool-call-group-chevron{transform:rotate(90deg);}
 .tool-call-group-body{display:block;padding-left:var(--space-3);}
@@ -1779,6 +1808,52 @@ body.resizing{user-select:none;cursor:col-resize;}
 }
 .tool-card-compress-reference .tool-card-name{
   color:var(--blue);
+}
+.tool-card-handoff-summary{
+  background:rgba(124,185,255,.04);
+  border-color:rgba(124,185,255,.18);
+}
+.tool-card-handoff-summary .tool-card-name{
+  color:var(--blue);
+}
+.tool-card-handoff-summary .tool-card-preview{
+  margin-left:10px;
+}
+.handoff-summary-fallback-note{
+  margin:10px 0 0;
+  color:var(--muted);
+  font-size:11px;
+  line-height:1.5;
+  font-style:normal;
+}
+.handoff-summary-body{
+  color:var(--text);
+  font-size:var(--font-size-sm);
+  line-height:1.65;
+}
+.handoff-summary-body p{
+  margin:0 0 8px;
+}
+.handoff-summary-body p:last-child{
+  margin-bottom:0;
+}
+.handoff-summary-body ul,
+.handoff-summary-body ol{
+  margin:4px 0 4px 20px;
+}
+.handoff-summary-body li{
+  margin:3px 0;
+}
+.handoff-summary-body strong{
+  color:var(--strong);
+}
+.handoff-summary-body code{
+  font-family:'SF Mono',ui-monospace,monospace;
+  font-size:.92em;
+  background:var(--code-inline-bg);
+  color:var(--code-text);
+  padding:1px 5px;
+  border-radius:4px;
 }
 
 .compression-row{
@@ -2427,6 +2502,16 @@ main.main.showing-profiles > #mainProfiles{display:flex;}
   line-height:1.5;
   user-select:all;
 }
+/* "+N more" disclosure pill — appended when a provider's catalog is trimmed
+   for UI scannability (#1567 — Nous Portal large-tier accounts ship 100s of
+   models). Visually distinct from a real model tag so users don't think it's
+   a model id; muted dashed border, italic, no user-select. */
+.provider-card-model-tag-more{
+  font-style:italic;
+  border-style:dashed;
+  user-select:none;
+  cursor:help;
+}
 
 /* ── Session pin indicator (inline, only when pinned) ── */
 .session-pin-indicator{
@@ -2694,11 +2779,13 @@ main.main.showing-profiles > #mainProfiles{display:flex;}
   justify-content: flex-start;
   gap: 8px;
 }
-.msg-usage-inline {
+.msg-usage-inline,
+.msg-duration-inline {
   font-size: 11px;
   color: var(--muted);
   opacity: .7;
   flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
 }
 .msg-foot-with-usage .msg-time,
 .msg-foot-with-usage .msg-actions {

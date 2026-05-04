@@ -1647,13 +1647,63 @@ function _positionProfileDropdown(){
 function renderWorkspaceDropdownInto(dd, workspaces, currentWs){
   if(!dd)return;
   dd.innerHTML='';
-  for(const w of workspaces){
-    const opt=document.createElement('div');
-    opt.className='ws-opt'+(w.path===currentWs?' active':'');
-    opt.innerHTML=`<span class="ws-opt-name">${esc(w.name)}</span><span class="ws-opt-path">${esc(w.path)}</span>`;
-    opt.onclick=()=>switchToWorkspace(w.path,w.name);
-    dd.appendChild(opt);
+
+  // ── Search row ──────────────────────────────────────────────────────────
+  const searchRow=document.createElement('div');
+  searchRow.className='ws-search-row';
+  searchRow.innerHTML=`<input class="ws-search-input" type="text" placeholder="${esc(t('ws_search_placeholder')||'Search workspaces…')}" spellcheck="false" autocomplete="off"><button class="ws-search-clear" title="Clear search">${li('x',10)}</button>`;
+  const si=searchRow.querySelector('.ws-search-input');
+  const sc=searchRow.querySelector('.ws-search-clear');
+  dd.appendChild(searchRow);
+
+  // ── Workspace list ──────────────────────────────────────────────────────
+  // Sort alphabetically by name (case-insensitive) before rendering.
+  const sorted=[...workspaces].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const listContainer=document.createElement('div');
+  listContainer.className='ws-list-container';
+  dd.appendChild(listContainer);
+
+  // Pre-create noResults element so filterWs can reference it safely from the start.
+  const noResults=document.createElement('div');
+  noResults.className='ws-no-results';
+  noResults.textContent=t('ws_no_results')||'No workspaces found';
+  noResults.style.display='none';
+
+  function filterWs(term){
+    term=(term||'').trim().toLowerCase();
+    let visible=0;
+    const opts=listContainer.querySelectorAll('.ws-opt');
+    for(const opt of opts){
+      const name=(opt.dataset.name||'').toLowerCase();
+      const path=(opt.dataset.path||'').toLowerCase();
+      const show=!term||name.includes(term)||path.includes(term);
+      opt.style.display=show?'':'none';
+      if(show) visible++;
+    }
+    noResults.style.display=visible?'none':'';
   }
+
+  function renderList(){
+    listContainer.innerHTML='';
+    for(const w of sorted){
+      const opt=document.createElement('div');
+      opt.className='ws-opt'+(w.path===currentWs?' active':'');
+      opt.dataset.name=w.name||'';
+      opt.dataset.path=w.path||'';
+      opt.innerHTML=`<span class="ws-opt-name">${esc(w.name)}</span><span class="ws-opt-path">${esc(w.path)}</span>`;
+      opt.onclick=()=>switchToWorkspace(w.path,w.name);
+      listContainer.appendChild(opt);
+    }
+    listContainer.appendChild(noResults);
+  }
+
+  renderList();
+  filterWs('');
+
+  si.addEventListener('input',()=>{ filterWs(si.value); });
+  sc.addEventListener('click',()=>{ si.value=''; filterWs(''); si.focus(); });
+
+  // ── Footer actions ────────────────────────────────────────────────────────
   dd.appendChild(document.createElement('div')).className='ws-divider';
   dd.appendChild(_renderWorkspaceAction(
     t('workspace_choose_path'),
@@ -2966,7 +3016,12 @@ function _schedulePreferencesAutosave(){
 
 async function _autosavePreferencesSettings(payload){
   try{
-    await api('/api/settings',{method:'POST',body:JSON.stringify(payload)});
+    const saved=await api('/api/settings',{method:'POST',body:JSON.stringify(payload)});
+    if(payload&&payload.simplified_tool_calling!==undefined){
+      window._simplifiedToolCalling=(saved&&saved.simplified_tool_calling!==false);
+      if(typeof clearMessageRenderCache==='function') clearMessageRenderCache();
+      if(typeof renderMessages==='function') renderMessages();
+    }
     _settingsPreferencesAutosaveRetryPayload=null;
     _setPreferencesAutosaveStatus('saved');
     // Only clear the global dirty flag and hide the unsaved-changes bar when
@@ -3197,11 +3252,33 @@ async function loadSettingsPanel(){
     // Password field: always blank (we don't send hash back)
     const pwField=$('settingsPassword');
     if(pwField){pwField.value='';pwField.addEventListener('input',_markSettingsDirty,{once:false});}
+    // #1560: when HERMES_WEBUI_PASSWORD env var is set, the settings password
+    // field silently no-ops. Disable it + reveal the lock banner so the UI
+    // tells the truth before a user tries (and the backend now also returns
+    // 409 as defense-in-depth).
+    const pwEnvLocked=!!settings.password_env_var;
+    const pwLockBanner=$('settingsPasswordEnvLock');
+    if(pwField){
+      pwField.disabled=pwEnvLocked;
+      if(pwEnvLocked){
+        pwField.value='';
+        pwField.placeholder=t('password_env_var_locked_placeholder')||pwField.placeholder;
+      }
+    }
+    if(pwLockBanner) pwLockBanner.style.display=pwEnvLocked?'block':'none';
     // Show auth buttons only when auth is active
     try{
       const authStatus=await api('/api/auth/status');
       _setSettingsAuthButtonsVisible(!!authStatus.auth_enabled);
     }catch(e){}
+    // #1560: env-var-locked password also disables the Disable Auth button —
+    // clearing settings.password_hash is silent no-op when the env var is set,
+    // and the backend now returns 409 anyway, so don't offer the action.
+    // Sign Out remains available since it only clears the session cookie.
+    if(pwEnvLocked){
+      const disableBtn=$('btnDisableAuth');
+      if(disableBtn) disableBtn.style.display='none';
+    }
     _syncHermesPanelSessionActions();
     loadProvidersPanel(); // load provider cards in background
     switchSettingsSection(_settingsSection);
@@ -3649,7 +3726,13 @@ function _buildProviderCard(p){
   // Use the is_oauth flag from the backend — it reflects _OAUTH_PROVIDERS in providers.py.
   // key_source can be 'oauth' (hermes auth), 'config_yaml' (token in config.yaml), or 'none'.
   const isOauth=p.is_oauth===true;
-  const modelCount=Array.isArray(p.models)?p.models.length:0;
+  // models_total reflects the complete catalog (e.g. 396 for a large-tier
+  // Nous Portal account). The "models" array may be trimmed to a featured
+  // subset for UI scannability — fall back to its length only when the
+  // server didn't supply models_total (older builds, custom providers).
+  const modelCount=Number.isFinite(p.models_total)
+    ? p.models_total
+    : (Array.isArray(p.models) ? p.models.length : 0);
   const sourceLabel=p.key_source==='oauth'
     ? t('providers_status_oauth')
     : p.key_source==='config_yaml'
@@ -3764,11 +3847,27 @@ function _buildProviderCard(p){
     modelSection.appendChild(modelLabel);
     const modelList=document.createElement('div');
     modelList.className='provider-card-model-tags';
-    for(const m of p.models){
+    const renderedModels=Array.isArray(p.models)?p.models:[];
+    for(const m of renderedModels){
       const tag=document.createElement('span');
       tag.className='provider-card-model-tag';
       tag.textContent=m.id||m.label||m;
       modelList.appendChild(tag);
+    }
+    // When the rendered list is a strict subset of the total catalog (Nous
+    // Portal large-tier accounts hit this with ~400-model catalogs), show
+    // a "+N more" trailing pill so the user knows the picker is intentionally
+    // capped — and they can still reach the full catalog via the /model
+    // slash command (its autocomplete consumes the un-trimmed list from
+    // /api/models's extra_models field). #1567.
+    const totalCount=Number.isFinite(p.models_total)?p.models_total:renderedModels.length;
+    const hiddenCount=Math.max(0, totalCount - renderedModels.length);
+    if(hiddenCount>0){
+      const more=document.createElement('span');
+      more.className='provider-card-model-tag provider-card-model-tag-more';
+      more.textContent='+'+hiddenCount+' more';
+      more.title='The /model slash command can autocomplete every model in this provider\'s catalog.';
+      modelList.appendChild(more);
     }
     modelSection.appendChild(modelList);
     body.appendChild(modelSection);
@@ -3816,6 +3915,11 @@ async function _saveProviderKey(providerId){
     if(res.ok){
       showToast(res.provider+' key '+res.action);
       els.input.value='';
+      // Invalidate every dropdown surface that caches /api/models so the
+      // newly-configured provider's models show up without a server restart
+      // or page reload (#1539). Server-side invalidate_models_cache() is
+      // already called by api/providers.py:set_provider_key.
+      _refreshModelDropdownsAfterProviderChange();
       await loadProvidersPanel(); // refresh list
     }else{
       showToast(res.error||'Failed to save key');
@@ -3837,6 +3941,12 @@ async function _removeProviderKey(providerId){
     const res=await api('/api/providers/delete',{method:'POST',body:JSON.stringify({provider:providerId})});
     if(res.ok){
       showToast(res.provider+' key '+t('providers_key_removed').toLowerCase());
+      // Drop the removed provider from every cached dropdown surface so it
+      // disappears immediately — composer picker, /model slash command,
+      // Settings → Default Model, configured-model badges (#1539).
+      // Without this, a stale list from before the delete keeps offering
+      // the now-removed provider's models until the page is reloaded.
+      _refreshModelDropdownsAfterProviderChange();
       await loadProvidersPanel(); // refresh list
     }else{
       showToast(res.error||'Failed to remove key');
@@ -3845,6 +3955,28 @@ async function _removeProviderKey(providerId){
   }catch(e){
     showToast('Error: '+e.message);
     if(els.saveBtn){els.saveBtn.disabled=false;els.saveBtn.textContent=t('providers_save');}
+  }
+}
+
+// Shared dropdown-cache flush invoked after a provider add/remove. The
+// server-side TTL cache is already invalidated by /api/providers and
+// /api/providers/delete (via api/providers.py:set_provider_key); this
+// flushes the JS-side caches so the next render rebuilds from a fresh
+// /api/models response. Wrapped in a try/catch so a UI module that hasn't
+// loaded yet (e.g. during early Settings open) cannot break the save flow.
+function _refreshModelDropdownsAfterProviderChange(){
+  try{
+    if(typeof window._invalidateSlashModelCache==='function'){
+      window._invalidateSlashModelCache();
+    }
+    if(typeof populateModelDropdown==='function'){
+      // Fire-and-forget: don't block the providers panel refresh on a
+      // dropdown rebuild. The composer/Settings dropdowns will catch up
+      // on the very next paint frame.
+      Promise.resolve(populateModelDropdown()).catch(()=>{});
+    }
+  }catch(_e){
+    // Swallow — dropdown refresh is best-effort, providers panel must still update.
   }
 }
 
@@ -4259,12 +4391,37 @@ async function deleteMcpServer(name){
       else{showToast((r&&r.error)||t('mcp_delete_failed'));}
     }).catch(()=>{showToast(t('mcp_delete_failed'));});
 }
+function loadGatewayStatus(){
+  const card=$('gatewayStatusCard');
+  if(!card) return;
+  api('/api/gateway/status').then(r=>{
+    if(!r) return;
+    if(!r.running){
+      card.innerHTML=`<div style="color:var(--muted);font-size:12px;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block"></span>Gateway not running</div>`;
+      return;
+    }
+    const platformIcons={telegram:'💬',discord:'🎮',slack:'📝',web:'🌐',api:'🔌'};
+    let badges='';
+    if(r.platforms&&r.platforms.length){
+      badges=r.platforms.map(p=>{
+        const icon=platformIcons[p.name]||'📡';
+        return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:var(--code-bg);border:1px solid var(--border2);border-radius:12px;font-size:12px;font-weight:500">${icon} ${esc(p.label)}</span>`;
+      }).join(' ');
+    }
+    const lastActive=r.last_active?`<span style="font-size:11px;color:var(--muted)">Last active: ${esc(new Date(r.last_active).toLocaleString())}</span>`:'';
+    const sessionInfo=r.session_count?`<span style="font-size:11px;color:var(--muted)">${r.session_count} session${r.session_count!==1?'s':''}</span>`:'';
+    card.innerHTML=`<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><span style="width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block"></span><span style="font-size:13px;font-weight:500;color:#22c55e">Running</span></div>${badges?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">${badges}</div>`:''}<div style="display:flex;gap:12px">${sessionInfo}${lastActive}</div>`;
+  }).catch(()=>{card.innerHTML=`<div style="color:#ef4444;font-size:12px">Failed to load gateway status</div>`});
+}
 // Load MCP servers when system settings tab opens
 const _origSwitchSettings=switchSettingsSection;
 switchSettingsSection=function(name){
   _origSwitchSettings(name);
   const section=_currentSettingsSection;
-  if(section==='system') loadMcpServers();
+  if(section==='system'){
+    loadMcpServers();
+    loadGatewayStatus();
+  }
   if(section==='codex') loadCodexSettingsPanel({preserveEditor:false});
   if(section==='maintenance') loadSettingsMaintenancePanel(false);
 };

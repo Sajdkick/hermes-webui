@@ -370,6 +370,17 @@ async function populateModelDropdown(){
         og.appendChild(opt);
         _dynamicModelLabels[m.id]=m.label;
       }
+      // Hydrate the label map from extra_models too (the catalog tail that
+      // doesn't render as <option> entries when the picker is capped — see
+      // _build_nous_featured_set in api/config.py for the rationale). This
+      // keeps a model selected from the slash-command autocomplete or a
+      // persisted-localStorage value renderable with its proper label
+      // instead of falling back to the bare ID. #1567.
+      if(Array.isArray(g.extra_models)){
+        for(const m of g.extra_models){
+          if(m && m.id) _dynamicModelLabels[m.id]=m.label||m.id;
+        }
+      }
       sel.appendChild(og);
     }
     // Set default model from server if no localStorage preference
@@ -1198,6 +1209,17 @@ let _programmaticScroll=false;
   });
 })();
 function _fmtTokens(n){if(!n||n<0)return'0';if(n>=1e6)return(n/1e6).toFixed(1)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'k';return String(n);}
+function _formatTurnDuration(seconds){
+  const n=Number(seconds);
+  if(!Number.isFinite(n)||n<0)return'';
+  const total=Math.max(0,Math.round(n));
+  if(total<60)return`${total}s`;
+  const h=Math.floor(total/3600);
+  const m=Math.floor((total%3600)/60);
+  const s=total%60;
+  if(h)return`${h}h ${m}m`;
+  return`${m}m ${s}s`;
+}
 
 const _MOBILE_CONFIG_BASE_LABEL='Workspace, model, reasoning, and context settings';
 
@@ -2832,6 +2854,26 @@ function _showUpdateBanner(data){
   const banner=$('updateBanner');
   if(banner) banner.classList.add('visible');
   window._updateData=data;
+  // Wire up "What's new?" link.
+  //
+  // Reset display:none + clear the href on every render — otherwise a stale
+  // link from a prior update banner can stay visible after we've moved past
+  // a state where the new payload no longer carries usable SHAs (#1579 case
+  // when the local HEAD diverges from upstream and the compare URL would 404).
+  const link=$('updateWhatsNew');
+  if(link){
+    link.style.display='none';
+    link.removeAttribute('href');
+    if(data.webui){
+      const repoUrl=data.webui.repo_url;
+      const curSha=data.webui.current_sha;
+      const newSha=data.webui.latest_sha;
+      if(repoUrl && curSha && newSha){
+        link.href=repoUrl+'/compare/'+curSha+'...'+newSha;
+        link.style.display='inline';
+      }
+    }
+  }
 }
 function dismissUpdate(){
   const b=$('updateBanner');if(b)b.classList.remove('visible');
@@ -3174,7 +3216,7 @@ function ensureActivityGroup(inner, opts){
     group.setAttribute('data-tool-call-group','1');
     group.setAttribute('data-agent-activity-group','1');
     if(live) group.setAttribute('data-live-tool-call-group','1');
-    group.innerHTML=`<button type="button" class="tool-call-group-summary" aria-expanded="${collapsed?'false':'true'}" onclick="const g=this.closest('.tool-call-group');const c=g.classList.toggle('tool-call-group-collapsed');this.setAttribute('aria-expanded',String(!c));if(typeof _onLiveActivityToggle==='function')_onLiveActivityToggle(g);"><span class="tool-call-group-chevron">${li('chevron-right',12)}</span><span class="tool-call-group-label">Activity</span><span class="tool-call-group-list">tools / thinking</span><span class="tool-call-group-count">0</span></button><div class="tool-call-group-body"></div>`;
+    group.innerHTML=`<button type="button" class="tool-call-group-summary" aria-expanded="${collapsed?'false':'true'}" onclick="const g=this.closest('.tool-call-group');const c=g.classList.toggle('tool-call-group-collapsed');this.setAttribute('aria-expanded',String(!c));if(typeof _onLiveActivityToggle==='function')_onLiveActivityToggle(g);"><span class="tool-call-group-chevron">${li('chevron-right',12)}</span><span class="tool-call-group-label">Activity</span><span class="tool-call-group-list">tools / thinking</span><span class="tool-call-group-duration"></span><span class="tool-call-group-count">0</span></button><div class="tool-call-group-body"></div>`;
     const anchor=opts.anchor||null;
     if(anchor&&anchor.parentElement===inner) anchor.insertAdjacentElement('afterend', group);
     else inner.appendChild(group);
@@ -3290,6 +3332,48 @@ function _compressionCardsNode(state){
   wrap.className='compression-turn';
   wrap.innerHTML=`<div class="compression-turn-blocks">${_compressionCardsHtml(state)}</div>`;
   return wrap;
+}
+function _isHandoffSummaryToolPayload(value){
+  if(!value||typeof value!=='object'||Array.isArray(value)) return false;
+  return value._handoff_summary_card === true;
+}
+function _parseHandoffSummaryPayload(content){
+  if(!content) return null;
+  if(typeof content==='object' && !Array.isArray(content)) return _isHandoffSummaryToolPayload(content)?content:null;
+  if(typeof content!=='string') return null;
+  try {
+    const parsed=JSON.parse(content);
+    return _isHandoffSummaryToolPayload(parsed)?parsed:null;
+  } catch (e) {
+    return null;
+  }
+}
+function _handoffSummaryStateFromMessage(m){
+  if(!m||m.role!=='tool') return null;
+  const payload = _parseHandoffSummaryPayload(m.content);
+  if(!payload) return null;
+  if(String(payload.session_id||'') && S.session && String(m.session_id||'') && String(payload.session_id)!==String(S.session.session_id||'')) {
+    return null;
+  }
+  const summary = String(payload.summary||'').trim();
+  if(!summary) return null;
+  return {
+    phase: 'done',
+    channel: payload.channel || null,
+    rounds: Number.isFinite(payload.rounds)?payload.rounds:null,
+    summary,
+    fallback: !!payload.fallback,
+    generatedAt: Number(payload.generated_at) || null,
+  };
+}
+function _collectHandoffSummaryStates(messages){
+  const states=[];
+  if(!Array.isArray(messages)) return states;
+  for(let i=0;i<messages.length;i++){
+    const state=_handoffSummaryStateFromMessage(messages[i]);
+    if(state) states.push({state, rawIdx:i});
+  }
+  return states;
 }
 function _isContextCompactionMessage(m){
   if(!m||!m.role||m.role==='tool') return false;
@@ -3425,6 +3509,73 @@ function _compressionStatusCardHtml({
       ${bodyHtml}
     </div>`;
 }
+function _handoffStateForCurrentSession(){
+  const state=window._handoffUi;
+  if(!state||!S.session||state.sessionId!==S.session.session_id) return null;
+  return state;
+}
+function clearHandoffUi(){
+  window._handoffUi=null;
+  renderMessages();
+}
+function setHandoffUi(state){
+  if(!state){
+    clearHandoffUi();
+    return;
+  }
+  window._handoffUi={...state};
+  renderMessages();
+}
+function _handoffCardsHtml(state){
+  if(!state) return '';
+  const channel=String(state.channel||'').trim();
+  const label=channel?`${channel} handoff summary`:'Handoff summary';
+  const isError=state.phase==='error';
+  const isDone=state.phase==='done';
+  const isFallback=!!state.fallback;
+  const detail=isError
+    ? String(state.errorText||'Could not generate summary. Please try again.')
+    : isDone
+      ? String(state.summary||'')
+      : 'Generating handoff summary...';
+  const meta=typeof state.rounds==='number'
+    ? `${state.rounds} external conversation rounds`
+    : '';
+  const icon=isError
+    ? li('x',13)
+    : isDone
+      ? li('check',13)
+      : '<span class="tool-card-running-dot"></span>';
+  const bodyHtml=isDone&&!isError
+    ? (
+      `${renderMd(detail)}${
+        isFallback
+          ? '<p class="handoff-summary-fallback-note">Fallback summary generated from recent turns; no model-based rewrite was used.</p>'
+          : ''
+      }`
+    )
+    : `<p>${esc(detail)}</p>`;
+  return `
+    <div class="tool-card-row compression-card-row handoff-card-row" data-compression-card="1" data-handoff-card="1">
+      <div class="tool-card tool-card-handoff-summary${isError?' tool-card-compress-error':''} open">
+        <div class="tool-card-header" onclick="this.closest('.tool-card').classList.toggle('open')">
+          ${icon}
+          <span class="tool-card-name">${esc(label)}</span>
+          ${meta?`<span class="tool-card-preview">${esc(meta)}</span>`:''}
+          <span class="tool-card-toggle">${li('chevron-right',12)}</span>
+        </div>
+        <div class="tool-card-detail">
+          <div class="tool-card-result handoff-summary-body">${bodyHtml}</div>
+        </div>
+      </div>
+    </div>`;
+}
+function _handoffCardsNode(state){
+  const wrap=document.createElement('div');
+  wrap.className='compression-turn handoff-turn';
+  wrap.innerHTML=`<div class="compression-turn-blocks">${_handoffCardsHtml(state)}</div>`;
+  return wrap;
+}
 function _contextCompactionMessageHtml(m, tsTitle='', preservedMessages=[]){
   const text=msgContent(m)||String(m.content||'');
   return `<div class="compression-turn"><div class="compression-turn-blocks">${_compressionReferenceCardHtml(text, false, tsTitle)}${_preservedCompressionTaskListCardsHtml(preservedMessages)}</div></div>`;
@@ -3455,13 +3606,20 @@ function renderMessages(){
   const inner=$('msgInner');
   const sid=S.session?S.session.session_id:null;
   const msgCount=S.messages.length;
+  const hasTransientTranscriptUi=!!(
+    (window._compressionUi&&(!window._compressionUi.sessionId||window._compressionUi.sessionId===sid)) ||
+    (window._handoffUi&&(!window._handoffUi.sessionId||window._handoffUi.sessionId===sid))
+  );
 
   // Fast path: switching back to a previously rendered session with same count.
   // Guard: sid !== _sessionHtmlCacheSid ensures in-session updates (edits,
   // new messages, tool_complete) always get a fresh rebuild.
   // Skip cache if this session is still streaming — the live smd parser writes
   // into a DOM node inside the cached subtree; serving cached HTML detaches it.
-  if(sid&&sid!==_sessionHtmlCacheSid&&!INFLIGHT[sid]){
+  // Also skip cache for transient transcript cards such as /compress and
+  // cross-channel handoff summaries; otherwise the cached transcript returns
+  // before those cards can be inserted.
+  if(sid&&sid!==_sessionHtmlCacheSid&&!INFLIGHT[sid]&&!hasTransientTranscriptUi){
     const cached=_sessionHtmlCache.get(sid);
     if(cached&&cached.msgCount===msgCount){
       inner.innerHTML=cached.html;
@@ -3477,6 +3635,8 @@ function renderMessages(){
 
   const compressionState=_compressionStateForCurrentSession();
   if(window._compressionUi && !compressionState) clearCompressionUi();
+  const handoffState=_handoffStateForCurrentSession();
+  if(window._handoffUi && !handoffState) window._handoffUi=null;
   const sessionCompressionAnchor=(
     S.session && typeof S.session.compression_anchor_visible_idx==='number'
   ) ? S.session.compression_anchor_visible_idx : null;
@@ -3699,16 +3859,61 @@ function renderMessages(){
     }
     inner.appendChild(node);
   }
+  function _insertCompressionLikeNodeByRawIdx(node, rawIdx){
+    if(!node) return;
+    if(!visWithIdx.length){
+      inner.appendChild(node);
+      return;
+    }
+    let anchorIdx=null;
+    for(let i=0;i<visWithIdx.length;i++){
+      if(visWithIdx[i].rawIdx > rawIdx){
+        anchorIdx=i;
+        break;
+      }
+    }
+    if(anchorIdx===null){
+      inner.appendChild(node);
+      return;
+    }
+    const anchorRawIdx=visWithIdx[anchorIdx].rawIdx;
+    const anchorSeg=assistantSegments.get(anchorRawIdx);
+    if(anchorSeg){
+      const turn=anchorSeg.closest('.assistant-turn');
+      const blocks=_assistantTurnBlocks(turn);
+      if(blocks){
+        blocks.appendChild(node);
+        return;
+      }
+      const turnParent=turn && turn.parentElement;
+      if(turnParent){
+        turnParent.insertBefore(node, turn);
+        return;
+      }
+    }
+    const userRow=userRows.get(anchorRawIdx);
+    if(userRow && userRow.parentElement){
+      userRow.parentElement.insertBefore(node, userRow);
+      return;
+    }
+    inner.appendChild(node);
+  }
   const preservedOnlyNode=(!preservedCompressionTaskCardsAttached&&(!referenceMessage||compressionState)&&preservedCompressionTaskMessages.length)
     ? (()=>{const row=document.createElement('div');row.innerHTML=`<div class="compression-turn"><div class="compression-turn-blocks">${_preservedCompressionTaskListCardsHtml(preservedCompressionTaskMessages)}</div></div>`;return row.firstElementChild;})()
     : null;
   const preservedOnlyAnchor=preservedCompressionRawIdxs.length
     ? (()=>{let idx=null;for(let i=0;i<visWithIdx.length;i++){if(visWithIdx[i].rawIdx<preservedCompressionRawIdxs[0]) idx=i;}return idx;})()
     : null;
+  const handoffSummaryStates=_collectHandoffSummaryStates(S.messages);
 
   _insertCompressionLikeNode(compressionNode);
   _insertCompressionLikeNode(referenceNode);
   _insertCompressionLikeNode(preservedOnlyNode, preservedOnlyAnchor);
+  _insertCompressionLikeNode(handoffState?_handoffCardsNode(handoffState):null, visWithIdx.length?visWithIdx.length-1:null);
+  for(const entry of handoffSummaryStates){
+    if(!entry||!entry.state) continue;
+    _insertCompressionLikeNodeByRawIdx(_handoffCardsNode(entry.state), entry.rawIdx);
+  }
   renderCompressionUi();
   // Insert settled tool call cards (history view only).
   // During live streaming, tool cards are rendered in #liveToolCards by the
@@ -3807,6 +4012,8 @@ function renderMessages(){
         const anchorParent=anchorRow.parentElement;
         const insertAfterNode = anchorInsertAfter.get(anchorRow) || anchorRow;
         const group=ensureActivityGroup(anchorParent,{collapsed:true,anchor:insertAfterNode});
+        const sourceMsg=S.messages[aIdx]||{};
+        if(sourceMsg._turnDuration!==undefined) group.setAttribute('data-turn-duration', String(sourceMsg._turnDuration));
         const body=group&&group.querySelector('.tool-call-group-body');
         if(!body) continue;
         const thinkingText=assistantThinking.get(aIdx);
@@ -3858,30 +4065,49 @@ function renderMessages(){
       }
     }
   }
-  // Render per-turn token usage on each assistant message that has it (#503).
-  // Replaces the old cumulative-total-on-last-bubble approach.
-  if(window._showTokenUsage){
+  // Render per-turn duration and optional token usage on assistant messages.
+  // Duration stays visible even when token usage is disabled, because it answers
+  // the basic "how long did that turn take?" UX question.
+  {
     const asstRows=inner.querySelectorAll('.assistant-turn');
     let ai=0; // assistant-only index for DOM rows
     for(let mi=0;mi<S.messages.length;mi++){
       const msg=S.messages[mi];
       if(msg.role!=='assistant'){continue;}
-      if(!msg._turnUsage){ai++;continue;}
+      const hasTurnUsage=!!msg._turnUsage;
+      const compactActivityForMessage=isSimplifiedToolCalling()&&(
+        assistantThinking.has(mi)||
+        (S.toolCalls||[]).some(tc=>tc&&(tc.assistant_msg_idx!==undefined?tc.assistant_msg_idx:-1)===mi)
+      );
+      const durationText=compactActivityForMessage?'':_formatTurnDuration(msg._turnDuration);
+      if(!hasTurnUsage&&!durationText){ai++;continue;}
       if(ai>=asstRows.length) continue;
       const row=asstRows[ai];
       const footerRows=row.querySelectorAll('.msg-foot');
       const targetFoot=footerRows.length?footerRows[footerRows.length-1]:null;
-      if(!targetFoot||targetFoot.querySelector('.msg-usage-inline')){ai++;continue;}
-      const usage=document.createElement('span');
-      usage.className='msg-usage-inline';
-      const inTok=msg._turnUsage.input_tokens||0;
-      const outTok=msg._turnUsage.output_tokens||0;
-      const cost=msg._turnUsage.estimated_cost;
-      let text=`${_fmtTokens(inTok)} in · ${_fmtTokens(outTok)} out`;
-      if(cost) text+=` · ~$${cost<0.01?cost.toFixed(4):cost.toFixed(2)}`;
-      usage.textContent=text;
-      targetFoot.classList.add('msg-foot-with-usage');
-      targetFoot.insertBefore(usage, targetFoot.firstChild);
+      if(!targetFoot||targetFoot.querySelector('.msg-usage-inline,.msg-duration-inline')){ai++;continue;}
+      const fragments=[];
+      if(durationText){
+        const duration=document.createElement('span');
+        duration.className='msg-duration-inline';
+        duration.textContent=`Done in ${durationText}`;
+        fragments.push(duration);
+      }
+      if(window._showTokenUsage&&hasTurnUsage){
+        const usage=document.createElement('span');
+        usage.className='msg-usage-inline';
+        const inTok=msg._turnUsage.input_tokens||0;
+        const outTok=msg._turnUsage.output_tokens||0;
+        const cost=msg._turnUsage.estimated_cost;
+        let text=`${_fmtTokens(inTok)} in · ${_fmtTokens(outTok)} out`;
+        if(cost) text+=` · ~$${cost<0.01?cost.toFixed(4):cost.toFixed(2)}`;
+        usage.textContent=text;
+        fragments.push(usage);
+      }
+      if(fragments.length){
+        targetFoot.classList.add('msg-foot-with-usage');
+        for(let i=fragments.length-1;i>=0;i--) targetFoot.insertBefore(fragments[i], targetFoot.firstChild);
+      }
       ai++;
     }
   }
@@ -3904,7 +4130,7 @@ function renderMessages(){
   if(typeof _applyMediaPlaybackPreferences==='function') _applyMediaPlaybackPreferences(inner);
   // Populate session cache so switching back here skips a full rebuild.
   _sessionHtmlCacheSid=sid;
-  if(sid){
+  if(sid&&!hasTransientTranscriptUi){
     const _html=inner.innerHTML;
     // Only cache sessions with <300KB rendered HTML; evict oldest beyond 8 sessions.
     if(_html.length<300_000){
@@ -4002,6 +4228,7 @@ function _syncToolCallGroupSummary(group){
   const label=group.querySelector('.tool-call-group-label');
   const list=group.querySelector('.tool-call-group-list');
   const badge=group.querySelector('.tool-call-group-count');
+  const durationEl=group.querySelector('.tool-call-group-duration');
   const parts=[];
   if(thinkingCount) parts.push('thinking');
   if(uniqueNames.length) parts.push(uniqueNames.slice(0,5).join(', ')+(uniqueNames.length>5?'…':''));
@@ -4013,6 +4240,11 @@ function _syncToolCallGroupSummary(group){
     else label.textContent='Activity';
   }
   if(list) list.textContent=parts.join(' · ')||'tools / thinking';
+  if(durationEl){
+    const durationText=_formatTurnDuration(group.dataset.turnDuration);
+    durationEl.textContent=durationText?`Done in ${durationText}`:'';
+    durationEl.style.display=durationText?'':'none';
+  }
   if(badge) badge.textContent=String(total);
 }
 
@@ -5154,6 +5386,15 @@ function _showFileContextMenu(e, item){
   renameItem.onmouseleave=()=>renameItem.style.background='';
   renameItem.onclick=()=>{menu.remove();_inlineRenameFileItem(item);};
   menu.appendChild(renameItem);
+
+  // Reveal in File Manager
+  const revealItem=document.createElement('div');
+  revealItem.textContent=t('reveal_in_finder');
+  revealItem.style.cssText='padding:7px 14px;cursor:pointer;font-size:13px;color:var(--text);';
+  revealItem.onmouseenter=()=>revealItem.style.background='var(--hover)';
+  revealItem.onmouseleave=()=>revealItem.style.background='';
+  revealItem.onclick=async()=>{menu.remove();try{await api('/api/file/reveal',{method:'POST',body:JSON.stringify({session_id:S.session.session_id,path:item.path})});}catch(err){showToast(t('reveal_failed')+err.message);}};
+  menu.appendChild(revealItem);
 
   // Divider + Delete
   const sep=document.createElement('hr');

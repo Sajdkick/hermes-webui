@@ -120,6 +120,8 @@ const LOCALES = {
     model_search_placeholder: 'Search models…',
     model_search_no_results: 'No models found',
     model_group_configured: 'Configured',
+    ws_search_placeholder: 'Search workspaces…',
+    ws_no_results: 'No workspaces found',
     model_scope_advisory: 'Applies to this conversation from your next message.',
     model_scope_toast: 'Applies to this conversation from your next message.',
     // commands.js
@@ -316,6 +318,8 @@ const LOCALES = {
     rename_prompt: 'New name:',
     deleted: 'Deleted ',
     delete_failed: 'Delete failed: ',
+    reveal_in_finder: 'Reveal in File Manager',
+    reveal_failed: 'Failed to reveal: ',
     new_file_prompt: 'New file name (e.g. notes.md):',
     project_name_prompt: 'Project name:',
     created: 'Created ',
@@ -527,6 +531,8 @@ const LOCALES = {
     settings_desc_bot_name: 'Display name for the assistant throughout the UI. Defaults to Hermes.',
     settings_desc_password: 'Enter a new password to set or change it. Leave blank to keep current setting.',
     password_placeholder: 'Enter new password…',
+    password_env_var_locked: 'The HERMES_WEBUI_PASSWORD environment variable is currently set and takes precedence. Unset it and restart the server to manage the password from here.',
+    password_env_var_locked_placeholder: 'Locked: HERMES_WEBUI_PASSWORD env var is set',
     disable_auth: 'Disable Auth',
     sign_out: 'Sign Out',
     // Providers panel
@@ -1016,6 +1022,8 @@ const LOCALES = {
     model_search_placeholder: 'モデルを検索…',
     model_search_no_results: 'モデルが見つかりません',
     model_group_configured: '設定済み',
+    ws_search_placeholder: 'ワークスペースを検索…',
+    ws_no_results: 'ワークスペースが見つかりません',
     model_scope_advisory: '次回のメッセージからこの会話に適用されます。',
     model_scope_toast: '次回のメッセージからこの会話に適用されます。',
     // commands.js
@@ -1212,6 +1220,8 @@ const LOCALES = {
     rename_prompt: '新しい名前:',
     deleted: '削除しました: ',
     delete_failed: '削除失敗: ',
+    reveal_in_finder: 'ファイルマネージャーで表示',
+    reveal_failed: '表示に失敗しました: ',
     new_file_prompt: '新しいファイル名 (例: notes.md):',
     project_name_prompt: 'プロジェクト名:',
     created: '作成しました: ',
@@ -1423,6 +1433,8 @@ const LOCALES = {
     settings_desc_bot_name: 'UI 全体で表示されるアシスタントの名前。デフォルトは Hermes。',
     settings_desc_password: '新しいパスワードを入力すると設定または変更します。空欄なら現在の設定を維持。',
     password_placeholder: '新しいパスワードを入力…',
+    password_env_var_locked: '現在 HERMES_WEBUI_PASSWORD 環境変数が設定されており優先されます。ここで管理するには変数を解除してサーバーを再起動してください。',
+    password_env_var_locked_placeholder: 'ロック中: HERMES_WEBUI_PASSWORD 環境変数が設定されています',
     disable_auth: '認証を無効化',
     sign_out: 'サインアウト',
     // Providers panel
@@ -1958,6 +1970,8 @@ const LOCALES = {
     focus_label: 'Фокус',
     model_search_no_results: 'Модели не найдены',
     model_group_configured: 'Настроенные',
+    ws_search_placeholder: 'Поиск рабочих пространств…',
+    ws_no_results: 'Рабочие пространства не найдены',
     model_search_placeholder: 'Поиск моделей…',
     model_scope_advisory: 'Применяется к этой беседе со следующего сообщения.',
     session_toolsets: 'Session Toolsets', // TODO: translate
@@ -2031,6 +2045,8 @@ const LOCALES = {
     rename_prompt: 'Новое имя:',
     deleted: 'Удалено ',
     delete_failed: 'Не удалось удалить: ',
+    reveal_in_finder: 'Показать в файловом менеджере',
+    reveal_failed: 'Не удалось открыть: ',
     new_file_prompt: 'Имя нового файла (например, notes.md):',
     project_name_prompt: 'Имя проекта:',
     created: 'Создано ',
@@ -2128,6 +2144,8 @@ const LOCALES = {
     settings_desc_bot_name: 'Отображаемое имя помощника во всём интерфейсе. По умолчанию Hermes.',
     settings_desc_password: 'Введите новый пароль, чтобы задать или изменить его. Оставьте пустым, чтобы сохранить текущую настройку.',
     password_placeholder: 'Введите новый пароль…',
+    password_env_var_locked: 'Переменная окружения HERMES_WEBUI_PASSWORD сейчас задана и имеет приоритет. Сбросьте её и перезапустите сервер, чтобы управлять паролем отсюда.',
+    password_env_var_locked_placeholder: 'Заблокировано: задана переменная HERMES_WEBUI_PASSWORD',
     disable_auth: 'Отключить авторизацию',
     sign_out: 'Выйти',
     // Providers panel (English fallback — native translations welcome in follow-up PRs)
@@ -2724,6 +2742,8 @@ const LOCALES = {
     model_search_placeholder: 'Buscar modelos…',
     model_search_no_results: 'No se encontraron modelos',
     model_group_configured: 'Configurados',
+    ws_search_placeholder: 'Buscar espacios de trabajo…',
+    ws_no_results: 'No se encontraron espacios de trabajo',
     session_toolsets: 'Session Toolsets', // TODO: translate
     session_toolsets_desc: 'Restrict available tools for this session (blank = use global config)', // TODO: translate
     session_toolsets_global: 'Global (default)', // TODO: translate
@@ -2844,6 +2864,8 @@ const LOCALES = {
     rename_prompt: 'Nuevo nombre:',
     deleted: 'Eliminado ',
     delete_failed: 'Error al eliminar: ',
+    reveal_in_finder: 'Mostrar en el gestor de archivos',
+    reveal_failed: 'Error al mostrar: ',
     new_file_prompt: 'Nombre del archivo nuevo (p. ej. notes.md):',
     created: 'Creado ',
     create_failed: 'Error al crear: ',
@@ -2961,6 +2983,8 @@ const LOCALES = {
     settings_desc_bot_name: 'Nombre visible del asistente en toda la UI. Por defecto es Hermes.',
     settings_desc_password: 'Introduce una nueva contraseña para establecerla o cambiarla. Déjalo en blanco para mantener la configuración actual.',
     password_placeholder: 'Introduce una contraseña nueva…',
+    password_env_var_locked: 'La variable de entorno HERMES_WEBUI_PASSWORD está definida y tiene prioridad. Quítala y reinicia el servidor para gestionar la contraseña desde aquí.',
+    password_env_var_locked_placeholder: 'Bloqueado: la variable HERMES_WEBUI_PASSWORD está definida',
     disable_auth: 'Desactivar autenticación',
     sign_out: 'Cerrar sesión',
     // Providers panel (English fallback — native translations welcome in follow-up PRs)
@@ -3666,6 +3690,8 @@ const LOCALES = {
     rename_prompt: 'Neuer Name:',
     deleted: 'Gelöscht ',
     delete_failed: 'Löschen fehlgeschlagen: ',
+    reveal_in_finder: 'Im Dateimanager anzeigen',
+    reveal_failed: 'Anzeige fehlgeschlagen: ',
     new_file_prompt: 'Neuer Dateiname (z.B. notes.md):',
     project_name_prompt: 'Projektname:',
     created: 'Erstellt ',
@@ -3773,6 +3799,8 @@ const LOCALES = {
     settings_desc_bot_name: 'Anzeigename für den Assistenten in der UI. Standardmäßig Hermes.',
     settings_desc_password: 'Geben Sie ein neues Passwort ein, um es zu setzen oder zu ändern. Leer lassen, um die aktuelle Einstellung beizubehalten.',
     password_placeholder: 'Neues Passwort eingeben…',
+    password_env_var_locked: 'Die Umgebungsvariable HERMES_WEBUI_PASSWORD ist gesetzt und hat Vorrang. Entferne sie und starte den Server neu, um das Passwort hier zu verwalten.',
+    password_env_var_locked_placeholder: 'Gesperrt: HERMES_WEBUI_PASSWORD-Umgebungsvariable ist gesetzt',
     disable_auth: 'Authentifizierung deaktivieren',
     sign_out: 'Abmelden',
     // Providers panel (English fallback — native translations welcome in follow-up PRs)
@@ -3949,6 +3977,8 @@ const LOCALES = {
     model_search_placeholder: 'Modelle suchen…',
     model_search_no_results: 'Keine Modelle gefunden',
     model_group_configured: 'Konfiguriert',
+    ws_search_placeholder: 'Arbeitsbereiche suchen…',
+    ws_no_results: 'Keine Arbeitsbereiche gefunden',
     session_toolsets: 'Session Toolsets', // TODO: translate
     session_toolsets_desc: 'Restrict available tools for this session (blank = use global config)', // TODO: translate
     session_toolsets_global: 'Global (default)', // TODO: translate
@@ -4388,6 +4418,8 @@ const LOCALES = {
     model_search_placeholder: '\u641c\u7d22\u6a21\u578b\u2026',
     model_search_no_results: '\u672a\u627e\u5230\u6a21\u578b',
     model_group_configured: '已配置',
+    ws_search_placeholder: '搜索工作区…',
+    ws_no_results: '未找到工作区',
     session_toolsets: 'Session Toolsets', // TODO: translate
     session_toolsets_desc: 'Restrict available tools for this session (blank = use global config)', // TODO: translate
     session_toolsets_global: 'Global (default)', // TODO: translate
@@ -4515,6 +4547,8 @@ const LOCALES = {
     rename_prompt: '新名称:',
     deleted: '\u5df2\u5220\u9664 ',
     delete_failed: '\u5220\u9664\u5931\u8d25\uff1a',
+    reveal_in_finder: '\u5728\u6587\u4ef6\u7ba1\u7406\u5668\u4e2d\u663e\u793a',
+    reveal_failed: '\u663e\u793a\u5931\u8d25\uff1a',
     new_file_prompt: '\u65b0\u6587\u4ef6\u540d\uff08\u4f8b\u5982 notes.md\uff09\uff1a',
     project_name_prompt: '\u9879\u76ee\u540d\u79f0\uff1a',
     created: '\u5df2\u521b\u5efa ',
@@ -4636,6 +4670,8 @@ const LOCALES = {
     providers_key_placeholder_new: 'sk-...',
     providers_key_placeholder_replace: 'Enter new key to replace…',
     password_placeholder: '输入新密码…',
+    password_env_var_locked: '当前已设置 HERMES_WEBUI_PASSWORD 环境变量并具有优先级。请取消该变量并重启服务器，才能在此管理密码。',
+    password_env_var_locked_placeholder: '已锁定：已设置 HERMES_WEBUI_PASSWORD 环境变量',
     disable_auth: '停用认证',
     settings_label_sound: '通知声音',
     settings_label_notifications: '浏览器通知',
@@ -5297,6 +5333,8 @@ const LOCALES = {
     rename_prompt: '新名稱:',
     deleted: '\u5df2\u522a\u9664 ',
     delete_failed: '\u522a\u9664\u5931\u6557\uff1a',
+    reveal_in_finder: '\u5728\u6a94\u6848\u7ba1\u7406\u54e1\u4e2d\u986f\u793a',
+    reveal_failed: '\u986f\u793a\u5931\u6557\uff1a',
     new_file_prompt: '\u65b0\u6587\u4ef6\u540d\uff08\u4f8b\u5982 notes.md\uff09\uff1a',
     created: '\u5df2\u5275\u5efa ',
     create_failed: '\u5275\u5efa\u5931\u6557\uff1a',
@@ -5452,6 +5490,8 @@ const LOCALES = {
     suggest_files: '這個工作區有哪些檔案？',
     sign_out: '\u767b\u51fa',
     password_placeholder: '\u5bc6\u78bc',
+    password_env_var_locked: '\u76ee\u524d\u5df2\u8a2d\u5b9a HERMES_WEBUI_PASSWORD \u74b0\u5883\u8b8a\u6578\u4e14\u512a\u5148\u751f\u6548\u3002\u8acb\u53d6\u6d88\u8a2d\u5b9a\u4e26\u91cd\u65b0\u555f\u52d5\u4f3a\u670d\u5668\uff0c\u624d\u80fd\u5728\u6b64\u7ba1\u7406\u5bc6\u78bc\u3002',
+    password_env_var_locked_placeholder: '\u5df2\u9396\u5b9a\uff1a\u5df2\u8a2d\u5b9a HERMES_WEBUI_PASSWORD \u74b0\u5883\u8b8a\u6578',
     disable_auth: '\u505c\u7528\u9a57\u8b49',
     settings_label_sound: '\u901a\u77e5\u8072\u97f3',
     settings_label_notifications: '\u700f\u89bd\u901a\u77e5',
@@ -5658,6 +5698,8 @@ const LOCALES = {
     model_custom_placeholder: '\u4f8b\u5982 openai/gpt-5.4',
     model_search_no_results: '\u627e\u4e0d\u5230\u6a21\u578b',
     model_group_configured: '已設定',
+    ws_search_placeholder: '搜尋工作區…',
+    ws_no_results: '找不到工作區',
     model_search_placeholder: '\u641c\u5c0b\u6a21\u578b\u2026',
     session_toolsets: 'Session Toolsets', // TODO: translate
     session_toolsets_desc: 'Restrict available tools for this session (blank = use global config)', // TODO: translate
@@ -6137,6 +6179,8 @@ const LOCALES = {
     session_toolsets_failed: 'Failed to update toolsets: ', // TODO: translate
     model_search_no_results: 'Nenhum modelo encontrado',
     model_group_configured: 'Configurados',
+    ws_search_placeholder: 'Buscar espaços de trabalho…',
+    ws_no_results: 'Nenhum espaço de trabalho encontrado',
     // commands.js
     cmd_clear: 'Limpar mensagens da conversa',
     cmd_compress: 'Comprimir manualmente o contexto (uso: /compress [tópico])',
@@ -6299,6 +6343,8 @@ const LOCALES = {
     delete_confirm: (name) => `Excluir ${name}?`,
     deleted: 'Excluído ',
     delete_failed: 'Falha ao excluir: ',
+    reveal_in_finder: 'Mostrar no gerenciador de arquivos',
+    reveal_failed: 'Falha ao mostrar: ',
     new_file_prompt: 'Nome do novo arquivo (ex: notes.md):',
     project_name_prompt: 'Nome do projeto:',
     created: 'Criado ',
@@ -6458,6 +6504,8 @@ const LOCALES = {
     settings_desc_bot_name: 'Nome de exibição do assistente. Padrão: Hermes.',
     settings_desc_password: 'Digite nova senha para definir ou trocar. Deixe em branco para manter.',
     password_placeholder: 'Digite nova senha…',
+    password_env_var_locked: 'A variável de ambiente HERMES_WEBUI_PASSWORD está definida e tem prioridade. Remova-a e reinicie o servidor para gerenciar a senha aqui.',
+    password_env_var_locked_placeholder: 'Bloqueado: variável HERMES_WEBUI_PASSWORD está definida',
     disable_auth: 'Desativar Auth',
     sign_out: 'Sair',
     // Providers panel
@@ -6912,6 +6960,8 @@ const LOCALES = {
     session_toolsets_failed: 'Failed to update toolsets: ', // TODO: translate
     model_search_no_results: 'No models found',
     model_group_configured: '구성됨',
+    ws_search_placeholder: '워크스페이스 검색…',
+    ws_no_results: '워크스페이스를 찾을 수 없습니다',
     model_scope_advisory: '다음 메시지부터 이 대화에 적용됩니다.',
     model_scope_toast: '다음 메시지부터 이 대화에 적용됩니다.',
     // commands.js
@@ -7089,6 +7139,8 @@ const LOCALES = {
     rename_prompt: '새 이름:',
     deleted: '삭제됨: ',
     delete_failed: '삭제 실패: ',
+    reveal_in_finder: '파일 관리자에서 열기',
+    reveal_failed: '표시 실패: ',
     new_file_prompt: 'New file name (e.g. notes.md):',
     project_name_prompt: 'Project name:',
     created: '생성됨: ',
@@ -7260,6 +7312,8 @@ const LOCALES = {
     settings_desc_bot_name: 'UI 전체에 표시되는 Assistant 이름입니다. 기본값은 Hermes입니다.',
     settings_desc_password: '새 비밀번호를 설정하거나 변경하려면 입력하세요. 현재 설정을 유지하려면 비워 두세요.',
     password_placeholder: '새 비밀번호 입력…',
+    password_env_var_locked: '현재 HERMES_WEBUI_PASSWORD 환경 변수가 설정되어 있어 우선 적용됩니다. 변수를 해제하고 서버를 재시작해야 여기에서 비밀번호를 관리할 수 있습니다.',
+    password_env_var_locked_placeholder: '잠금: HERMES_WEBUI_PASSWORD 환경 변수가 설정되어 있습니다',
     disable_auth: '인증 비활성화',
     sign_out: '로그아웃',
     // Providers panel

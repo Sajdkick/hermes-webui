@@ -44,6 +44,12 @@ async function send(){
   if(!text&&!S.pendingFiles.length)return;
   // Don't send while an inline message edit is active
   if(document.querySelector('.msg-edit-area'))return;
+
+  // Dismiss handoff hint when user sends a message (resets seen_at).
+  if(S.session&&S.session.session_id&&typeof _dismissHandoffHint==='function'){
+    _dismissHandoffHint(S.session.session_id);
+  }
+
   const compressionRunning=typeof isCompressionUiRunning==='function'&&isCompressionUiRunning();
   // If busy or a manual compression is still running, handle based on busy_input_mode
   if(S.busy||compressionRunning){
@@ -171,6 +177,11 @@ async function send(){
   S.toolCalls=[];  // clear tool calls from previous turn
   clearLiveToolCards();  // clear any leftover live cards from last turn
   S.messages.push(userMsg);renderMessages();appendThinking();setBusy(true);
+  // First optimistic pass: make the local user turn visible before /api/chat/start
+  // can save pending state on the server.
+  if(typeof upsertActiveSessionForLocalTurn==='function'){
+    upsertActiveSessionForLocalTurn({title:displayText.slice(0,64),messageCount:S.messages.length,timestampMs:Date.now()});
+  }
   INFLIGHT[activeSid]={messages:[...S.messages],uploaded:uploadedNames,toolCalls:[]};
   if(typeof saveInflightState==='function'){
     saveInflightState(activeSid,{streamId:null,messages:INFLIGHT[activeSid].messages,uploaded:uploadedNames,toolCalls:[]});
@@ -187,13 +198,20 @@ async function send(){
     const provisionalTitle=displayText.slice(0,64);
     S.session.title=provisionalTitle;
     syncTopbar();
-    // Persist it and refresh the sidebar now -- don't wait for done
+    // Persist it in the background; keep the optimistic sidebar cache as the
+    // immediate source of truth until /api/chat/start saves pending state.
     api('/api/session/rename',{method:'POST',body:JSON.stringify({
       session_id:activeSid, title:provisionalTitle
     })}).catch(()=>{});  // fire-and-forget, server refines on done
-    renderSessionList();  // session appears in sidebar immediately
+    if(typeof upsertActiveSessionForLocalTurn==='function'){
+      // Second optimistic pass: carry the provisional title into the cached row
+      // without re-fetching /api/sessions before pending state exists server-side.
+      upsertActiveSessionForLocalTurn({title:provisionalTitle,messageCount:S.messages.length,timestampMs:Date.now()});
+    }else if(typeof renderSessionListFromCache==='function') renderSessionListFromCache();
+  } else if(typeof upsertActiveSessionForLocalTurn==='function'){
+    upsertActiveSessionForLocalTurn({title:S.session&&S.session.title||displayText.slice(0,64),messageCount:S.messages.length,timestampMs:Date.now()});
   } else {
-    renderSessionList();  // ensure it's visible even if already titled
+    renderSessionListFromCache();  // ensure it's visible even if already titled
   }
 
   // Start the agent via POST, get a stream_id back
@@ -223,6 +241,11 @@ async function send(){
     S.activeStreamId = streamId;
     if(S.session&&S.session.session_id===activeSid){
       S.session.active_stream_id = streamId;
+    }
+    if(typeof upsertActiveSessionForLocalTurn==='function'){
+      // Third optimistic pass: stream_id is now known, so the row can reconcile
+      // against real active-stream metadata before the background refresh lands.
+      upsertActiveSessionForLocalTurn({title:S.session&&S.session.title||displayText.slice(0,64),messageCount:S.messages.length,timestampMs:Date.now()});
     }
     markInflight(activeSid, streamId);
     if(typeof saveInflightState==='function'){
@@ -262,6 +285,9 @@ async function send(){
     if(!_clarifySessionId || _clarifySessionId===activeSid) hideClarifyCard(true, 'terminal');
     S.messages.push({role:'assistant',content:`**Error:** ${errMsg}`});
     _queueDrainSid=activeSid;renderMessages();setBusy(false);setComposerStatus(`Error: ${errMsg}`);
+    if(typeof clearOptimisticSessionStreaming==='function') clearOptimisticSessionStreaming(activeSid);
+    // Reconcile with server truth after immediately clearing the optimistic spinner.
+    if(typeof renderSessionList==='function') void renderSessionList();
     return;
   }
 
@@ -870,6 +896,9 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
                 output_tokens:Math.max(0,curOut-prevOut),
                 estimated_cost:Math.max(0,curCost-prevCost),
               };
+            }
+            if(typeof d.usage.duration_seconds==='number'){
+              lastAsst._turnDuration=d.usage.duration_seconds;
             }
           }
         }
