@@ -1,0 +1,41 @@
+{
+  "id": "095966fa-8b66-4478-b89b-465ebf486b22",
+  "sessionId": "49faddfd-ff9e-4757-90db-04caa7acaaaf",
+  "projectId": "d1b947af-f23c-4d01-a835-7da9402674bd",
+  "projectName": "Sajdkick/hermes-webui",
+  "cwd": "/home/ubuntu/cloud-terminal-data/projects/hermes-webui",
+  "title": "Summons freeze direct board playback repro",
+  "status": "collecting",
+  "createdAt": "2026-04-27T08:44:28.396Z",
+  "updatedAt": "2026-04-27T08:45:11.865Z",
+  "lastEventAt": "2026-04-27T08:45:11.865Z",
+  "totalEventCount": 1,
+  "droppedEventCount": 0,
+  "events": [
+    {
+      "id": "c66e7110-9f17-4d17-9fc3-a2dade4ba4aa",
+      "recordedAt": "2026-04-27T08:45:11.865Z",
+      "type": "log",
+      "source": "app",
+      "level": "info",
+      "label": "agent-raw-ingest-probe",
+      "message": "probe",
+      "url": null,
+      "route": null,
+      "data": {
+        "reportId": "095966fa-8b66-4478-b89b-465ebf486b22"
+      },
+      "meta": null,
+      "request": {
+        "userAgent": "curl/8.5.0",
+        "referer": null
+      }
+    }
+  ],
+  "ingest": {
+    "path": "/agent/sessions/49faddfd-ff9e-4757-90db-04caa7acaaaf/runtime/gather/reports/095966fa-8b66-4478-b89b-465ebf486b22/events",
+    "url": "http://127.0.0.1:5001/agent/sessions/49faddfd-ff9e-4757-90db-04caa7acaaaf/runtime/gather/reports/095966fa-8b66-4478-b89b-465ebf486b22/events",
+    "tokenHeader": "x-cloud-terminal-gather-token",
+    "tokenHash": "2a56d1d210d35674d2865cc07b7965d3eba12f93360d249a16eb6c3cab955692"
+  }
+}

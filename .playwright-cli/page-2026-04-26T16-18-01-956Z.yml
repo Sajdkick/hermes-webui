@@ -1,0 +1,200 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e27]:
+      - generic [ref=e29]:
+        - generic [ref=e30]:
+          - generic [ref=e31]:
+            - text: Workspace
+            - heading [level=6] [ref=e114]: Summons
+          - generic [ref=e33]:
+            - paragraph [ref=e34]: debug
+            - button [ref=e115] [cursor=pointer]: Logout
+        - generic [ref=e36]:
+          - link [ref=e116] [cursor=pointer]:
+            - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons
+            - text: Summons
+          - link [ref=e117] [cursor=pointer]:
+            - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/pieces
+            - text: Pieces
+    - generic [ref=e41]:
+      - banner [ref=e42]:
+        - generic [ref=e43]:
+          - generic [ref=e44]:
+            - generic [ref=e45]: Tournament-first tactics
+            - heading [level=2] [ref=e118]: Summons
+            - paragraph [ref=e47]: Build pieces, seed brackets, and jump into live board play. Start with a tournament, a solo run, or the workshop.
+            - generic [ref=e48]:
+              - button [ref=e119] [cursor=pointer]: Create Tournament
+              - link [ref=e120] [cursor=pointer]:
+                - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/single-player
+                - text: Single Player
+              - button [ref=e121] [cursor=pointer]: Create Piece
+          - generic [ref=e54]:
+            - generic [ref=e56]:
+              - generic [ref=e57]: Quick join
+              - heading [level=6] [ref=e122]: Open a lobby by invite
+              - paragraph [ref=e59]: Use a tournament code to jump directly into an active room.
+            - generic [ref=e60]:
+              - generic [ref=e61]:
+                - generic: Invite code
+                - generic [ref=e62]:
+                  - textbox [ref=e123]
+                  - group:
+                    - generic: Invite code
+                - paragraph [ref=e64]: Enter a 6-character tournament code.
+              - button [disabled]: Join Tournament
+        - generic [ref=e65]:
+          - generic [ref=e67]:
+            - generic [ref=e68]: Tracked tournaments
+            - heading [level=6] [ref=e124]: "0"
+          - generic [ref=e71]:
+            - generic [ref=e72]: Pieces in workshop
+            - heading [level=6] [ref=e125]: "11"
+          - generic [ref=e75]:
+            - generic [ref=e76]: Access
+            - heading [level=6] [ref=e126]: Player
+      - generic [ref=e78]:
+        - generic [ref=e81]:
+          - generic [ref=e83]:
+            - generic [ref=e84]: Recent activity
+            - heading [level=6] [ref=e127]: Tournaments
+            - paragraph [ref=e86]: Re-enter recent brackets, check invite codes, and continue where the latest sessions left off.
+          - generic [ref=e88]:
+            - paragraph [ref=e89]: No tournaments yet. Create the first bracket to start building match history.
+            - button [ref=e128] [cursor=pointer]: Create Tournament
+        - generic [ref=e93]:
+          - generic [ref=e94]:
+            - generic [ref=e95]:
+              - generic [ref=e96]: Workshop
+              - heading [level=6] [ref=e129]: Pieces
+              - paragraph [ref=e98]: Draft new units, reopen recent builds, and jump into the full library when you need the whole roster.
+            - link [ref=e130] [cursor=pointer]:
+              - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/pieces
+              - text: Open Library
+          - generic [ref=e101]:
+            - generic [ref=e102]:
+              - link [ref=e131] [cursor=pointer]:
+                - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/pieces/2ea10d38-cb87-4c05-89bc-170c95e95738/edit
+                - text: Solar Harrier
+              - paragraph [ref=e104]: Public · Published revision ready
+            - generic [ref=e105]:
+              - link [ref=e132] [cursor=pointer]:
+                - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/pieces/4d67554d-cd32-4294-9d70-25a8725df31d/edit
+                - text: Ironbound Ram
+              - paragraph [ref=e107]: Public · Published revision ready
+            - generic [ref=e108]:
+              - link [ref=e133] [cursor=pointer]:
+                - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/pieces/5aac5c92-c9c4-4bcb-ad26-f2b62de6d766/edit
+                - text: Veil Archivist
+              - paragraph [ref=e110]: Public · Published revision ready
+            - generic [ref=e111]:
+              - link [ref=e134] [cursor=pointer]:
+                - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/pieces/6ae181e1-2346-4614-a8dc-d85dbea04014/edit
+                - text: Siege Mason
+              - paragraph [ref=e113]: Public · Published revision ready
+  - dialog "Create Tournament" [ref=e137]:
+    - heading "Create Tournament" [level=2] [ref=e138]
+    - generic [ref=e140]:
+      - generic [ref=e141]:
+        - generic [ref=e142]: Title
+        - generic [ref=e143]:
+          - textbox "Title" [ref=e144]: New Summons Tournament
+          - group:
+            - generic: Title
+      - generic [ref=e145]:
+        - generic [ref=e147]:
+          - generic [ref=e148]: Board Width
+          - generic [ref=e149]:
+            - spinbutton "Board Width" [ref=e150]: "12"
+            - group:
+              - generic: Board Width
+        - generic [ref=e152]:
+          - generic [ref=e153]: Board Height
+          - generic [ref=e154]:
+            - spinbutton "Board Height" [ref=e155]: "12"
+            - group:
+              - generic: Board Height
+        - generic [ref=e157]:
+          - generic [ref=e158]: Arena Algorithm
+          - generic [ref=e159]:
+            - combobox "Arena Algorithm" [ref=e160] [cursor=pointer]:
+              - option "Rectangle" [selected]
+              - option "Circle / oval"
+              - option "Dungeon rooms and corridors"
+            - img
+            - group:
+              - generic: Arena Algorithm
+          - paragraph [ref=e161]: Choose rectangle, circular, or branching room/corridor dungeon layouts.
+        - generic [ref=e163]:
+          - generic [ref=e164]: Players Per Match
+          - generic [ref=e165]:
+            - spinbutton "Players Per Match" [ref=e166]: "2"
+            - group:
+              - generic: Players Per Match
+        - generic [ref=e168]:
+          - generic [ref=e169]: Players Per Team
+          - generic [ref=e170]:
+            - spinbutton "Players Per Team" [ref=e171]: "1"
+            - group:
+              - generic: Players Per Team
+          - paragraph [ref=e172]: Use 1 for free-for-all, 2 for 2v2, or larger teams when players per match allows it.
+        - generic [ref=e174]:
+          - generic [ref=e175]: Pieces Per Player
+          - generic [ref=e176]:
+            - spinbutton "Pieces Per Player" [ref=e177]: "2"
+            - group:
+              - generic: Pieces Per Player
+        - generic [ref=e179]:
+          - generic [ref=e180]: Battle Mode
+          - generic [ref=e181]:
+            - combobox "Battle Mode" [ref=e182] [cursor=pointer]:
+              - option "Simultaneous" [selected]
+              - option "Sequential"
+            - img
+            - group:
+              - generic: Battle Mode
+        - generic [ref=e184]:
+          - generic [ref=e185]: Win Condition
+          - generic [ref=e186]:
+            - combobox "Win Condition" [ref=e187] [cursor=pointer]:
+              - option "Classic elimination" [selected]
+              - option "Football / ball goal"
+            - img
+            - group:
+              - generic: Win Condition
+          - paragraph [ref=e188]: Ball goal runs as an authoritative Nakama objective mode with a dummy ball piece.
+        - generic [ref=e190]:
+          - generic [ref=e191]: Best Of
+          - generic [ref=e192]:
+            - combobox "Best Of" [ref=e193] [cursor=pointer]:
+              - option "1" [selected]
+              - option "3"
+              - option "5"
+            - img
+            - group:
+              - generic: Best Of
+        - generic [ref=e195]:
+          - generic [ref=e196]: Flower Clusters Per Round
+          - generic [ref=e197]:
+            - spinbutton "Flower Clusters Per Round" [ref=e198]: "2"
+            - group:
+              - generic: Flower Clusters Per Round
+        - generic [ref=e200]:
+          - generic [ref=e201]: Active Pieces Per Round
+          - generic [ref=e202]:
+            - spinbutton "Active Pieces Per Round" [ref=e203]: "1"
+            - group:
+              - generic: Active Pieces Per Round
+          - paragraph [ref=e204]: Each player may submit this many of their own pieces per round.
+        - generic [ref=e206]:
+          - generic [ref=e207]: Bot Opponents
+          - generic [ref=e208]:
+            - spinbutton "Bot Opponents" [ref=e209]: "0"
+            - group:
+              - generic: Bot Opponents
+      - generic [ref=e210]:
+        - paragraph [ref=e211]: Allow Private Published Pieces
+        - switch [ref=e214] [cursor=pointer]
+    - generic [ref=e217]:
+      - button "Cancel" [ref=e218] [cursor=pointer]
+      - button "Start Lobby" [ref=e219] [cursor=pointer]

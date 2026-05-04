@@ -1,0 +1,83 @@
+- generic [ref=e2]:
+  - banner [ref=e27]:
+    - generic [ref=e29]:
+      - generic [ref=e30]:
+        - generic [ref=e31]:
+          - text: Workspace
+          - heading "Summons" [level=6] [ref=e32]
+        - button "Logout" [ref=e34] [cursor=pointer]
+      - generic [ref=e35]:
+        - link "Summons" [ref=e36] [cursor=pointer]:
+          - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons
+        - link "Pieces" [ref=e37] [cursor=pointer]:
+          - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/pieces
+  - generic [ref=e40]:
+    - banner [ref=e41]:
+      - generic [ref=e42]:
+        - generic [ref=e43]:
+          - generic [ref=e44]: Tournament-first tactics
+          - heading "Summons" [level=2] [ref=e45]
+          - paragraph [ref=e46]: Build pieces, seed brackets, and jump into live board play. Start with a tournament, a solo run, or the workshop.
+          - generic [ref=e47]:
+            - button "Create Tournament" [ref=e48] [cursor=pointer]
+            - link "Single Player" [ref=e49] [cursor=pointer]:
+              - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/single-player
+            - button "Create Piece" [ref=e50] [cursor=pointer]
+        - generic [ref=e53]:
+          - generic [ref=e55]:
+            - generic [ref=e56]: Quick join
+            - heading "Open a lobby by invite" [level=6] [ref=e57]
+            - paragraph [ref=e58]: Use a tournament code to jump directly into an active room.
+          - generic [ref=e59]:
+            - generic [ref=e60]:
+              - generic: Invite code
+              - generic [ref=e61]:
+                - textbox "Invite code" [ref=e62]
+                - group:
+                  - generic: Invite code
+              - paragraph [ref=e63]: Enter a 6-character tournament code.
+            - button "Join Tournament" [disabled]
+      - generic [ref=e64]:
+        - generic [ref=e66]:
+          - generic [ref=e67]: Tracked tournaments
+          - heading "0" [level=6] [ref=e68]
+        - generic [ref=e70]:
+          - generic [ref=e71]: Pieces in workshop
+          - heading "11" [level=6] [ref=e72]
+        - generic [ref=e74]:
+          - generic [ref=e75]: Access
+          - heading "Player" [level=6] [ref=e76]
+    - generic [ref=e77]:
+      - generic [ref=e80]:
+        - generic [ref=e82]:
+          - generic [ref=e83]: Recent activity
+          - heading "Tournaments" [level=6] [ref=e84]
+          - paragraph [ref=e85]: Re-enter recent brackets, check invite codes, and continue where the latest sessions left off.
+        - generic [ref=e87]:
+          - paragraph [ref=e88]: No tournaments yet. Create the first bracket to start building match history.
+          - button "Create Tournament" [ref=e89] [cursor=pointer]
+      - generic [ref=e92]:
+        - generic [ref=e93]:
+          - generic [ref=e94]:
+            - generic [ref=e95]: Workshop
+            - heading "Pieces" [level=6] [ref=e96]
+            - paragraph [ref=e97]: Draft new units, reopen recent builds, and jump into the full library when you need the whole roster.
+          - link "Open Library" [ref=e99] [cursor=pointer]:
+            - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/pieces
+        - generic [ref=e100]:
+          - generic [ref=e101]:
+            - link "Solar Harrier" [ref=e102] [cursor=pointer]:
+              - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/pieces/2ea10d38-cb87-4c05-89bc-170c95e95738/edit
+            - paragraph [ref=e103]: Public · Published revision ready
+          - generic [ref=e104]:
+            - link "Ironbound Ram" [ref=e105] [cursor=pointer]:
+              - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/pieces/4d67554d-cd32-4294-9d70-25a8725df31d/edit
+            - paragraph [ref=e106]: Public · Published revision ready
+          - generic [ref=e107]:
+            - link "Veil Archivist" [ref=e108] [cursor=pointer]:
+              - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/pieces/5aac5c92-c9c4-4bcb-ad26-f2b62de6d766/edit
+            - paragraph [ref=e109]: Public · Published revision ready
+          - generic [ref=e110]:
+            - link "Siege Mason" [ref=e111] [cursor=pointer]:
+              - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/pieces/6ae181e1-2346-4614-a8dc-d85dbea04014/edit
+            - paragraph [ref=e112]: Public · Published revision ready

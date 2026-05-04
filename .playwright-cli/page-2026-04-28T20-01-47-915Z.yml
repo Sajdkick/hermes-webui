@@ -1,0 +1,124 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - generic [ref=e4]:
+      - button "Chat" [ref=e5] [cursor=pointer]:
+        - img [ref=e6]
+      - button "Dashboard" [ref=e8] [cursor=pointer]:
+        - img [ref=e9]
+      - button "Tasks" [ref=e14] [cursor=pointer]:
+        - img [ref=e15]
+      - button "Skills" [ref=e17] [cursor=pointer]:
+        - img [ref=e18]
+      - button "Memory" [ref=e22] [cursor=pointer]:
+        - img [ref=e23]
+      - button "Spaces" [ref=e25] [cursor=pointer]:
+        - img [ref=e26]
+      - button "Profiles" [ref=e28] [cursor=pointer]:
+        - img [ref=e29]
+      - button "Todos" [ref=e32] [cursor=pointer]:
+        - img [ref=e33]
+    - generic [ref=e36]:
+      - button "New conversation Cmd+K" [ref=e38] [cursor=pointer]:
+        - img [ref=e39]
+        - generic [ref=e40]: New conversation
+        - generic [ref=e41]: Cmd+K
+      - textbox "Filter conversations..." [ref=e43]
+    - button "Hermes WebUI Preferences, imports, exports" [ref=e46] [cursor=pointer]:
+      - img [ref=e48]
+      - generic [ref=e58]:
+        - generic [ref=e59]: Hermes WebUI
+        - generic [ref=e60]: Preferences, imports, exports
+      - img [ref=e62]
+  - main [ref=e65]:
+    - generic [ref=e66]:
+      - generic [ref=e67]:
+        - generic [ref=e68]: Hermes
+        - generic [ref=e69]: New conversation
+      - button "Files" [ref=e71] [cursor=pointer]:
+        - img [ref=e72]
+        - generic [ref=e74]: Files
+    - generic [ref=e76]:
+      - img "Hermes caduceus" [ref=e78]
+      - heading "What can I help with?" [level=2] [ref=e88]
+      - paragraph [ref=e89]: Ask anything, run commands, explore files, or manage your scheduled tasks.
+      - generic [ref=e90]:
+        - button "What files are in this workspace?" [ref=e91] [cursor=pointer]:
+          - img [ref=e92]
+          - text: What files are in this workspace?
+        - button "What's on my schedule today?" [ref=e94] [cursor=pointer]:
+          - img [ref=e95]
+          - text: What's on my schedule today?
+        - button "Help me plan a small project." [ref=e98] [cursor=pointer]:
+          - img [ref=e99]
+          - text: Help me plan a small project.
+    - generic [ref=e102]:
+      - generic:
+        - alertdialog "Approval required":
+          - generic:
+            - generic:
+              - img
+              - generic: Approval required
+            - generic:
+              - button "Allow once ↵":
+                - generic:
+                  - img
+                - generic: Allow once
+                - generic: ↵
+              - button "Allow session":
+                - generic:
+                  - img
+                - generic: Allow session
+              - button "Always allow":
+                - generic:
+                  - img
+                - generic: Always allow
+              - button "Deny":
+                - generic:
+                  - img
+                - generic: Deny
+        - dialog "Clarification needed":
+          - generic:
+            - generic:
+              - img
+              - generic: Clarification needed
+            - generic:
+              - textbox "Type your response…"
+              - button "Send"
+            - generic: Pick a choice, or type your own answer below.
+      - generic [ref=e103]:
+        - textbox "Message Hermes…" [ref=e104]
+        - generic [ref=e105]:
+          - generic [ref=e106]:
+            - button "Attach files" [ref=e107] [cursor=pointer]:
+              - img [ref=e108]
+            - button "Voice input" [ref=e110] [cursor=pointer]:
+              - img [ref=e111]
+            - button "default" [ref=e116] [cursor=pointer]:
+              - img [ref=e118]
+              - generic [ref=e121]: default
+              - img [ref=e123]
+            - button "Switch workspace" [disabled] [ref=e126]:
+              - img [ref=e128]
+              - img [ref=e131]
+            - generic [ref=e133]:
+              - button "Conversation model" [ref=e134] [cursor=pointer]:
+                - img [ref=e136]
+                - img [ref=e140]
+              - combobox
+          - button "Send message" [disabled] [ref=e143]:
+            - img [ref=e144]
+  - complementary:
+    - generic:
+      - generic: Workspace
+      - generic:
+        - button "Hide workspace panel":
+          - img
+        - button "New file":
+          - img
+        - button "New folder":
+          - img
+        - button "Refresh":
+          - img
+        - button "Close preview":
+          - img
+        - button "Close workspace panel": ×

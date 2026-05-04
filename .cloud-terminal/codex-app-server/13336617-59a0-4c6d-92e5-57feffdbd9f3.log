@@ -1,0 +1,6 @@
+[2m2026-05-02T05:35:21.288629Z[0m [31mERROR[0m [2mcodex_app_server[0m[2m:[0m Codex could not find bubblewrap on PATH. Install bubblewrap with your OS package manager. See the sandbox prerequisites: https://developers.openai.com/codex/concepts/sandboxing#prerequisites. Codex will use the vendored bubblewrap in the meantime.
+codex app-server (WebSockets)
+  listening on: ws://127.0.0.1:45520
+  readyz: http://127.0.0.1:45520/readyz
+  healthz: http://127.0.0.1:45520/healthz
+  note: binds localhost only (use SSH port-forwarding for remote access)

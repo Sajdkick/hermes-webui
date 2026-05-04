@@ -1,0 +1,296 @@
+{
+  "id": "ae7fedd0-c6e2-4d54-ac5d-d0bd55709e45",
+  "sessionId": "49faddfd-ff9e-4757-90db-04caa7acaaaf",
+  "projectId": "d1b947af-f23c-4d01-a835-7da9402674bd",
+  "projectName": "Sajdkick/hermes-webui",
+  "cwd": "/home/ubuntu/cloud-terminal-data/projects/hermes-webui",
+  "title": "Summons freeze card visual playback repro",
+  "status": "collecting",
+  "createdAt": "2026-04-27T06:55:58.549Z",
+  "updatedAt": "2026-04-27T07:47:37.599Z",
+  "lastEventAt": "2026-04-27T07:47:37.599Z",
+  "totalEventCount": 8,
+  "droppedEventCount": 0,
+  "events": [
+    {
+      "id": "4ab9a711-44b1-413d-91b3-eb08031a639a",
+      "recordedAt": "2026-04-27T06:57:00.938Z",
+      "type": "log",
+      "source": "app",
+      "level": "info",
+      "label": "agent-card-visual-probe",
+      "message": "probe",
+      "url": null,
+      "route": null,
+      "data": {
+        "reportId": "ae7fedd0-c6e2-4d54-ac5d-d0bd55709e45"
+      },
+      "meta": null,
+      "request": {
+        "userAgent": "curl/8.5.0",
+        "referer": null
+      }
+    },
+    {
+      "id": "46809ba0-f660-4e08-93d4-2f13dcf4e450",
+      "recordedAt": "2026-04-27T07:39:43.745Z",
+      "type": "log",
+      "source": "app",
+      "level": "info",
+      "label": "agent-forwarder-updated-probe",
+      "message": "probe",
+      "url": null,
+      "route": null,
+      "data": {
+        "reportId": "ae7fedd0-c6e2-4d54-ac5d-d0bd55709e45"
+      },
+      "meta": null,
+      "request": {
+        "userAgent": "curl/8.5.0",
+        "referer": null
+      }
+    },
+    {
+      "id": "ed9b8a37-130e-48aa-9a9f-c80257fc099a",
+      "recordedAt": "2026-04-27T07:47:36.785Z",
+      "type": "log",
+      "source": "app",
+      "level": "info",
+      "label": "summons-series.lock-freeze.instrumentation-mounted",
+      "message": null,
+      "url": "https://cloudterminal.duckdns.org/play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/series/05f7fcdb-be32-4492-883c-73b9d5b0a126",
+      "route": "/play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/series/05f7fcdb-be32-4492-883c-73b9d5b0a126",
+      "data": {
+        "reportId": "ae7fedd0-c6e2-4d54-ac5d-d0bd55709e45",
+        "path": "/play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/series/05f7fcdb-be32-4492-883c-73b9d5b0a126",
+        "existingBufferedEvents": 13
+      },
+      "meta": null,
+      "request": {
+        "userAgent": "node",
+        "referer": null
+      }
+    },
+    {
+      "id": "4025c4c5-1ba7-4c72-a2d3-e30e69ff64a1",
+      "recordedAt": "2026-04-27T07:47:37.003Z",
+      "type": "log",
+      "source": "app",
+      "level": "info",
+      "label": "summons-series.lock-freeze.derived-state",
+      "message": null,
+      "url": "https://cloudterminal.duckdns.org/play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/series/05f7fcdb-be32-4492-883c-73b9d5b0a126",
+      "route": "/play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/series/05f7fcdb-be32-4492-883c-73b9d5b0a126",
+      "data": {
+        "reportId": "ae7fedd0-c6e2-4d54-ac5d-d0bd55709e45",
+        "at": "2026-04-27T07:47:37.199Z",
+        "data": {
+          "matchId": null,
+          "phase": null,
+          "battleRound": null,
+          "viewerUserId": "95824322-9d3b-481e-b0d6-4cdc9607dddc",
+          "viewerSubmitted": null,
+          "isRealtimeReady": false,
+          "connectionState": "idle",
+          "joinedMatchId": null,
+          "activeMatchId": null,
+          "isRoundPlaybackActive": false,
+          "isPreludePlaybackActive": false,
+          "effectiveRoundPlaybackId": null,
+          "effectiveMotionPlaybackId": null,
+          "effectiveVisualTimelineId": null,
+          "effectiveVisualTimelineKind": null,
+          "hasPendingBattleSubmission": true,
+          "hasLocalBattleSubmissionLock": true,
+          "pendingRoundPlayback": false,
+          "pendingSnapshot": false,
+          "roundPlaybackIdReference": null
+        },
+        "extras": {}
+      },
+      "meta": null,
+      "request": {
+        "userAgent": "node",
+        "referer": null
+      }
+    },
+    {
+      "id": "102f8148-67dc-49b6-8f7c-843edb3ad212",
+      "recordedAt": "2026-04-27T07:47:37.017Z",
+      "type": "log",
+      "source": "app",
+      "level": "info",
+      "label": "summons-series.lock-freeze.derived-state",
+      "message": null,
+      "url": "https://cloudterminal.duckdns.org/play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/series/05f7fcdb-be32-4492-883c-73b9d5b0a126",
+      "route": "/play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/series/05f7fcdb-be32-4492-883c-73b9d5b0a126",
+      "data": {
+        "reportId": "ae7fedd0-c6e2-4d54-ac5d-d0bd55709e45",
+        "at": "2026-04-27T07:47:37.207Z",
+        "data": {
+          "matchId": null,
+          "phase": null,
+          "battleRound": null,
+          "viewerUserId": "95824322-9d3b-481e-b0d6-4cdc9607dddc",
+          "viewerSubmitted": null,
+          "isRealtimeReady": false,
+          "connectionState": "connecting",
+          "joinedMatchId": null,
+          "activeMatchId": null,
+          "isRoundPlaybackActive": false,
+          "isPreludePlaybackActive": false,
+          "effectiveRoundPlaybackId": null,
+          "effectiveMotionPlaybackId": null,
+          "effectiveVisualTimelineId": null,
+          "effectiveVisualTimelineKind": null,
+          "hasPendingBattleSubmission": true,
+          "hasLocalBattleSubmissionLock": true,
+          "pendingRoundPlayback": false,
+          "pendingSnapshot": false,
+          "roundPlaybackIdReference": null
+        },
+        "extras": {}
+      },
+      "meta": null,
+      "request": {
+        "userAgent": "node",
+        "referer": null
+      }
+    },
+    {
+      "id": "8a1ad748-48e0-45a5-a9cc-729f7591a3ba",
+      "recordedAt": "2026-04-27T07:47:37.241Z",
+      "type": "log",
+      "source": "app",
+      "level": "info",
+      "label": "summons-series.lock-freeze.derived-state",
+      "message": null,
+      "url": "https://cloudterminal.duckdns.org/play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/series/05f7fcdb-be32-4492-883c-73b9d5b0a126",
+      "route": "/play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/series/05f7fcdb-be32-4492-883c-73b9d5b0a126",
+      "data": {
+        "reportId": "ae7fedd0-c6e2-4d54-ac5d-d0bd55709e45",
+        "at": "2026-04-27T07:47:37.496Z",
+        "data": {
+          "matchId": null,
+          "phase": null,
+          "battleRound": null,
+          "viewerUserId": "95824322-9d3b-481e-b0d6-4cdc9607dddc",
+          "viewerSubmitted": null,
+          "isRealtimeReady": false,
+          "connectionState": "connecting",
+          "joinedMatchId": null,
+          "activeMatchId": "4e794b91-7ac3-45ec-a72c-e5196eda3005.nakama",
+          "isRoundPlaybackActive": false,
+          "isPreludePlaybackActive": false,
+          "effectiveRoundPlaybackId": null,
+          "effectiveMotionPlaybackId": null,
+          "effectiveVisualTimelineId": null,
+          "effectiveVisualTimelineKind": null,
+          "hasPendingBattleSubmission": true,
+          "hasLocalBattleSubmissionLock": true,
+          "pendingRoundPlayback": false,
+          "pendingSnapshot": false,
+          "roundPlaybackIdReference": null
+        },
+        "extras": {}
+      },
+      "meta": null,
+      "request": {
+        "userAgent": "node",
+        "referer": null
+      }
+    },
+    {
+      "id": "c8fccf49-e8a3-4978-804f-a604e7ea81ff",
+      "recordedAt": "2026-04-27T07:47:37.597Z",
+      "type": "log",
+      "source": "app",
+      "level": "info",
+      "label": "summons-series.lock-freeze.derived-state",
+      "message": null,
+      "url": "https://cloudterminal.duckdns.org/play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/series/05f7fcdb-be32-4492-883c-73b9d5b0a126",
+      "route": "/play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/series/05f7fcdb-be32-4492-883c-73b9d5b0a126",
+      "data": {
+        "reportId": "ae7fedd0-c6e2-4d54-ac5d-d0bd55709e45",
+        "at": "2026-04-27T07:47:37.998Z",
+        "data": {
+          "matchId": "4e794b91-7ac3-45ec-a72c-e5196eda3005.nakama",
+          "phase": "placement",
+          "battleRound": 0,
+          "viewerUserId": "95824322-9d3b-481e-b0d6-4cdc9607dddc",
+          "viewerSubmitted": false,
+          "isRealtimeReady": true,
+          "connectionState": "connected",
+          "joinedMatchId": "4e794b91-7ac3-45ec-a72c-e5196eda3005.nakama",
+          "activeMatchId": "4e794b91-7ac3-45ec-a72c-e5196eda3005.nakama",
+          "isRoundPlaybackActive": false,
+          "isPreludePlaybackActive": false,
+          "effectiveRoundPlaybackId": null,
+          "effectiveMotionPlaybackId": null,
+          "effectiveVisualTimelineId": null,
+          "effectiveVisualTimelineKind": null,
+          "hasPendingBattleSubmission": false,
+          "hasLocalBattleSubmissionLock": false,
+          "pendingRoundPlayback": false,
+          "pendingSnapshot": false,
+          "roundPlaybackIdReference": null
+        },
+        "extras": {}
+      },
+      "meta": null,
+      "request": {
+        "userAgent": "node",
+        "referer": null
+      }
+    },
+    {
+      "id": "6355aaf4-6c4d-4320-939b-86ffed3e7e49",
+      "recordedAt": "2026-04-27T07:47:37.599Z",
+      "type": "log",
+      "source": "app",
+      "level": "info",
+      "label": "summons-series.lock-freeze.derived-state",
+      "message": null,
+      "url": "https://cloudterminal.duckdns.org/play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/series/05f7fcdb-be32-4492-883c-73b9d5b0a126",
+      "route": "/play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/series/05f7fcdb-be32-4492-883c-73b9d5b0a126",
+      "data": {
+        "reportId": "ae7fedd0-c6e2-4d54-ac5d-d0bd55709e45",
+        "at": "2026-04-27T07:47:37.739Z",
+        "data": {
+          "matchId": null,
+          "phase": null,
+          "battleRound": null,
+          "viewerUserId": "95824322-9d3b-481e-b0d6-4cdc9607dddc",
+          "viewerSubmitted": null,
+          "isRealtimeReady": false,
+          "connectionState": "connected",
+          "joinedMatchId": null,
+          "activeMatchId": "4e794b91-7ac3-45ec-a72c-e5196eda3005.nakama",
+          "isRoundPlaybackActive": false,
+          "isPreludePlaybackActive": false,
+          "effectiveRoundPlaybackId": null,
+          "effectiveMotionPlaybackId": null,
+          "effectiveVisualTimelineId": null,
+          "effectiveVisualTimelineKind": null,
+          "hasPendingBattleSubmission": true,
+          "hasLocalBattleSubmissionLock": true,
+          "pendingRoundPlayback": false,
+          "pendingSnapshot": false,
+          "roundPlaybackIdReference": null
+        },
+        "extras": {}
+      },
+      "meta": null,
+      "request": {
+        "userAgent": "node",
+        "referer": null
+      }
+    }
+  ],
+  "ingest": {
+    "path": "/agent/sessions/49faddfd-ff9e-4757-90db-04caa7acaaaf/runtime/gather/reports/ae7fedd0-c6e2-4d54-ac5d-d0bd55709e45/events",
+    "url": "http://127.0.0.1:5001/agent/sessions/49faddfd-ff9e-4757-90db-04caa7acaaaf/runtime/gather/reports/ae7fedd0-c6e2-4d54-ac5d-d0bd55709e45/events",
+    "tokenHeader": "x-cloud-terminal-gather-token",
+    "tokenHash": "8bcc61e3ba84579a463904a003ceb2f1cfbe8c4a2c77de42b354fe68571de994"
+  }
+}

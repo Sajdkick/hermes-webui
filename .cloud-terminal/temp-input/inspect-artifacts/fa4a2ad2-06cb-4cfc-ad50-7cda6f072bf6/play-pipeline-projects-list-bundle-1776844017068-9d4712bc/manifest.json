@@ -1,0 +1,275 @@
+{
+  "version": 1,
+  "bundleType": "inspect-run-bundle",
+  "createdAt": "2026-04-22T07:46:57.069Z",
+  "sessionId": "fa4a2ad2-06cb-4cfc-ad50-7cda6f072bf6",
+  "kind": "inspect-action",
+  "comparisonKey": "inspect-action:/-2075d158e9d8",
+  "entrypoint": {
+    "type": "inspect-action",
+    "route": "/"
+  },
+  "input": {
+    "url": "http://127.0.0.1:5003",
+    "keepSession": false,
+    "captureScreenshot": true,
+    "width": 1440,
+    "height": 900,
+    "delayMs": 2000,
+    "timeoutMs": 14000,
+    "actions": [
+      {
+        "type": "waitForSelectorVisible",
+        "selector": "#opsDashboardNavBtn",
+        "nth": 0,
+        "timeoutMs": 10000,
+        "state": "visible"
+      },
+      {
+        "type": "click",
+        "selector": "#opsDashboardNavBtn",
+        "nth": 0,
+        "x": null,
+        "y": null,
+        "button": "left",
+        "clickCount": 1,
+        "delayMs": 0
+      },
+      {
+        "type": "waitForSelectorVisible",
+        "selector": "text=Projects",
+        "nth": 0,
+        "timeoutMs": 10000,
+        "state": "visible"
+      },
+      {
+        "type": "click",
+        "selector": "text=Projects",
+        "nth": 0,
+        "x": null,
+        "y": null,
+        "button": "left",
+        "clickCount": 1,
+        "delayMs": 0
+      },
+      {
+        "type": "wait",
+        "delayMs": 6000
+      },
+      {
+        "type": "assert",
+        "expression": "document.querySelectorAll(\".ops-play-status\").length > 0",
+        "awaitPromise": true,
+        "message": "project list should show Play status controls",
+        "delayMs": 0
+      },
+      {
+        "type": "assert",
+        "expression": "document.querySelectorAll(\"[data-ops-action=start-play]\").length > 0",
+        "awaitPromise": true,
+        "message": "project list should show Play start buttons",
+        "delayMs": 0
+      }
+    ]
+  },
+  "output": {
+    "actions": {
+      "requestedCount": 7,
+      "executedCount": 7,
+      "results": [
+        {
+          "index": 0,
+          "type": "waitForSelectorVisible",
+          "selector": "#opsDashboardNavBtn",
+          "nth": 0,
+          "state": "visible",
+          "timeoutMs": 10000,
+          "description": "Matched \"#opsDashboardNavBtn\" (visible)."
+        },
+        {
+          "index": 1,
+          "type": "click",
+          "selector": "#opsDashboardNavBtn",
+          "nth": 0,
+          "point": {
+            "x": 60.4375,
+            "y": 25
+          },
+          "button": "left",
+          "clickCount": 1,
+          "description": "Clicked \"#opsDashboardNavBtn\" at (60, 25)."
+        },
+        {
+          "index": 2,
+          "type": "waitForSelectorVisible",
+          "selector": "text=Projects",
+          "nth": 0,
+          "state": "visible",
+          "timeoutMs": 10000,
+          "description": "Matched \"text=Projects\" (visible)."
+        },
+        {
+          "index": 3,
+          "type": "click",
+          "selector": "text=Projects",
+          "nth": 0,
+          "point": {
+            "x": 431.9921875,
+            "y": 99.5
+          },
+          "button": "left",
+          "clickCount": 1,
+          "description": "Clicked \"text=Projects\" at (432, 100)."
+        },
+        {
+          "index": 4,
+          "type": "wait",
+          "delayMs": 6000,
+          "description": "Waited 6000ms."
+        },
+        {
+          "index": 5,
+          "type": "assert",
+          "value": true,
+          "description": "Assertion passed: project list should show Play status controls"
+        },
+        {
+          "index": 6,
+          "type": "assert",
+          "value": true,
+          "description": "Assertion passed: project list should show Play start buttons"
+        }
+      ]
+    },
+    "capture": {
+      "path": ".cloud-terminal/temp-input/screenshots/fa4a2ad2-06cb-4cfc-ad50-7cda6f072bf6/play-pipeline-projects-list-1776844008056-e8b7547a.png",
+      "absolutePath": "/home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/temp-input/screenshots/fa4a2ad2-06cb-4cfc-ad50-7cda6f072bf6/play-pipeline-projects-list-1776844008056-e8b7547a.png",
+      "name": "play-pipeline-projects-list-1776844008056-e8b7547a.png",
+      "size": 154911,
+      "type": "image/png",
+      "kind": "full-page-screenshot",
+      "selector": "",
+      "nth": 0,
+      "target": "viewport",
+      "width": 1440,
+      "height": 900,
+      "tagName": null,
+      "sessionMode": "ephemeral"
+    },
+    "artifacts": null,
+    "gather": null
+  },
+  "inspectUrl": "http://127.0.0.1:5003/",
+  "captureUrl": "http://127.0.0.1:5003/",
+  "page": {
+    "status": "matched",
+    "matched": true,
+    "requestedUrl": "http://127.0.0.1:5003/",
+    "finalUrl": "http://127.0.0.1:5003/",
+    "requestedPath": "/",
+    "finalPath": "/",
+    "pageTitle": "Projects - Hermes",
+    "summary": "Captured /. Title: \"Projects - Hermes\".",
+    "warnings": []
+  },
+  "inspectSession": null,
+  "auth": {
+    "enabled": false,
+    "strategy": null,
+    "loginUrls": []
+  },
+  "capture": {
+    "path": ".cloud-terminal/temp-input/screenshots/fa4a2ad2-06cb-4cfc-ad50-7cda6f072bf6/play-pipeline-projects-list-1776844008056-e8b7547a.png",
+    "absolutePath": "/home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/temp-input/screenshots/fa4a2ad2-06cb-4cfc-ad50-7cda6f072bf6/play-pipeline-projects-list-1776844008056-e8b7547a.png",
+    "name": "play-pipeline-projects-list-1776844008056-e8b7547a.png",
+    "size": 154911,
+    "type": "image/png",
+    "kind": "full-page-screenshot",
+    "selector": "",
+    "nth": 0,
+    "target": "viewport",
+    "width": 1440,
+    "height": 900,
+    "tagName": null,
+    "sessionMode": "ephemeral"
+  },
+  "artifacts": null,
+  "gather": null,
+  "operations": [
+    {
+      "index": 0,
+      "type": "waitForSelectorVisible",
+      "selector": "#opsDashboardNavBtn",
+      "nth": 0,
+      "state": "visible",
+      "timeoutMs": 10000,
+      "description": "Matched \"#opsDashboardNavBtn\" (visible)."
+    },
+    {
+      "index": 1,
+      "type": "click",
+      "selector": "#opsDashboardNavBtn",
+      "nth": 0,
+      "point": {
+        "x": 60.4375,
+        "y": 25
+      },
+      "button": "left",
+      "clickCount": 1,
+      "description": "Clicked \"#opsDashboardNavBtn\" at (60, 25)."
+    },
+    {
+      "index": 2,
+      "type": "waitForSelectorVisible",
+      "selector": "text=Projects",
+      "nth": 0,
+      "state": "visible",
+      "timeoutMs": 10000,
+      "description": "Matched \"text=Projects\" (visible)."
+    },
+    {
+      "index": 3,
+      "type": "click",
+      "selector": "text=Projects",
+      "nth": 0,
+      "point": {
+        "x": 431.9921875,
+        "y": 99.5
+      },
+      "button": "left",
+      "clickCount": 1,
+      "description": "Clicked \"text=Projects\" at (432, 100)."
+    },
+    {
+      "index": 4,
+      "type": "wait",
+      "delayMs": 6000,
+      "description": "Waited 6000ms."
+    },
+    {
+      "index": 5,
+      "type": "assert",
+      "value": true,
+      "description": "Assertion passed: project list should show Play status controls"
+    },
+    {
+      "index": 6,
+      "type": "assert",
+      "value": true,
+      "description": "Assertion passed: project list should show Play start buttons"
+    }
+  ],
+  "files": [
+    {
+      "role": "capture",
+      "key": "capture",
+      "label": "viewport",
+      "type": "image/png",
+      "path": ".cloud-terminal/temp-input/screenshots/fa4a2ad2-06cb-4cfc-ad50-7cda6f072bf6/play-pipeline-projects-list-1776844008056-e8b7547a.png",
+      "absolutePath": "/home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/temp-input/screenshots/fa4a2ad2-06cb-4cfc-ad50-7cda6f072bf6/play-pipeline-projects-list-1776844008056-e8b7547a.png",
+      "size": 154911,
+      "sha256": "be55d48159d61da1d3be84b86d12d38cb4963216655107bf67bbc87fb88a259e"
+    }
+  ],
+  "compare": null
+}

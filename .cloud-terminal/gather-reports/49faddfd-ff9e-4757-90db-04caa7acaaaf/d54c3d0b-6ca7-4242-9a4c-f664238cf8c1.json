@@ -1,0 +1,21 @@
+{
+  "id": "d54c3d0b-6ca7-4242-9a4c-f664238cf8c1",
+  "sessionId": "49faddfd-ff9e-4757-90db-04caa7acaaaf",
+  "projectId": "d1b947af-f23c-4d01-a835-7da9402674bd",
+  "projectName": "Sajdkick/hermes-webui",
+  "cwd": "/home/ubuntu/cloud-terminal-data/projects/hermes-webui",
+  "title": "Summons lock freeze repro",
+  "status": "collecting",
+  "createdAt": "2026-04-27T04:21:44.327Z",
+  "updatedAt": "2026-04-27T04:21:44.327Z",
+  "lastEventAt": null,
+  "totalEventCount": 0,
+  "droppedEventCount": 0,
+  "events": [],
+  "ingest": {
+    "path": "/agent/sessions/49faddfd-ff9e-4757-90db-04caa7acaaaf/runtime/gather/reports/d54c3d0b-6ca7-4242-9a4c-f664238cf8c1/events",
+    "url": "http://127.0.0.1:5001/agent/sessions/49faddfd-ff9e-4757-90db-04caa7acaaaf/runtime/gather/reports/d54c3d0b-6ca7-4242-9a4c-f664238cf8c1/events",
+    "tokenHeader": "x-cloud-terminal-gather-token",
+    "tokenHash": "520c2db16ed1af066e1f27063a65b79bcaa6d170f35d301f86b7584778ab7d14"
+  }
+}

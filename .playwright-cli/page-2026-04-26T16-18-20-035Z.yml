@@ -1,0 +1,81 @@
+- generic [ref=e2]:
+  - banner [ref=e27]:
+    - generic [ref=e29]:
+      - generic [ref=e30]:
+        - generic [ref=e31]:
+          - text: Workspace
+          - heading "Summons" [level=6] [ref=e220]
+        - generic [ref=e33]:
+          - paragraph [ref=e34]: debug
+          - button "Logout" [ref=e221] [cursor=pointer]
+      - generic [ref=e36]:
+        - link "Summons" [ref=e222] [cursor=pointer]:
+          - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons
+        - link "Pieces" [ref=e223] [cursor=pointer]:
+          - /url: /play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/app/summons/pieces
+  - generic [ref=e225]:
+    - banner [ref=e226]:
+      - generic [ref=e228]:
+        - generic [ref=e229]: Tournament lobby
+        - heading "New Summons Tournament" [level=2] [ref=e230]
+        - paragraph [ref=e231]: Lock the roster, verify the bracket settings, and keep the room moving toward the first active series without leaving the lobby.
+        - button "Start Tournament" [ref=e233] [cursor=pointer]
+      - generic [ref=e234]:
+        - generic [ref=e236]:
+          - generic [ref=e237]: Status
+          - heading "lobby" [level=6] [ref=e238]
+        - generic [ref=e240]:
+          - generic [ref=e241]: Invite code
+          - heading "21JQKR" [level=6] [ref=e242]
+        - generic [ref=e244]:
+          - generic [ref=e245]: Participants
+          - heading "1" [level=6] [ref=e246]
+    - generic [ref=e247]:
+      - generic [ref=e250]:
+        - generic [ref=e252]:
+          - generic [ref=e253]: Configuration
+          - heading "Settings" [level=6] [ref=e254]
+          - paragraph [ref=e255]: Review the match frame before the host starts the bracket.
+        - generic [ref=e256]:
+          - paragraph [ref=e257]: Board 12 x 12
+          - paragraph [ref=e258]: Players per match 2
+          - paragraph [ref=e259]: Players per team 1
+          - paragraph [ref=e260]: Pieces per player 2
+          - paragraph [ref=e261]: Best of 1
+          - paragraph [ref=e262]: Active pieces per round 1
+          - paragraph [ref=e263]: Flower clusters per round 2
+          - paragraph [ref=e264]: Private published pieces disabled
+      - generic [ref=e267]:
+        - generic [ref=e269]:
+          - generic [ref=e270]: Roster
+          - heading "Participants" [level=6] [ref=e271]
+          - paragraph [ref=e272]: Track readiness and selected-piece counts before the first match spawns.
+        - generic [ref=e274]:
+          - heading "debug" [level=6] [ref=e275]
+          - paragraph [ref=e276]: Not ready · 0 selected
+    - generic [ref=e278]:
+      - generic [ref=e280]:
+        - generic [ref=e281]: Realtime
+        - heading "Lobby chat" [level=6] [ref=e282]
+        - paragraph [ref=e283]: Nakama room chat · socket connected
+      - generic [ref=e284]:
+        - generic [ref=e285]:
+          - generic [ref=e286]:
+            - generic: Message
+            - generic [ref=e287]:
+              - textbox "Message" [ref=e288]
+              - group:
+                - generic: Message
+          - button "Send" [disabled]
+        - paragraph [ref=e290]: Chat is ready. Messages sent here are shared with the tournament lobby.
+    - generic [ref=e292]:
+      - generic [ref=e294]:
+        - generic [ref=e295]: Loadout
+        - heading "Selected pieces" [level=6] [ref=e296]
+        - paragraph [ref=e297]: Keep the tournament roster locked and ready before the series assignment begins.
+      - generic [ref=e298]:
+        - paragraph [ref=e299]: 0 / 2 selected
+        - paragraph [ref=e300]: No pieces selected yet.
+        - generic [ref=e301]:
+          - button "Select Pieces" [ref=e302] [cursor=pointer]
+          - button "Mark Ready" [ref=e303] [cursor=pointer]

@@ -1,0 +1,399 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - generic [ref=e4]:
+      - button "Chat" [ref=e5] [cursor=pointer]:
+        - img [ref=e6]
+      - button "Dashboard" [ref=e8] [cursor=pointer]:
+        - img [ref=e9]
+      - button "Tasks" [ref=e14] [cursor=pointer]:
+        - img [ref=e15]
+      - button "Skills" [ref=e17] [cursor=pointer]:
+        - img [ref=e18]
+      - button "Memory" [ref=e22] [cursor=pointer]:
+        - img [ref=e23]
+      - button "Spaces" [ref=e25] [cursor=pointer]:
+        - img [ref=e26]
+      - button "Profiles" [ref=e28] [cursor=pointer]:
+        - img [ref=e29]
+      - button "Todos" [ref=e32] [cursor=pointer]:
+        - img [ref=e33]
+    - generic [ref=e36]:
+      - button "New conversation Cmd+K" [ref=e38] [cursor=pointer]:
+        - img [ref=e39]
+        - generic [ref=e40]: New conversation
+        - generic [ref=e41]: Cmd+K
+      - textbox "Filter conversations..." [ref=e43]
+      - generic [ref=e44]:
+        - generic [ref=e146] [cursor=pointer]: Show 1 from other profiles
+        - generic [ref=e147]:
+          - generic [ref=e148] [cursor=pointer]:
+            - generic [ref=e149]: ▸
+            - generic [ref=e150]: Today
+          - generic [ref=e152] [cursor=pointer]:
+            - generic "Double-click to rename" [ref=e155]: Readable output verification
+            - generic:
+              - button "Conversation actions":
+                - img
+    - button "Hermes WebUI Preferences, imports, exports" [ref=e46] [cursor=pointer]:
+      - img [ref=e48]
+      - generic [ref=e58]:
+        - generic [ref=e59]: Hermes WebUI
+        - generic [ref=e60]: Preferences, imports, exports
+      - img [ref=e62]
+  - main [ref=e65]:
+    - generic [ref=e66]:
+      - generic [ref=e67]:
+        - generic [ref=e68]: Readable output verification
+        - generic [ref=e69]: 4 messages
+      - button "Files" [ref=e71] [cursor=pointer]:
+        - img [ref=e72]
+        - generic [ref=e74]: Files
+    - generic [ref=e75]:
+      - generic [ref=e249]:
+        - generic [ref=e250]:
+          - generic [ref=e251]:
+            - generic [ref=e252]: Readable output
+            - generic [ref=e253]:
+              - generic [ref=e254]: First verification output
+              - generic [ref=e255]: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/readable-output/ro_verify_20260428/entries/ro_first/message.md
+              - generic [ref=e256]: 89 bytes
+              - generic [ref=e257]: 1 asset
+              - generic [ref=e258]: 2 saved outputs
+          - generic [ref=e259]:
+            - button "Refresh" [ref=e260] [cursor=pointer]
+            - button "Dismiss" [ref=e261] [cursor=pointer]
+        - generic [ref=e262]:
+          - button "Latest verification output" [ref=e263] [cursor=pointer]
+          - button "First verification output" [ref=e264] [cursor=pointer]
+        - generic [ref=e265]:
+          - heading "First verification output" [level=1] [ref=e266]
+          - paragraph [ref=e267]: This is the older readable output.
+          - paragraph [ref=e268]:
+            - img "Preview" [ref=e269]
+      - generic [ref=e101]:
+        - generic [ref=e178]:
+          - generic [ref=e179]: Show me the first verification output.
+          - generic [ref=e180]:
+            - generic "4/28/2026, 7:51:34 PM" [ref=e181]: 07:51 PM
+            - button "Copy" [ref=e183] [cursor=pointer]:
+              - img [ref=e184]
+        - generic [ref=e187]:
+          - generic "4/28/2026, 7:52:04 PM" [ref=e188]:
+            - generic [ref=e189]: H
+            - generic [ref=e190]: Hermes
+          - generic [ref=e192]:
+            - paragraph [ref=e194]: I wrote the first readable output for this turn.
+            - button "Readable output" [active] [ref=e196] [cursor=pointer]:
+              - img [ref=e197]
+              - generic [ref=e200]: Readable output
+            - generic [ref=e201]:
+              - generic "4/28/2026, 7:52:04 PM" [ref=e202]: 07:52 PM
+              - button "Copy" [ref=e204] [cursor=pointer]:
+                - img [ref=e205]
+        - generic [ref=e208]:
+          - generic [ref=e209]: Now show me the latest verification output.
+          - generic [ref=e210]:
+            - generic "4/28/2026, 7:53:34 PM" [ref=e211]: 07:53 PM
+            - generic [ref=e212]:
+              - button "Edit message" [ref=e213] [cursor=pointer]:
+                - img [ref=e214]
+              - button "Copy" [ref=e216] [cursor=pointer]:
+                - img [ref=e217]
+        - generic [ref=e220]:
+          - generic "4/28/2026, 7:54:04 PM" [ref=e221]:
+            - generic [ref=e222]: H
+            - generic [ref=e223]: Hermes
+          - generic [ref=e225]:
+            - paragraph [ref=e227]: I wrote the latest readable output for this turn.
+            - button "Readable output" [ref=e229] [cursor=pointer]:
+              - img [ref=e230]
+              - generic [ref=e233]: Readable output
+            - generic [ref=e234]:
+              - generic "4/28/2026, 7:54:04 PM" [ref=e235]: 07:54 PM
+              - generic [ref=e236]:
+                - button "Copy" [ref=e237] [cursor=pointer]:
+                  - img [ref=e238]
+                - button "Regenerate response" [ref=e241] [cursor=pointer]:
+                  - img [ref=e242]
+    - generic [ref=e102]:
+      - generic:
+        - alertdialog "Approval required":
+          - generic:
+            - generic:
+              - img
+              - generic: Approval required
+            - generic:
+              - button "Allow once ↵":
+                - generic:
+                  - img
+                - generic: Allow once
+                - generic: ↵
+              - button "Allow session":
+                - generic:
+                  - img
+                - generic: Allow session
+              - button "Always allow":
+                - generic:
+                  - img
+                - generic: Always allow
+              - button "Deny":
+                - generic:
+                  - img
+                - generic: Deny
+        - dialog "Clarification needed":
+          - generic:
+            - generic:
+              - img
+              - generic: Clarification needed
+            - generic:
+              - textbox "Type your response…"
+              - button "Send"
+            - generic: Pick a choice, or type your own answer below.
+      - generic [ref=e103]:
+        - textbox "Message Hermes…" [ref=e104]
+        - generic [ref=e105]:
+          - generic [ref=e106]:
+            - button "Attach files" [ref=e107] [cursor=pointer]:
+              - img [ref=e108]
+            - button "Voice input" [ref=e110] [cursor=pointer]:
+              - img [ref=e111]
+            - button "default" [ref=e116] [cursor=pointer]:
+              - img [ref=e118]
+              - generic [ref=e121]: default
+              - img [ref=e123]
+            - button "hermes-webui" [ref=e245] [cursor=pointer]:
+              - img [ref=e128]
+              - generic [ref=e246]: hermes-webui
+              - img [ref=e131]
+            - generic [ref=e133]:
+              - button "Claude Sonnet 4.6" [ref=e247] [cursor=pointer]:
+                - img [ref=e136]
+                - generic [ref=e248]: Claude Sonnet 4.6
+                - img [ref=e140]
+              - combobox
+          - button "Send message" [disabled] [ref=e143]:
+            - img [ref=e144]
+  - complementary:
+    - generic:
+      - generic: Workspace
+      - generic: master · 34∆
+      - generic:
+        - button "Hide workspace panel":
+          - img
+        - button "New file":
+          - img
+        - button "New folder":
+          - img
+        - button "Refresh":
+          - img
+        - button "Close workspace panel": ×
+    - generic:
+      - generic:
+        - generic: ▸
+        - generic:
+          - img
+        - generic "Double-click to rename": .agents
+      - generic:
+        - generic: ▸
+        - generic:
+          - img
+        - generic "Double-click to rename": .cloud-terminal
+      - generic:
+        - generic: ▸
+        - generic:
+          - img
+        - generic "Double-click to rename": .git
+      - generic:
+        - generic: ▸
+        - generic:
+          - img
+        - generic "Double-click to rename": .github
+      - generic:
+        - generic: ▸
+        - generic:
+          - img
+        - generic "Double-click to rename": .playwright-cli
+      - generic:
+        - generic: ▸
+        - generic:
+          - img
+        - generic "Double-click to rename": .pytest_cache
+      - generic:
+        - generic: ▸
+        - generic:
+          - img
+        - generic "Double-click to rename": __pycache__
+      - generic:
+        - generic: ▸
+        - generic:
+          - img
+        - generic "Double-click to rename": api
+      - generic:
+        - generic: ▸
+        - generic:
+          - img
+        - generic "Double-click to rename": bin
+      - generic:
+        - generic: ▸
+        - generic:
+          - img
+        - generic "Double-click to rename": docs
+      - generic:
+        - generic: ▸
+        - generic:
+          - img
+        - generic "Double-click to rename": project_tasks
+      - generic:
+        - generic: ▸
+        - generic:
+          - img
+        - generic "Double-click to rename": static
+      - generic:
+        - generic: ▸
+        - generic:
+          - img
+        - generic "Double-click to rename": tests
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": .dockerignore
+        - generic: 0.1k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": .env.example
+        - generic: 1.1k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": .gitignore
+        - generic: 0.7k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": AGENTS.md
+        - generic: 1.3k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": ARCHITECTURE.md
+        - generic: 78.8k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": bootstrap.py
+        - generic: 8.8k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": BUGS.md
+        - generic: 1.8k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": CHANGELOG.md
+        - generic: 166.6k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": CONTRIBUTING.md
+        - generic: 5.9k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": docker-compose.three-container.yml
+        - generic: 4.0k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": docker-compose.two-container.yml
+        - generic: 2.9k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": docker-compose.yml
+        - generic: 1.7k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": docker_init.bash
+        - generic: 14.6k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": Dockerfile
+        - generic: 3.1k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": HERMES.md
+        - generic: 27.8k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": LICENSE
+        - generic: 1.1k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": README.md
+        - generic: 36.5k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": requirements.txt
+        - generic: 0.2k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": ROADMAP.md
+        - generic: 24.7k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": server.py
+        - generic: 8.9k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": SPRINTS.md
+        - generic: 51.2k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": start.sh
+        - generic: 0.6k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": TESTING.md
+        - generic: 65.2k
+        - button "×"
+      - generic:
+        - generic:
+          - img
+        - generic "Double-click to rename": THEMES.md
+        - generic: 6.1k
+        - button "×"

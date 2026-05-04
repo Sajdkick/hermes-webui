@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cloud Terminal Readable Output"
+  short_description: "Required path for user-readable output"
+  default_prompt: "Use $cloud-terminal-readable-output for any user-facing output the user needs to read, including the final answer. If the readable-output env vars are missing, derive the standard project-scoped path from `CLOUD_TERMINAL_SESSION_ID` and the project root before giving up."

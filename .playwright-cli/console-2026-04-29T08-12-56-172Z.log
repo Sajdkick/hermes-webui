@@ -1,0 +1,4 @@
+[     208ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:5003/:0
+[     208ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:5003/:0
+[    1636ms] [LOG] [hermes] Live models loaded for openrouter: 23 new models added @ http://127.0.0.1:5003/static/ui.js:199
+[ 2340214ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5003/api/crons/recent?since=1777450376.349:0

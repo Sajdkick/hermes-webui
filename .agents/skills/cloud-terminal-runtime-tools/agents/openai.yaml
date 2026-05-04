@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cloud Terminal Runtime Tools"
+  short_description: "Run, inspect, and review apps in Cloud Terminal"
+  default_prompt: "Use $cloud-terminal-runtime-tools to run the project, inspect the app, and capture review evidence through Cloud Terminal."

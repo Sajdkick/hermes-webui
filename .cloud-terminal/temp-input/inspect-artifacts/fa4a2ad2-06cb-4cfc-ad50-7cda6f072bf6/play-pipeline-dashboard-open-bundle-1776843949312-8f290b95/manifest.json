@@ -1,0 +1,204 @@
+{
+  "version": 1,
+  "bundleType": "inspect-run-bundle",
+  "createdAt": "2026-04-22T07:45:49.313Z",
+  "sessionId": "fa4a2ad2-06cb-4cfc-ad50-7cda6f072bf6",
+  "kind": "inspect-action",
+  "comparisonKey": "inspect-action:/-06a88d83c158",
+  "entrypoint": {
+    "type": "inspect-action",
+    "route": "/"
+  },
+  "input": {
+    "url": "http://127.0.0.1:5003",
+    "keepSession": false,
+    "captureScreenshot": true,
+    "width": 1440,
+    "height": 900,
+    "delayMs": 2000,
+    "timeoutMs": 30000,
+    "actions": [
+      {
+        "type": "waitForSelectorVisible",
+        "selector": "#opsDashboardNavBtn",
+        "nth": 0,
+        "timeoutMs": 10000,
+        "state": "visible"
+      },
+      {
+        "type": "click",
+        "selector": "#opsDashboardNavBtn",
+        "nth": 0,
+        "x": null,
+        "y": null,
+        "button": "left",
+        "clickCount": 1,
+        "delayMs": 0
+      },
+      {
+        "type": "waitForSelectorVisible",
+        "selector": ".ops-home-dashboard",
+        "nth": 0,
+        "timeoutMs": 10000,
+        "state": "visible"
+      },
+      {
+        "type": "assert",
+        "expression": "!!document.querySelector(\".ops-home-dashboard\")",
+        "awaitPromise": true,
+        "message": "dashboard should render",
+        "delayMs": 0
+      }
+    ]
+  },
+  "output": {
+    "actions": {
+      "requestedCount": 4,
+      "executedCount": 4,
+      "results": [
+        {
+          "index": 0,
+          "type": "waitForSelectorVisible",
+          "selector": "#opsDashboardNavBtn",
+          "nth": 0,
+          "state": "visible",
+          "timeoutMs": 10000,
+          "description": "Matched \"#opsDashboardNavBtn\" (visible)."
+        },
+        {
+          "index": 1,
+          "type": "click",
+          "selector": "#opsDashboardNavBtn",
+          "nth": 0,
+          "point": {
+            "x": 60.4375,
+            "y": 25
+          },
+          "button": "left",
+          "clickCount": 1,
+          "description": "Clicked \"#opsDashboardNavBtn\" at (60, 25)."
+        },
+        {
+          "index": 2,
+          "type": "waitForSelectorVisible",
+          "selector": ".ops-home-dashboard",
+          "nth": 0,
+          "state": "visible",
+          "timeoutMs": 10000,
+          "description": "Matched \".ops-home-dashboard\" (visible)."
+        },
+        {
+          "index": 3,
+          "type": "assert",
+          "value": true,
+          "description": "Assertion passed: dashboard should render"
+        }
+      ]
+    },
+    "capture": {
+      "path": ".cloud-terminal/temp-input/screenshots/fa4a2ad2-06cb-4cfc-ad50-7cda6f072bf6/play-pipeline-dashboard-open-1776843946043-a65871f8.png",
+      "absolutePath": "/home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/temp-input/screenshots/fa4a2ad2-06cb-4cfc-ad50-7cda6f072bf6/play-pipeline-dashboard-open-1776843946043-a65871f8.png",
+      "name": "play-pipeline-dashboard-open-1776843946043-a65871f8.png",
+      "size": 71213,
+      "type": "image/png",
+      "kind": "full-page-screenshot",
+      "selector": "",
+      "nth": 0,
+      "target": "viewport",
+      "width": 1440,
+      "height": 900,
+      "tagName": null,
+      "sessionMode": "ephemeral"
+    },
+    "artifacts": null,
+    "gather": null
+  },
+  "inspectUrl": "http://127.0.0.1:5003/",
+  "captureUrl": "http://127.0.0.1:5003/",
+  "page": {
+    "status": "matched",
+    "matched": true,
+    "requestedUrl": "http://127.0.0.1:5003/",
+    "finalUrl": "http://127.0.0.1:5003/",
+    "requestedPath": "/",
+    "finalPath": "/",
+    "pageTitle": "Dashboard - Hermes",
+    "summary": "Captured /. Title: \"Dashboard - Hermes\".",
+    "warnings": []
+  },
+  "inspectSession": null,
+  "auth": {
+    "enabled": false,
+    "strategy": null,
+    "loginUrls": []
+  },
+  "capture": {
+    "path": ".cloud-terminal/temp-input/screenshots/fa4a2ad2-06cb-4cfc-ad50-7cda6f072bf6/play-pipeline-dashboard-open-1776843946043-a65871f8.png",
+    "absolutePath": "/home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/temp-input/screenshots/fa4a2ad2-06cb-4cfc-ad50-7cda6f072bf6/play-pipeline-dashboard-open-1776843946043-a65871f8.png",
+    "name": "play-pipeline-dashboard-open-1776843946043-a65871f8.png",
+    "size": 71213,
+    "type": "image/png",
+    "kind": "full-page-screenshot",
+    "selector": "",
+    "nth": 0,
+    "target": "viewport",
+    "width": 1440,
+    "height": 900,
+    "tagName": null,
+    "sessionMode": "ephemeral"
+  },
+  "artifacts": null,
+  "gather": null,
+  "operations": [
+    {
+      "index": 0,
+      "type": "waitForSelectorVisible",
+      "selector": "#opsDashboardNavBtn",
+      "nth": 0,
+      "state": "visible",
+      "timeoutMs": 10000,
+      "description": "Matched \"#opsDashboardNavBtn\" (visible)."
+    },
+    {
+      "index": 1,
+      "type": "click",
+      "selector": "#opsDashboardNavBtn",
+      "nth": 0,
+      "point": {
+        "x": 60.4375,
+        "y": 25
+      },
+      "button": "left",
+      "clickCount": 1,
+      "description": "Clicked \"#opsDashboardNavBtn\" at (60, 25)."
+    },
+    {
+      "index": 2,
+      "type": "waitForSelectorVisible",
+      "selector": ".ops-home-dashboard",
+      "nth": 0,
+      "state": "visible",
+      "timeoutMs": 10000,
+      "description": "Matched \".ops-home-dashboard\" (visible)."
+    },
+    {
+      "index": 3,
+      "type": "assert",
+      "value": true,
+      "description": "Assertion passed: dashboard should render"
+    }
+  ],
+  "files": [
+    {
+      "role": "capture",
+      "key": "capture",
+      "label": "viewport",
+      "type": "image/png",
+      "path": ".cloud-terminal/temp-input/screenshots/fa4a2ad2-06cb-4cfc-ad50-7cda6f072bf6/play-pipeline-dashboard-open-1776843946043-a65871f8.png",
+      "absolutePath": "/home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/temp-input/screenshots/fa4a2ad2-06cb-4cfc-ad50-7cda6f072bf6/play-pipeline-dashboard-open-1776843946043-a65871f8.png",
+      "size": 71213,
+      "sha256": "87423974c09cd2f5b2485ca5c35dc48f5ac28a067b1ea0f384699af087e1a3e2"
+    }
+  ],
+  "compare": null
+}

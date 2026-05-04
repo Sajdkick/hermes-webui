@@ -1,0 +1,3 @@
+[     304ms] [ERROR] Framing 'http://127.0.0.1:5003/index.html?embed=play-chat&session_id=20260426_121117_acd612' violates the following Content Security Policy directive: "frame-src 'none'". The request has been blocked.
+ @ http://127.0.0.1:5003/static/play-inspect-overlay.js:126
+[     347ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:5003/play-project/dc51e1cb-0729-45b4-85ea-889d88cd58f0/api/trpc/auth.me?batch=1&input=%7B%7D:0

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cloud Terminal Skill Creator"
+  short_description: "Create shared Cloud Terminal skills"
+  default_prompt: "Use $cloud-terminal-skill-creator to create or update a shared Cloud Terminal skill in this repo's `.agents/skills` source with the right metadata and rollout guidance."

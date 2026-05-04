@@ -1,0 +1,3 @@
+[     411ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:5003/?session_key=ro_verify_20260428:0
+[     412ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:5003/?session_key=ro_verify_20260428:0
+[    2328ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/upstream-sync/status?session_id=ro_verify_20260428:0
