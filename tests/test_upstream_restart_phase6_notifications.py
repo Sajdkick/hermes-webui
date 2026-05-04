@@ -150,7 +150,7 @@ def test_phase6_shell_includes_notifications_asset_and_payload():
     from api.routes import handle_get
 
     shell_page = _FakeHandler()
-    assert handle_get(shell_page, urlparse("http://example.com/ops")) is True
+    assert handle_get(shell_page, urlparse("http://example.com/ops-phase")) is True
     html = bytes(shell_page.body).decode("utf-8")
     assert 'src="static/ops-notifications.js?v=' in html
 

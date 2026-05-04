@@ -1,0 +1,60 @@
+- generic [active] [ref=e1]:
+  - main [ref=e3]:
+    - generic [ref=e4]:
+      - button "Ops dashboard" [ref=e5] [cursor=pointer]:
+        - img [ref=e6]
+      - generic [ref=e12]: Dashboard
+      - link "Back to Hermes" [ref=e14] [cursor=pointer]:
+        - /url: ./
+    - generic [ref=e16]:
+      - generic [ref=e17]:
+        - button "Projects" [ref=e18] [cursor=pointer]:
+          - img [ref=e19]
+          - generic [ref=e21]: Projects
+        - button "Refresh" [ref=e22] [cursor=pointer]:
+          - img [ref=e23]
+          - generic [ref=e27]: Refresh
+      - generic [ref=e28]:
+        - generic [ref=e29]:
+          - generic [ref=e30]:
+            - heading "Notifications" [level=2] [ref=e31]
+            - generic [ref=e32]: Sessions that need input or have finished.
+          - generic [ref=e33]:
+            - button "Auto-approve off" [disabled] [ref=e34]:
+              - img [ref=e35]
+              - generic [ref=e38]: Auto-approve off
+            - button "Refresh" [disabled] [ref=e39]:
+              - img [ref=e40]
+              - generic [ref=e44]: Refresh
+        - generic [ref=e45]: No notifications.
+      - generic [ref=e46]:
+        - generic [ref=e48]:
+          - heading "Quick task runner" [level=2] [ref=e49]
+          - generic [ref=e50]: Create the task under the Quick tasks epic and start it immediately.
+        - generic [ref=e51]:
+          - generic [ref=e52]:
+            - generic [ref=e53]: Project
+            - combobox "Project" [ref=e54] [cursor=pointer]:
+              - option "No projects available" [selected]
+          - generic [ref=e55]:
+            - generic [ref=e56]: Task
+            - textbox "Task" [disabled] [ref=e57]:
+              - /placeholder: Create a project first to use quick tasks.
+          - generic [ref=e58]:
+            - generic [ref=e59]:
+              - button "Record" [disabled] [ref=e60]:
+                - img [ref=e61]
+                - generic [ref=e63]: Record
+              - button "Attach screenshots" [disabled] [ref=e64]:
+                - img [ref=e65]
+                - generic [ref=e67]: Attach screenshots
+            - button "Create & run" [disabled] [ref=e68]:
+              - img [ref=e69]
+              - generic [ref=e71]: Create & run
+        - generic [ref=e72]: not found
+      - generic [ref=e73]:
+        - generic [ref=e75]:
+          - heading "Active sessions" [level=2] [ref=e76]
+          - generic [ref=e77]: Session activity, state, and the next action from one place.
+        - generic [ref=e78]: No active sessions.
+  - generic: not found

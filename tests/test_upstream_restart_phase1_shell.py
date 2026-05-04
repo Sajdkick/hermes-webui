@@ -40,8 +40,27 @@ def test_ops_shell_route_is_registered_and_serves_html():
     assert handler.status == 200
     assert (handler.header("Content-Type") or "").startswith("text/html")
     html = bytes(handler.body).decode("utf-8")
-    assert 'data-ops-shell="cloud-terminal"' in html
     assert 'document.write(\'<base href="' in html
+    assert 'href="static/ops-legacy.css?v=' in html
+    assert 'src="static/ops-legacy-host.js?v=' in html
+    assert 'src="static/ops-legacy-dashboard.js?v=' in html
+    assert 'src="static/ops-legacy-projects.js?v=' in html
+    assert 'src="static/ops-legacy-task-actions.js?v=' in html
+    assert 'src="static/cloud-terminal-entry.js?v=' not in html
+    assert 'Phase 10 post-restart admin slice' not in html
+
+
+def test_ops_phase_shell_route_is_registered_and_serves_html():
+    from api.routes import handle_get
+
+    handler = _FakeHandler()
+    parsed = urlparse("http://example.com/ops-phase")
+
+    assert handle_get(handler, parsed) is True
+    assert handler.status == 200
+    assert (handler.header("Content-Type") or "").startswith("text/html")
+    html = bytes(handler.body).decode("utf-8")
+    assert 'data-ops-shell="cloud-terminal"' in html
     assert 'href="static/cloud-terminal.css?v=__WEBUI_VERSION__"' not in html
     assert 'href="static/cloud-terminal.css?v=' in html
     assert 'src="static/ops-github-admin.js?v=' in html
@@ -65,7 +84,7 @@ def test_ops_shell_bootstrap_api_is_registered():
     assert (handler.header("Content-Type") or "").startswith("application/json")
     payload = json.loads(bytes(handler.body).decode("utf-8"))
     assert payload["phase"].startswith("phase-")
-    assert payload["route"] == "/ops"
+    assert payload["route"] == "/ops-phase"
     assert payload["assets"]["entryScript"] == "/static/cloud-terminal-entry.js"
     assert payload["assets"]["entryStylesheet"] == "/static/cloud-terminal.css"
     assert payload["assets"]["githubScript"] == "/static/ops-github-admin.js"
@@ -84,8 +103,32 @@ def test_ops_entry_uses_base_relative_shell_fetch():
     assert "fetch(appUrl('api/ops/shell')" in source
 
 
+def test_legacy_ops_shell_keeps_restart_compatibility_contract():
+    host_source = Path("static/ops-legacy-host.js").read_text(encoding="utf-8")
+    bridge_source = Path("static/ops-legacy-agent-bridge.js").read_text(encoding="utf-8")
+
+    assert "window.projectUrl = projectUrl;" in host_source
+    assert "api('/api/ops/notifications/pending')" in bridge_source
+    assert "return api('/api/sessions').then(fallback=>({" in bridge_source
+
+
 def test_ops_shell_assets_are_served_by_static_route():
     from api.routes import handle_get
+
+    legacy_script = _FakeHandler()
+    assert handle_get(legacy_script, urlparse("http://example.com/static/ops-legacy-host.js")) is True
+    assert legacy_script.status == 200
+    assert (legacy_script.header("Content-Type") or "").startswith("application/javascript")
+
+    legacy_dashboard = _FakeHandler()
+    assert handle_get(legacy_dashboard, urlparse("http://example.com/static/ops-legacy-dashboard.js")) is True
+    assert legacy_dashboard.status == 200
+    assert (legacy_dashboard.header("Content-Type") or "").startswith("application/javascript")
+
+    legacy_stylesheet = _FakeHandler()
+    assert handle_get(legacy_stylesheet, urlparse("http://example.com/static/ops-legacy.css")) is True
+    assert legacy_stylesheet.status == 200
+    assert (legacy_stylesheet.header("Content-Type") or "").startswith("text/css")
 
     script = _FakeHandler()
     assert handle_get(script, urlparse("http://example.com/static/cloud-terminal-entry.js")) is True

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hermes Ops</title>
+<link rel="icon" type="image/svg+xml" href="static/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="static/favicon-32.png">
+<link rel="shortcut icon" href="static/favicon.ico">
+<script>(function(){var path=location.pathname||'/';path=path.replace(/\/ops\/?$/,'/');if(!path.endsWith('/'))path=(path.replace(/\/[^\/]*$/,'/')||'/');document.write('<base href="'+location.origin+path+'">');})()</script>
+<script>(function(){var themes={light:1,dark:1,system:1},skins={default:1,ares:1,mono:1,slate:1,poseidon:1,sisyphus:1,charizard:1},legacy={slate:['dark','slate'],solarized:['dark','poseidon'],monokai:['dark','sisyphus'],nord:['dark','slate'],oled:['dark','default']},t=(localStorage.getItem('hermes-theme')||'dark').toLowerCase(),s=(localStorage.getItem('hermes-skin')||'').toLowerCase(),m=legacy[t],theme=m?m[0]:(themes[t]?t:'dark'),skin=skins[s]?s:(m?m[1]:'default');localStorage.setItem('hermes-theme',theme);localStorage.setItem('hermes-skin',skin);if(theme==='system')theme=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';if(theme==='dark')document.documentElement.classList.add('dark');if(skin!=='default')document.documentElement.dataset.skin=skin;})()</script>
+<script>(function(){var fs=(localStorage.getItem('hermes-font-size')||'default').toLowerCase();if(fs==='small'||fs==='large')document.documentElement.dataset.fontSize=fs;})()</script>
+<link rel="stylesheet" href="static/ops-legacy.css?v=__WEBUI_VERSION__">
+</head>
+<body>
+<div class="layout">
+  <main class="main">
+    <div class="topbar">
+      <button class="nav-tab active" id="opsDashboardNavBtn" type="button" aria-label="Ops dashboard" title="Ops dashboard">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      </button>
+      <div style="flex:1;min-width:0;overflow:hidden">
+        <div class="topbar-title" id="topbarTitle">Ops</div>
+        <div class="topbar-meta" id="topbarMeta">Loading dashboard…</div>
+      </div>
+      <div class="topbar-chips">
+        <a class="chip" href="./" title="Back to Hermes">Back to Hermes</a>
+      </div>
+    </div>
+    <section class="ops-dashboard-root" id="opsDashboardRoot" hidden></section>
+    <textarea id="msg" hidden></textarea>
+    <div id="pendingFileTray" hidden></div>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<script src="static/ops-legacy-host.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-agent-bridge.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-dashboard-shared.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-dashboard-shell.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-dashboard-quick-actions.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-home.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-projects.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-project-detail.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-task-actions.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-play.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-git.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-database.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-deployments.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-health.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-notifications.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-runs.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-dashboard-actions.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ops-legacy-dashboard.js?v=__WEBUI_VERSION__" defer></script>
+</body>
+</html>

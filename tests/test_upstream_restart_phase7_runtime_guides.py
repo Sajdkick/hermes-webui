@@ -176,9 +176,9 @@ def test_phase7_shell_includes_runtime_asset_and_payload():
     from api.routes import handle_get
 
     shell_page = _FakeHandler()
-    assert handle_get(shell_page, urlparse("http://example.com/ops")) is True
+    assert handle_get(shell_page, urlparse("http://example.com/ops-phase")) is True
     html = bytes(shell_page.body).decode("utf-8")
-    assert "/static/ops-runtime.js" in html
+    assert 'src="static/ops-runtime.js?v=' in html
 
     shell_api = _FakeHandler()
     assert handle_get(shell_api, urlparse("http://example.com/api/ops/shell")) is True

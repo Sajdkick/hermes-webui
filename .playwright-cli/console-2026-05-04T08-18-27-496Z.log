@@ -1,0 +1,141 @@
+[     253ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[     268ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications/settings:0
+[     270ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications/monitor:0
+[     271ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications/logs?limit=5:0
+[     292ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications/push/subscriptions:0
+[     294ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications/push/status:0
+[     296ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications/auto-approval:0
+[     466ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/sessions/groups:0
+[     516ms] ReferenceError: projectUrl is not defined
+    at Object.status (http://127.0.0.1:5003/static/ops-legacy-agent-bridge.js?v=v0.50.278-16-gadc3755-dirty:386:9)
+    at refreshProjectPlayStatus (http://127.0.0.1:5003/static/ops-legacy-play.js?v=v0.50.278-16-gadc3755-dirty:95:46)
+    at http://127.0.0.1:5003/static/ops-legacy-projects.js?v=v0.50.278-16-gadc3755-dirty:300:26
+    at Array.map (<anonymous>)
+    at Object.loadProjects (http://127.0.0.1:5003/static/ops-legacy-projects.js?v=v0.50.278-16-gadc3755-dirty:297:44)
+    at async Promise.all (index 0)
+[     516ms] ReferenceError: projectUrl is not defined
+    at Object.status (http://127.0.0.1:5003/static/ops-legacy-agent-bridge.js?v=v0.50.278-16-gadc3755-dirty:386:9)
+    at refreshProjectPlayStatus (http://127.0.0.1:5003/static/ops-legacy-play.js?v=v0.50.278-16-gadc3755-dirty:95:46)
+    at http://127.0.0.1:5003/static/ops-legacy-projects.js?v=v0.50.278-16-gadc3755-dirty:300:26
+    at Array.map (<anonymous>)
+    at Object.loadProjects (http://127.0.0.1:5003/static/ops-legacy-projects.js?v=v0.50.278-16-gadc3755-dirty:297:44)
+    at async Promise.all (index 0)
+[     516ms] ReferenceError: projectUrl is not defined
+    at Object.status (http://127.0.0.1:5003/static/ops-legacy-agent-bridge.js?v=v0.50.278-16-gadc3755-dirty:386:9)
+    at refreshProjectPlayStatus (http://127.0.0.1:5003/static/ops-legacy-play.js?v=v0.50.278-16-gadc3755-dirty:95:46)
+    at http://127.0.0.1:5003/static/ops-legacy-projects.js?v=v0.50.278-16-gadc3755-dirty:300:26
+    at Array.map (<anonymous>)
+    at Object.loadProjects (http://127.0.0.1:5003/static/ops-legacy-projects.js?v=v0.50.278-16-gadc3755-dirty:297:44)
+    at async Promise.all (index 0)
+[     516ms] ReferenceError: projectUrl is not defined
+    at Object.status (http://127.0.0.1:5003/static/ops-legacy-agent-bridge.js?v=v0.50.278-16-gadc3755-dirty:386:9)
+    at refreshProjectPlayStatus (http://127.0.0.1:5003/static/ops-legacy-play.js?v=v0.50.278-16-gadc3755-dirty:95:46)
+    at http://127.0.0.1:5003/static/ops-legacy-projects.js?v=v0.50.278-16-gadc3755-dirty:300:26
+    at Array.map (<anonymous>)
+    at Object.loadProjects (http://127.0.0.1:5003/static/ops-legacy-projects.js?v=v0.50.278-16-gadc3755-dirty:297:44)
+    at async Promise.all (index 0)
+[     516ms] ReferenceError: projectUrl is not defined
+    at Object.status (http://127.0.0.1:5003/static/ops-legacy-agent-bridge.js?v=v0.50.278-16-gadc3755-dirty:386:9)
+    at refreshProjectPlayStatus (http://127.0.0.1:5003/static/ops-legacy-play.js?v=v0.50.278-16-gadc3755-dirty:95:46)
+    at http://127.0.0.1:5003/static/ops-legacy-projects.js?v=v0.50.278-16-gadc3755-dirty:300:26
+    at Array.map (<anonymous>)
+    at Object.loadProjects (http://127.0.0.1:5003/static/ops-legacy-projects.js?v=v0.50.278-16-gadc3755-dirty:297:44)
+    at async Promise.all (index 0)
+[     516ms] ReferenceError: projectUrl is not defined
+    at Object.status (http://127.0.0.1:5003/static/ops-legacy-agent-bridge.js?v=v0.50.278-16-gadc3755-dirty:386:9)
+    at refreshProjectPlayStatus (http://127.0.0.1:5003/static/ops-legacy-play.js?v=v0.50.278-16-gadc3755-dirty:95:46)
+    at http://127.0.0.1:5003/static/ops-legacy-projects.js?v=v0.50.278-16-gadc3755-dirty:300:26
+    at Array.map (<anonymous>)
+    at Object.loadProjects (http://127.0.0.1:5003/static/ops-legacy-projects.js?v=v0.50.278-16-gadc3755-dirty:297:44)
+    at async Promise.all (index 0)
+[    5199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   10198ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   15201ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   20204ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   25199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   30204ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   35200ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   40200ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   45199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   50202ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   55204ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   60199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   65207ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   70200ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   75201ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   80201ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   85201ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   90206ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[   95199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  100202ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  105200ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  110203ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  115205ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  120198ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  125204ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  130201ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  135202ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  140199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  145199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  150207ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  155212ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  160202ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  165203ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  170207ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  175202ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  180203ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  185198ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  190202ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  195201ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  200199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  205199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  210207ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  215202ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  220203ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  225205ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  230203ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  235202ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  240211ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  245200ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  250206ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  255201ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  260201ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  265202ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  270199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  275201ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  280198ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  285204ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  290204ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  295200ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  300198ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  305199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  310204ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  315202ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  320199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  325199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  330201ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  335203ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  340199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  345200ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  350201ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  355202ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  360200ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  365200ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  370199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  375199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  380209ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  385200ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  390200ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  395198ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  400203ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  405208ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  410199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  415199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  420203ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  425199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  430201ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  435203ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  440204ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  445201ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  450203ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0
+[  455199ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5003/api/notifications:0

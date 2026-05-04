@@ -1234,7 +1234,11 @@ def handle_get(handler, parsed) -> bool:
             },
         )
 
-    if parsed.path in ("/ops", "/ops/") or parsed.path.startswith("/api/ops/") or parsed.path.startswith("/play-project/"):
+    if (
+        parsed.path in ("/ops", "/ops/", "/ops-phase", "/ops-phase/")
+        or parsed.path.startswith("/api/ops/")
+        or parsed.path.startswith("/play-project/")
+    ):
         from api.routes_ops import handle_get as handle_ops_get
 
         if handle_ops_get(handler, parsed):

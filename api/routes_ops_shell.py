@@ -1,4 +1,4 @@
-"""Fork-owned ops shell routes for the clean restart branch."""
+"""Fork-owned ops shell routes."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from api.updates import WEBUI_VERSION
 
 _STATIC_DIR = (Path(__file__).parent.parent / "static").resolve()
 _OPS_SHELL_PATH = (_STATIC_DIR / "ops-shell.html").resolve()
+_LEGACY_OPS_SHELL_PATH = (_STATIC_DIR / "ops-legacy.html").resolve()
 
 
 def _ops_shell_payload() -> dict:
@@ -18,7 +19,7 @@ def _ops_shell_payload() -> dict:
         "app": "cloud-terminal",
         "phase": "phase-10",
         "status": "ready",
-        "route": "/ops",
+        "route": "/ops-phase",
         "apiBase": "/api/ops",
         "assets": {
             "entryScript": "/static/cloud-terminal-entry.js",
@@ -41,8 +42,22 @@ def _ops_shell_html() -> str:
     return _OPS_SHELL_PATH.read_text(encoding="utf-8").replace("__WEBUI_VERSION__", version_token)
 
 
+def _legacy_ops_shell_html() -> str:
+    version_token = quote(WEBUI_VERSION, safe="")
+    return _LEGACY_OPS_SHELL_PATH.read_text(encoding="utf-8").replace("__WEBUI_VERSION__", version_token)
+
+
 def handle_get(handler, parsed) -> bool:
     if parsed.path in ("/ops", "/ops/"):
+        try:
+            html = _legacy_ops_shell_html()
+        except OSError:
+            j(handler, {"error": "ops shell is unavailable"}, status=500)
+            return True
+        t(handler, html, content_type="text/html; charset=utf-8")
+        return True
+
+    if parsed.path in ("/ops-phase", "/ops-phase/"):
         try:
             html = _ops_shell_html()
         except OSError:
