@@ -28,12 +28,7 @@ Use `ct-runtime` for Cloud Terminal Play and inspect workflows. Do not guess the
    - `ct-runtime inspect session close <session-id>`
 4. If Play fails or never becomes ready:
    - `ct-runtime play logs --limit 200`
-5. If `ct-runtime` itself is unavailable in the agent shell (`command not found`), do not stop. Fall back to direct runtime discovery:
-   - inspect running processes/ports with `ps`/`ss`,
-   - hit local HTTP endpoints with `curl`/Python `urllib`,
-   - use the browser tool against the discovered localhost URL,
-   - verify the browser console and rendered DOM directly.
-6. If screenshot capture is unavailable or you need human feedback:
+5. If screenshot capture is unavailable or you need human feedback:
    - `ct-runtime inspect request-review "Please inspect the running app and share feedback."`
 
 ## Guidance
