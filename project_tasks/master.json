@@ -14,6 +14,40 @@
           "markers": [
             "AI suggestion"
           ]
+        },
+        {
+          "id": "b95cbda9-dd30-4f22-b399-3153175057b4",
+          "text": "Make the restored `/ops` Projects view render project cards immediately and hydrate session/count/play/git metadata in the background instead of blocking on the full enrichment pass, which currently keeps the screen on `Loading projects...` for several seconds on larger project sets.",
+          "done": false,
+          "qaStatus": "ready-for-test",
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-05T04:51:00.000Z",
+          "markers": [
+            "AI suggestion"
+          ]
+        },
+        {
+          "id": "4fd0fd64-1fb4-4221-8dbd-cf3c4025fd1c",
+          "text": "Port the remaining global Cloud Terminal menu destinations into Hermes `/ops` so the home action strip can expose true equivalents for deployments, files, todos, and terminal/back navigation instead of the current reduced menu shell.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-05T05:56:00.000Z",
+          "markers": [
+            "AI suggestion"
+          ]
+        },
+        {
+          "id": "de8548d7-fbc8-4e30-b70a-3e299133b27e",
+          "text": "Continue porting the remaining Hermes-owned `/ops` side panels onto Cloud Terminal shell patterns so run artifacts/logs/events and the deeper deployment/database/health/play detail panels no longer mix Cloud Terminal cards with legacy Hermes panel styling.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-05T07:10:00.000Z",
+          "markers": [
+            "AI suggestion"
+          ]
         }
       ],
       "createdBy": {
@@ -26,6 +60,75 @@
       },
       "markers": [
         "AI suggestion"
+      ]
+    },
+    {
+      "id": "294bc155-93a4-433a-a340-26c6d96b827f",
+      "title": "Quick tasks",
+      "tasks": [
+        {
+          "id": "a8e7f630-0941-4431-a776-14d4bc8147e8",
+          "text": "I want to add a toggle to the quick task runner that when toggled, sets the task as a goal by using the /goal command in hermes agent. I want you to look online to see exactly how it works so your implementation is correct.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-04T16:17:17.931Z",
+          "lastSessionAt": "2026-05-05T16:34:42.060Z"
+        },
+        {
+          "id": "27f67178-57b1-4671-83a8-c63ae13e4b1c",
+          "text": "There is a bug in the ops dashboard, where if I remove all notifications, I dismiss them, then I go back and in again, they're still there, so they're not truly dismissed.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-05T10:27:06.385Z",
+          "lastSessionAt": "2026-05-05T10:27:06.932Z",
+          "startedAt": "2026-05-05T10:27:06.932Z",
+          "inProgress": true
+        },
+        {
+          "id": "096922cb-5426-426f-82c6-68c2022269ae",
+          "text": "I created a task and executed it, bit it didnt show up in the actove sessions list in the ops dashboard. Instead insee 15 unnamed tasks?",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-05T16:37:00.968Z",
+          "lastSessionAt": "2026-05-05T16:37:01.289Z",
+          "startedAt": "2026-05-05T16:37:01.289Z",
+          "inProgress": true
+        }
+      ]
+    },
+    {
+      "id": "e1735f35-fd29-4f7e-be85-ff36bbeb57aa",
+      "title": "AI automation",
+      "tasks": [
+        {
+          "id": "989817c2-5278-40b4-81f5-f51735e56b25",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-04T16:20:05.989Z"
+        },
+        {
+          "id": "961c5dbb-04a4-4d0d-b751-8cad1814f4a8",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-04T16:23:44.141Z",
+          "lastSessionAt": "2026-05-05T10:20:14.683Z"
+        },
+        {
+          "id": "f50c1131-379e-4216-b04a-3dde1ee3ff67",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-04T16:26:39.505Z",
+          "lastSessionAt": "2026-05-05T10:20:08.011Z"
+        }
       ]
     }
   ]

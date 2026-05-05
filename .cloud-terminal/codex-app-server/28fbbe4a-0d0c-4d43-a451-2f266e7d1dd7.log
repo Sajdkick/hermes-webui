@@ -50,3 +50,37 @@ async function ensureBackendHealthy(name, maxWaitMs = BACKEND_STARTUP_TIMEOUT_MS
       return (OPS.projects||[]).find(project=>project.id===projectId)||null;
     }
 [2m2026-05-04T10:29:53.718870Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to read /home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/readable-output/28fbbe4a-0d0c-4d43-a451-2f266e7d1dd7/message.md: No such file or directory (os error 2)
+[2m2026-05-04T17:36:00.399089Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to find expected lines in /home/ubuntu/cloud-terminal-data/projects/hermes-webui/tests/test_upstream_restart_phase4_sessions.py:
+    completed = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+    assert completed.stdout.strip() == "ok"
+[2m2026-05-04T17:40:01.991788Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to read /home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/readable-output/28fbbe4a-0d0c-4d43-a451-2f266e7d1dd7/message.md: No such file or directory (os error 2)
+[2m2026-05-04T18:22:01.823655Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to read /home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/readable-output/28fbbe4a-0d0c-4d43-a451-2f266e7d1dd7/message.md: No such file or directory (os error 2)
+[2m2026-05-04T18:38:37.722779Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to read file to update /home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/readable-output/28fbbe4a-0d0c-4d43-a451-2f266e7d1dd7/message.md: No such file or directory (os error 2)
+[2m2026-05-05T04:50:45.418751Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0m{"output":"Failed to delete file /home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/temp-input/ops-introspect.json\n","metadata":{"exit_code":1,"duration_seconds":0.0}}
+[2m2026-05-05T04:50:58.661654Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0m{"output":"Failed to delete file /home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/temp-input/ops-introspect.json\n","metadata":{"exit_code":1,"duration_seconds":0.0}}
+[2m2026-05-05T05:07:39.857301Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to read file to update /home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/readable-output/28fbbe4a-0d0c-4d43-a451-2f266e7d1dd7/message.md: No such file or directory (os error 2)
+[2m2026-05-05T05:39:28.706635Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to find expected lines in /home/ubuntu/cloud-terminal-data/projects/hermes-webui/static/ops-legacy.css:
+  .ops-home-top{align-items:stretch;}
+  .ops-home-top .ops-home-projects-btn,.ops-home-top .ops-btn{width:100%;}
+  .ops-title-block span{max-width:100%;white-space:normal;}
+  .ops-quick-task-form{grid-template-columns:1fr;}
+  .ops-quick-task-actions{align-items:stretch;}
+  .ops-quick-task-secondary-actions{width:100%;}
+  .ops-quick-task-secondary-actions .ops-btn,.ops-quick-task-actions>.ops-btn{width:100%;}
+[2m2026-05-05T06:20:25.888120Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0m{"output":"Failed to delete file /home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/readable-output/49faddfd-ff9e-4757-90db-04caa7acaaaf/message.md\n","metadata":{"exit_code":1,"duration_seconds":0.0}}
+[2m2026-05-05T09:03:17.322940Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to find expected lines in /home/ubuntu/cloud-terminal-data/projects/hermes-webui/static/ops-legacy.css:
+.menu-session-activity-badge{display:inline-flex;align-items:center;justify-content:center;border:1px solid #334155;border-radius:999px;padding:2px 8px;font-size:.68rem;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:#cbd5f5;background:rgba(15,23,42,.7);}
+.menu-session-activity-badge.readable-output{border-color:rgba(251,191,36,.46);color:#fde68a;background:rgba(120,53,15,.28);}
+.ops-notification-diagnostics-panel{overflow:hidden;}
+.ops-notification-diagnostics-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
+[2m2026-05-05T09:04:19.945325Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to find expected lines in /home/ubuntu/cloud-terminal-data/projects/hermes-webui/static/ops-legacy.css:
+  .ops-run-actions{justify-content:flex-start;}
+  .ops-run-panel-header{flex-direction:column;}
+  .ops-run-readable-body{max-height:60vh;}
+  .ops-run-artifact-form{grid-template-columns:1fr;}
+  .ops-run-artifact-form label.full{grid-column:auto;}
+  .ops-notification{grid-template-columns:1fr;}
+  .ops-notification-control,.ops-notification-actions,.ops-notification-choices{align-items:flex-start;justify-content:flex-start;}
+  .ops-notification-response{grid-template-columns:1fr;min-width:0;width:100%;}
+}
+[2m2026-05-05T17:34:45.536892Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0m{"output":"Failed to delete file /home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/readable-output/49faddfd-ff9e-4757-90db-04caa7acaaaf/message.md\n","metadata":{"exit_code":1,"duration_seconds":0.1}}

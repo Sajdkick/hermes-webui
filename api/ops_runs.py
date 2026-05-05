@@ -11,7 +11,7 @@ from typing import Any
 from urllib.parse import quote
 
 from api.config import STATE_DIR
-from api import ops_projects, session_readable_output
+from api import ops_projects, session_readable_output, session_sidecars
 from api.models import get_session
 
 
@@ -154,6 +154,12 @@ def _session_summary(session_id: str) -> dict | None:
     if not key:
         return None
     try:
+        resolved = session_sidecars.resolve_session_summary(key)
+    except Exception:
+        resolved = None
+    if isinstance(resolved, dict):
+        return resolved
+    try:
         session = get_session(key, metadata_only=True)
     except KeyError:
         return None
@@ -200,8 +206,9 @@ def _readable_output_state(session_id: str) -> dict:
     key = _text(session_id, limit=128)
     if not key:
         return {"available": False}
+    resolved_id = session_sidecars.resolve_session_id(key) or key
     try:
-        payload = session_readable_output.get_session_readable_output(key)
+        payload = session_readable_output.get_session_readable_output(resolved_id)
     except session_readable_output.SessionReadableOutputError:
         return {"available": False}
     artifact = payload.get("readableOutput") if isinstance(payload, dict) else None
@@ -218,15 +225,16 @@ def _run_requests_for_session(session_id: str) -> list[dict]:
     key = _text(session_id, limit=128)
     if not key:
         return []
+    resolved_id = session_sidecars.resolve_session_id(key) or key
     from api import ops_notifications
 
     requests: list[dict] = []
-    approval = ops_notifications._pending_approval(key)
+    approval = ops_notifications._pending_approval(resolved_id)
     pending_approval = approval.get("pending")
     if isinstance(pending_approval, dict):
         requests.append(
             {
-                "id": _text(pending_approval.get("approval_id"), limit=128) or f"approval:{key}",
+                "id": _text(pending_approval.get("approval_id"), limit=128) or f"approval:{resolved_id}",
                 "kind": "approval",
                 "status": "pending",
                 "message": _text(
@@ -237,12 +245,12 @@ def _run_requests_for_session(session_id: str) -> list[dict]:
                 "metadata": _json_safe(pending_approval),
             }
         )
-    clarify = ops_notifications._pending_clarify(key)
+    clarify = ops_notifications._pending_clarify(resolved_id)
     pending_clarify = clarify.get("pending")
     if isinstance(pending_clarify, dict):
         requests.append(
             {
-                "id": _text(pending_clarify.get("requested_at"), limit=128) or f"clarify:{key}",
+                "id": _text(pending_clarify.get("requested_at"), limit=128) or f"clarify:{resolved_id}",
                 "kind": "clarification",
                 "status": "pending",
                 "message": _text(
@@ -268,30 +276,37 @@ def _derive_status(run: dict, session: dict | None, requests: list[dict], readab
         return "waiting-input"
     if session.get("active_stream_id") or session.get("pending_user_message"):
         return "running"
-    if readable_output.get("available"):
+    if readable_output.get("available") or int(session.get("message_count") or 0) > 0:
         return "succeeded"
     return stored
 
 
 def _enrich_run(run: dict) -> dict:
-    session_id = _text(run.get("sessionId"), limit=128)
-    session = _session_summary(session_id)
-    requests = _run_requests_for_session(session_id)
-    readable_output = _readable_output_state(session_id)
+    stored_session_id = _text(run.get("sessionId"), limit=128)
+    session = _session_summary(stored_session_id)
+    resolved_session_id = _text((session or {}).get("session_id"), limit=128) or stored_session_id
+    requests = _run_requests_for_session(resolved_session_id)
+    readable_output = _readable_output_state(resolved_session_id)
     status = _derive_status(run, session, requests, readable_output)
     updated_at = run.get("updatedAt")
     if isinstance(session, dict):
         updated_at = _to_iso(session.get("updated_at")) or updated_at
     if readable_output.get("available") and readable_output.get("updatedAt"):
         updated_at = _to_iso(readable_output.get("updatedAt")) or updated_at
+    lineage_root_id = _text((session or {}).get("_lineage_root_id"), limit=128)
+    lineage_tip_id = _text((session or {}).get("_lineage_tip_id"), limit=128) or resolved_session_id
     return {
         **run,
+        "sessionId": resolved_session_id,
+        "linkedSessionId": stored_session_id,
+        "lineageRootId": lineage_root_id,
+        "lineageTipId": lineage_tip_id,
         "status": status,
         "updatedAt": updated_at or run.get("updatedAt"),
         "project": _project_context(_text(run.get("projectId"), limit=128)),
         "task": _task_context(_text(run.get("projectId"), limit=128), _text(run.get("taskId"), limit=128)),
         "session": session,
-        "sessionUrl": _session_url(session_id) if session_id else "",
+        "sessionUrl": _session_url(resolved_session_id) if resolved_session_id else "",
         "pendingRequestCount": len(requests),
         "requests": requests,
         "readableOutput": {
@@ -343,6 +358,38 @@ def create_task_run(project_id: str, task_id: str, session_id: str, *, title: st
     return _enrich_run(run)
 
 
+def create_ops_run(body: dict | None = None) -> dict:
+    payload = body if isinstance(body, dict) else {}
+    project_id = _text(payload.get("projectId") or payload.get("project_id"), limit=128)
+    task_id = _text(payload.get("taskId") or payload.get("task_id"), limit=128)
+    session_id = _text(payload.get("sessionId") or payload.get("session_id"), limit=128)
+    if not project_id or not task_id or not session_id:
+        raise OpsRunError("Project id, task id, and session id are required.")
+
+    run = create_task_run(
+        project_id,
+        task_id,
+        session_id,
+        title=_text(payload.get("title"), limit=256),
+        summary=_text(payload.get("summary"), limit=4000),
+    )
+
+    updates: dict[str, Any] = {}
+    if "title" in payload:
+        updates["title"] = _text(payload.get("title"), limit=256)
+    if "summary" in payload:
+        updates["summary"] = _text(payload.get("summary"), limit=4000)
+    if "status" in payload:
+        updates["status"] = payload.get("status")
+    if "metadata" in payload:
+        updates["metadata"] = payload.get("metadata")
+    if payload.get("engine") is not None:
+        updates["engine"] = _text(payload.get("engine"), limit=128)
+    if updates:
+        run = update_ops_run(_text(run.get("id"), limit=128), updates)
+    return run
+
+
 def list_ops_runs(filters: dict | None = None) -> dict:
     filters = filters or {}
     project_id = _text(filters.get("projectId") or filters.get("project_id"), limit=128)
@@ -360,7 +407,17 @@ def list_ops_runs(filters: dict | None = None) -> dict:
     if task_id:
         enriched = [run for run in enriched if _text(run.get("taskId"), limit=128) == task_id]
     if session_id:
-        enriched = [run for run in enriched if _text(run.get("sessionId"), limit=128) == session_id]
+        filtered = []
+        for run in enriched:
+            aliases = {
+                _text(run.get("sessionId"), limit=128),
+                _text(run.get("linkedSessionId"), limit=128),
+                _text(run.get("lineageRootId"), limit=128),
+                _text(run.get("lineageTipId"), limit=128),
+            }
+            if session_id in aliases:
+                filtered.append(run)
+        enriched = filtered
     if status:
         enriched = [run for run in enriched if run.get("status") == status]
     enriched.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
@@ -383,8 +440,23 @@ def update_ops_run(run_id: str, updates: dict | None = None) -> dict:
         updated["title"] = title
     if "summary" in payload:
         updated["summary"] = _text(payload.get("summary"), limit=4000)
+    if "completedAt" in payload:
+        completed_at = _to_iso(payload.get("completedAt"))
+        if completed_at:
+            updated["completedAt"] = completed_at
+        else:
+            updated.pop("completedAt", None)
     if "status" in payload:
         updated["status"] = _status(payload.get("status"), default=updated.get("status") or "running")
+    if "metadata" in payload:
+        current_metadata = updated.get("metadata") if isinstance(updated.get("metadata"), dict) else {}
+        next_metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        updated["metadata"] = _json_safe({**current_metadata, **next_metadata})
+    if "engine" in payload:
+        engine = _text(payload.get("engine"), limit=128)
+        metadata = updated.get("metadata") if isinstance(updated.get("metadata"), dict) else {}
+        if engine:
+            updated["metadata"] = _json_safe({**metadata, "engine": engine})
     updated["updatedAt"] = _now_iso()
     if updated.get("status") in RUN_TERMINAL_STATUSES and not updated.get("completedAt"):
         updated["completedAt"] = updated["updatedAt"]

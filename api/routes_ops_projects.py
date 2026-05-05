@@ -17,7 +17,14 @@ _PROJECT_DELETE_RE = re.compile(r"^/api/ops/projects/([^/]+)/delete/?$")
 _PROJECT_ENSURE_WORKSPACE_RE = re.compile(r"^/api/ops/projects/([^/]+)/ensure-workspace/?$")
 _PROJECT_TASKS_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/?$")
 _PROJECT_EPICS_RE = re.compile(r"^/api/ops/projects/([^/]+)/epics/?$")
+_PROJECT_EPIC_DELETE_RE = re.compile(r"^/api/ops/projects/([^/]+)/epics/([^/]+)/delete/?$")
+_PROJECT_TASK_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/([^/]+)/?$")
 _PROJECT_TASK_UPDATE_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/([^/]+)/update/?$")
+_PROJECT_TASK_DELETE_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/([^/]+)/delete/?$")
+_PROJECT_TASK_COMPLETE_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/([^/]+)/complete/?$")
+_PROJECT_TASK_ARCHIVE_COMPLETED_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/archive-completed/?$")
+_PROJECT_TASK_SESSION_ENSURE_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/([^/]+)/session/ensure/?$")
+_PROJECT_TASK_SESSION_CLOSE_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/([^/]+)/session/close/?$")
 _PROJECT_TASK_SESSION_LAUNCH_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/([^/]+)/sessions/launch/?$")
 
 
@@ -101,9 +108,44 @@ def handle_post(handler, parsed, body: dict) -> bool:
             j(handler, ops_projects.update_ops_project_task(match.group(1), match.group(2), body))
             return True
 
+        match = _PROJECT_TASK_DELETE_RE.match(parsed.path)
+        if match:
+            j(handler, ops_projects.delete_ops_project_task(match.group(1), match.group(2)))
+            return True
+
+        match = _PROJECT_EPIC_DELETE_RE.match(parsed.path)
+        if match:
+            j(handler, ops_projects.delete_ops_project_epic(match.group(1), match.group(2)))
+            return True
+
+        match = _PROJECT_TASK_ARCHIVE_COMPLETED_RE.match(parsed.path)
+        if match:
+            j(handler, ops_projects.archive_completed_ops_project_tasks(match.group(1)))
+            return True
+
+        match = _PROJECT_TASK_RE.match(parsed.path)
+        if match:
+            j(handler, ops_projects.update_ops_project_task(match.group(1), match.group(2), body))
+            return True
+
+        match = _PROJECT_TASK_SESSION_ENSURE_RE.match(parsed.path)
+        if match:
+            j(handler, ops_sessions.launch_task_session(match.group(1), match.group(2), body), status=201)
+            return True
+
+        match = _PROJECT_TASK_SESSION_CLOSE_RE.match(parsed.path)
+        if match:
+            j(handler, ops_sessions.close_task_session(match.group(1), match.group(2), body))
+            return True
+
         match = _PROJECT_TASK_SESSION_LAUNCH_RE.match(parsed.path)
         if match:
-            j(handler, ops_sessions.launch_task_session(match.group(1), match.group(2)), status=201)
+            j(handler, ops_sessions.launch_task_session(match.group(1), match.group(2), body), status=201)
+            return True
+
+        match = _PROJECT_TASK_COMPLETE_RE.match(parsed.path)
+        if match:
+            j(handler, ops_sessions.complete_task_session(match.group(1), match.group(2), body))
             return True
 
         return False

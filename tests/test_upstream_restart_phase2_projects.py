@@ -2,6 +2,7 @@ import io
 import json
 import shutil
 import subprocess
+import textwrap
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -213,3 +214,274 @@ def test_phase2_project_compatibility_routes_expose_legacy_ops_capabilities(monk
     ) is True
     assert delete.status == 200
     assert _response_json(delete)["projects"] == []
+
+
+def test_phase2_projects_view_renders_before_background_hydration():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (async () => {
+          const source = fs.readFileSync('static/ops-legacy-projects.js', 'utf8');
+          let releaseSessions = null;
+          let releaseTasks = null;
+          const groupedPromise = new Promise((resolve) => { releaseSessions = resolve; });
+          const tasksPromise = new Promise((resolve) => { releaseTasks = resolve; });
+          const rootEl = { innerHTML: '' };
+          const project = {
+            id: 'project-1',
+            name: 'hermes-webui',
+            fullName: 'Sajdkick/hermes-webui',
+            path: '/tmp/hermes-webui',
+            coreBranch: 'master',
+            profile: 'hermes',
+          };
+
+          const windowRef = { HermesOpsModules: {} };
+          const context = {
+            console,
+            window: windowRef,
+            document: {
+              getElementById(){ return null; },
+            },
+            setTimeout,
+            clearTimeout,
+          };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const dashboard = context.window.HermesOpsModules.projects.bindDashboard({
+            OPS: {
+              view: 'home',
+              projects: [],
+              profiles: [],
+              sessions: [],
+              sessionGroups: null,
+              counts: {},
+              taskDataByProject: {},
+              currentProject: null,
+              taskData: null,
+              showCreate: false,
+              playStatusByProject: {},
+              gitStatusByProject: {},
+            },
+            api: async (path) => {
+              if (path === '/api/ops/projects') {
+                return { projects: [project] };
+              }
+              if (path === '/api/ops/projects/project-1/tasks') {
+                return tasksPromise;
+              }
+              throw new Error('Unexpected api path: ' + path);
+            },
+            AgentBridge: {
+              sessions: {
+                grouped: async () => groupedPromise,
+                list: async () => ({ sessions: [] }),
+              },
+              profiles: {
+                list: async () => ({ profiles: [{ name: 'hermes' }] }),
+              },
+            },
+            root: () => rootEl,
+            esc: (value) => String(value ?? ''),
+            svg: { plus: '', refresh: '', arrow: '', chat: '', folder: '' },
+            nameOf: (entry) => entry.fullName || entry.name || entry.id,
+            projectPath: (entry) => entry.path,
+            projectUrl: (projectId, suffix = '') => '/api/ops/projects/' + projectId + suffix,
+            projectProfileLabel: (entry) => entry.profile || 'No assigned profile',
+            renderProjectProfileOptions: () => '',
+            projectUsesBranchTitle: () => false,
+            projectCardTitle: (entry) => entry.fullName || entry.name || entry.id,
+            projectContextLabel: () => '',
+            projectAccentStyle: () => '',
+            setDashboardTopbar: () => {},
+            renderLoading: (label) => { rootEl.innerHTML = label; },
+            renderGitHubDiscovery: () => '',
+            renderSessionWorkspaceActions: () => '',
+            renderProjectSessionRows: () => '',
+            showToast: () => {},
+            resetTaskFilters: () => {},
+            renderProjectDetail: () => '',
+            refreshProjectPlayStatus: async () => null,
+            refreshProjectGitStatus: async () => null,
+            playStatusFor: () => null,
+            playStatusKind: () => '',
+            playStatusLabel: () => '',
+            loadOpsRuns: async () => [],
+            loadProjectDependencyStatus: async () => null,
+            loadProjectGatherReports: async () => null,
+            loadProjectReviewRequests: async () => null,
+            loadProjectDeployment: async () => null,
+            loadProjectDatabase: async () => null,
+          });
+
+          const result = await Promise.race([
+            dashboard.openProjects().then(() => 'resolved'),
+            new Promise((resolve) => setTimeout(() => resolve('timeout'), 100)),
+          ]);
+          if (result !== 'resolved') {
+            throw new Error('openProjects waited for background hydration.');
+          }
+          if (!rootEl.innerHTML.includes('Sajdkick/hermes-webui')) {
+            throw new Error('Projects view did not render project cards immediately.');
+          }
+          if (!rootEl.innerHTML.includes('project-page-content')) {
+            throw new Error('Projects view did not switch to the Cloud Terminal project-page shell.');
+          }
+          if (!rootEl.innerHTML.includes('quick-response-panel')) {
+            throw new Error('Projects view did not use the Cloud Terminal quick-response shell.');
+          }
+          if (!rootEl.innerHTML.includes('quick-response-project-card')) {
+            throw new Error('Projects view did not render Cloud Terminal-style project cards.');
+          }
+          if (!rootEl.innerHTML.includes('Loading task counts...')) {
+            throw new Error('Projects view did not show interim background hydration state.');
+          }
+
+          releaseSessions({ sessions: [], groups: [], ungrouped: [] });
+          releaseTasks({ epics: [{ id: 'epic-1', title: 'Quick tasks', tasks: [{ id: 'task-1', done: false }] }] });
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          await new Promise((resolve) => setTimeout(resolve, 0));
+
+          if (!rootEl.innerHTML.includes('1 active task')) {
+            throw new Error('Projects view did not hydrate task counts after the background requests resolved.');
+          }
+
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_phase2_project_detail_uses_cloud_terminal_task_shell():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (() => {
+          const source = fs.readFileSync('static/ops-legacy-project-detail.js', 'utf8');
+          const rootEl = { innerHTML: '' };
+          const windowRef = { HermesOpsModules: {} };
+          const context = {
+            console,
+            window: windowRef,
+            document: {},
+            setTimeout,
+            clearTimeout,
+            URL,
+          };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const project = {
+            id: 'project-1',
+            name: 'hermes-webui',
+            fullName: 'Sajdkick/hermes-webui',
+            path: '/tmp/hermes-webui',
+            coreBranch: 'master',
+            profile: 'hermes',
+            active: true,
+          };
+          const epics = [{
+            id: 'epic-1',
+            title: 'Quick tasks',
+            tasks: [{
+              id: 'task-1',
+              text: 'Match the Cloud Terminal task shell',
+              done: false,
+              grade: 'orange',
+              createdAt: '2026-05-05T00:00:00Z',
+              dependencies: [],
+              flags: ['ui'],
+              markers: ['AI suggestion'],
+            }],
+          }];
+
+          const dashboard = context.window.HermesOpsModules.projectDetail.bindDashboard({
+            OPS: {
+              currentProject: project,
+              taskData: { branch: 'master', epics },
+              taskFilters: { status: 'active', grade: '', token: '' },
+              taskCreateCollapsed: false,
+              taskFiltersCollapsed: false,
+              taskAutomationBusyByProject: {},
+              editingTask: null,
+            },
+            root: () => rootEl,
+            esc: (value) => String(value ?? ''),
+            svg: { plus: '', refresh: '', close: '', play: '', folder: '', grid: '', arrow: '', trash: '', check: '' },
+            setDashboardTopbar: () => {},
+            showError: () => {},
+            summarizeEpics: (items) => {
+              const allTasks = (items || []).flatMap((epic) => epic.tasks || []);
+              return {
+                epics: (items || []).length,
+                active: allTasks.filter((task) => !task.done && !task.archived).length,
+                done: allTasks.filter((task) => task.done).length,
+              };
+            },
+            nameOf: (entry) => entry.fullName || entry.name || entry.id,
+            projectPath: (entry) => entry.path,
+            projectProfileLabel: (entry) => entry.profile || 'No assigned profile',
+            rememberTaskFilterFocus: () => {},
+            restoreTaskFilterFocus: () => {},
+            syncEpicCollapseState: () => {},
+            isEpicCollapsed: () => false,
+            renderProjectPlayControls: () => '',
+            renderProjectSettings: () => '',
+            renderProjectHealth: () => '',
+            renderProjectGitStatus: () => '',
+            renderProjectPlayConfigEditor: () => '',
+            renderProjectRuntimeSnapshot: () => '',
+            renderProjectRuntimeScreenshot: () => '',
+            renderProjectPlayLogs: () => '',
+            renderProjectGatherReports: () => '',
+            renderProjectReviewRequests: () => '',
+            renderProjectDeployment: () => '',
+            renderProjectDatabase: () => '',
+            renderProjectRunActivity: () => '',
+            renderRunDetailPanel: () => '',
+            resolvedTaskSession: () => null,
+            sessionRefValue: (value) => value || '',
+            updateTaskGrade: async () => null,
+            windowRef,
+            URLRef: URL,
+          });
+
+          dashboard.renderProjectDetail();
+          const html = rootEl.innerHTML;
+          if (!html.includes('tasks-wrapper show')) throw new Error('Missing Cloud Terminal tasks wrapper shell.');
+          if (!html.includes('tasks-hero')) throw new Error('Missing Cloud Terminal tasks hero.');
+          if (!html.includes('tasks-layout')) throw new Error('Missing Cloud Terminal tasks layout.');
+          if (!html.includes('tasks-card tasks-card-create')) throw new Error('Missing Cloud Terminal create card.');
+          if (!html.includes('tasks-card tasks-card-filters')) throw new Error('Missing Cloud Terminal filters card.');
+          if (!html.includes('tasks-list')) throw new Error('Missing Cloud Terminal tasks list.');
+          if (!html.includes('epic-card')) throw new Error('Missing Cloud Terminal epic cards.');
+          if (!html.includes('task-item')) throw new Error('Missing Cloud Terminal task items.');
+          if (html.includes('ops-toolbar')) throw new Error('Legacy Hermes toolbar should not render inside the Cloud Terminal task shell.');
+          if (html.includes('ops-create-band')) throw new Error('Legacy Hermes create band should not render inside the Cloud Terminal task shell.');
+
+          console.log('ok');
+        })();
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"

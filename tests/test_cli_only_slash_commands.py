@@ -192,3 +192,11 @@ def test_builtin_command_opt_outs_do_not_hit_agent_metadata_lookup():
     assert optout_idx != -1
     assert metadata_idx != -1
     assert "if(_parsedCmd&&!_cmd)" in intercept[optout_idx:metadata_idx + 120]
+
+
+def test_goal_command_is_builtin_backend_fallthrough():
+    """/goal should be suggested locally but handled by the targeted backend bridge."""
+    assert "{name:'goal'" in COMMANDS_JS
+    assert "function cmdGoal()" in COMMANDS_JS
+    assert "return false;" in COMMANDS_JS[COMMANDS_JS.find("function cmdGoal()"):COMMANDS_JS.find("function cmdGoal()") + 120]
+    assert "native /goal support" in COMMANDS_JS

@@ -417,6 +417,25 @@
       return 'Notification';
     }
 
+    function notificationTypeStyleKey(note){
+      if(note&&note.kind==='play')return playNotificationNeedsRepair(note)?'play-fallback':'play-ready';
+      if(note&&note.kind==='done')return 'agent-done';
+      if(note&&note.kind==='input')return 'input-request';
+      return 'default';
+    }
+
+    function renderNotificationResponseOption(note,attrs,label,description,preview){
+      const attributeMap=attrs&&typeof attrs==='object'?attrs:{};
+      const previewText=String(preview||'').trim();
+      return `
+        <button class="menu-notification-response-option" type="button" ${Object.entries(attributeMap).map(([key,value])=>`${key}="${esc(value)}"`).join(' ')}>
+          <span class="menu-notification-response-option-label">${esc(label)}</span>
+          ${description?`<span class="menu-notification-response-option-description">${esc(description)}</span>`:''}
+          ${previewText?`<span class="menu-notification-response-option-preview">${esc(previewText)}</span>`:''}
+        </button>
+      `;
+    }
+
     function notificationPrimaryAction(note){
       const id=String(note&&note.id||'').trim();
       if(!id)return null;
@@ -441,38 +460,36 @@
     function renderNotificationMeta(entries){
       const values=(Array.isArray(entries)?entries:[]).map(value=>String(value||'').trim()).filter(Boolean);
       if(!values.length)return '';
-      return `
-        <div class="ops-notification-meta">
-          ${values.map(value=>`<span>${esc(value)}</span>`).join('')}
-        </div>
-      `;
+      return `<div class="menu-notification-meta">${esc(values.join(' • '))}</div>`;
     }
 
     function renderNotificationOpenSurface(note,options){
       const opts=options&&typeof options==='object'?options:{};
       const primary=notificationPrimaryAction(note);
+      const typeStyleKey=notificationTypeStyleKey(note);
       const projectLabel=notificationProjectLabel(note);
-      const content=`
-        <div class="ops-notification-title-row">
-          <span class="ops-notification-badge ${esc(opts.badgeKind||'input')}">${esc(opts.badgeLabel||'Notification')}</span>
-          <span class="ops-notification-title">${esc(opts.title||'Notification')}</span>
+      const badges=`
+        <div class="menu-notification-badges">
+          <span class="menu-notification-type-badge menu-notification-type-badge--${esc(typeStyleKey)}">${esc(opts.badgeLabel||'Notification')}</span>
+          ${opts.important?'<span class="menu-notification-type-badge menu-notification-type-badge--important">Important</span>':''}
         </div>
-        ${projectLabel?`
-          <div class="ops-notification-project-row">
-            <span class="ops-notification-project-tag">Project</span>
-            <span class="ops-notification-project-name">${esc(projectLabel)}</span>
-          </div>
-        `:''}
-        <div class="ops-notification-message">${esc(opts.message||'')}</div>
-        ${opts.command?`<pre class="ops-notification-command">${esc(opts.command)}</pre>`:''}
+      `;
+      const content=`
+        <div class="menu-notification-heading">
+          <div class="menu-notification-title">${esc(opts.title||'Notification')}</div>
+          ${badges}
+        </div>
+        <div class="menu-notification-message">${esc(opts.message||'')}</div>
+        ${opts.command?`<pre class="menu-notification-command">${esc(opts.command)}</pre>`:''}
+        ${projectLabel?`<div class="menu-notification-meta">${esc(`Project: ${projectLabel}`)}</div>`:''}
         ${opts.extra||''}
         ${renderNotificationMeta(opts.meta)}
       `;
       if(!primary){
-        return `<div class="ops-notification-main">${content}</div>`;
+        return `<div class="menu-notification-open-btn menu-notification-open-btn--${esc(typeStyleKey)}">${content}</div>`;
       }
       return `
-        <button class="ops-notification-open-btn" type="button" data-ops-action="${esc(primary.action)}" data-notification-id="${esc(note&&note.id||'')}" title="${esc(primary.label)}">
+        <button class="menu-notification-open-btn menu-notification-open-btn--${esc(typeStyleKey)}" type="button" data-ops-action="${esc(primary.action)}" data-notification-id="${esc(note&&note.id||'')}" title="${esc(primary.label)}">
           ${content}
         </button>
       `;
@@ -517,24 +534,44 @@
     function renderInputNotification(note){
       const payload=(note.payload&&typeof note.payload==='object')?note.payload:{};
       const isApproval=note.input_kind==='approval';
-      const title=isApproval?'Approval needed':'Clarification needed';
       const typeLabel=isApproval?'Approval':'Clarification';
       const choices=Array.isArray(payload.choices_offered)?payload.choices_offered:(Array.isArray(payload.choices)?payload.choices:[]);
       const approvalActions=isApproval?`
-        <div class="ops-notification-actions">
-          ${['once','session','always','deny'].map(choice=>`
-            <button class="ops-btn ${choice==='deny'?'danger':''}" type="button" data-ops-action="respond-notification" data-notification-id="${esc(note.id)}" data-choice="${esc(choice)}">${esc(choice==='once'?'Allow once':choice==='session'?'Allow session':choice==='always'?'Always allow':'Deny')}</button>
-          `).join('')}
+        <div class="menu-notification-response-panel">
+          <div class="menu-notification-response-question">
+            <div class="menu-notification-response-prompt">Choose how this approval should be handled.</div>
+          </div>
+          <div class="menu-notification-response-options">
+            ${[
+              ['once','Allow once','Approve only this request.'],
+              ['session','Allow session','Approve matching requests until the session ends.'],
+              ['always','Always allow','Approve this routine request every time.'],
+              ['deny','Deny','Reject this request.'],
+            ].map(([choice,label,description])=>renderNotificationResponseOption(note,{
+              'data-ops-action':'respond-notification',
+              'data-notification-id':String(note.id||''),
+              'data-choice':choice,
+            },label,description,'')).join('')}
+          </div>
         </div>
       `:'';
       const clarifyActions=!isApproval?`
-        ${choices.length?`<div class="ops-notification-choices">
-          ${choices.map(choice=>`<button class="ops-btn" type="button" data-ops-action="respond-notification" data-notification-id="${esc(note.id)}" data-response="${esc(choice)}">${esc(choice)}</button>`).join('')}
-        </div>`:''}
-        <form class="ops-notification-response" data-ops-submit="notification-response" data-notification-id="${esc(note.id)}">
-          <input name="response" autocomplete="off" placeholder="Type your answer..." required>
-          <button class="ops-btn primary" type="submit">Send</button>
-        </form>
+        <div class="menu-notification-response-panel">
+          <div class="menu-notification-response-question">
+            <div class="menu-notification-response-prompt">${esc(note.message||'Send the answer the agent is waiting for.')}</div>
+          </div>
+          ${choices.length?`<div class="menu-notification-response-options">
+            ${choices.map(choice=>renderNotificationResponseOption(note,{
+              'data-ops-action':'respond-notification',
+              'data-notification-id':String(note.id||''),
+              'data-response':String(choice||''),
+            },String(choice||''),'Send this response.','')).join('')}
+          </div>`:''}
+          <form class="menu-notification-response-form" data-ops-submit="notification-response" data-notification-id="${esc(note.id)}">
+            <input class="menu-notification-response-input" name="response" autocomplete="off" placeholder="Type your answer..." required>
+            <button class="menu-action-btn small menu-notification-response-submit-btn" type="submit">Send</button>
+          </form>
+        </div>
       `:'';
       const meta=[
         notificationTitle(note),
@@ -543,27 +580,29 @@
         `Type: ${typeLabel}`,
       ];
       return `
-        <article class="ops-notification input">
-          ${renderNotificationOpenSurface(note,{
-            badgeKind:'input',
+        <article class="menu-notification-item menu-notification-item--input-request">
+          <div class="menu-notification-body">
+            ${renderNotificationOpenSurface(note,{
             badgeLabel:typeLabel,
-            title,
+            title:notificationTitle(note),
             message:note.message||'Session needs input.',
             command:payload.command,
             meta,
           })}
-          <div class="ops-notification-control">
             ${approvalActions}
             ${clarifyActions}
-            <div class="ops-notification-actions secondary">
-              <button class="ops-btn" type="button" data-ops-action="dismiss-notification" data-notification-id="${esc(note.id)}">Dismiss</button>
-            </div>
+          </div>
+          <div class="menu-notification-actions">
+            <button class="menu-action-btn secondary small menu-notification-dismiss-btn" type="button" data-ops-action="dismiss-notification" data-notification-id="${esc(note.id)}">Dismiss</button>
           </div>
         </article>
       `;
     }
 
     function renderDoneNotification(note){
+      const payload=notificationPayload(note);
+      const runStatus=String(note&&note.run_status||payload.status||'succeeded').trim().toLowerCase();
+      const badgeLabel=runStatus==='failed'?'Failed':(runStatus==='stopped'?'Stopped':'Done');
       const meta=[
         notificationTitle(note),
         formatNotificationTime(note),
@@ -571,16 +610,17 @@
         `Type: ${notificationTypeLabel(note)}`,
       ];
       return `
-        <article class="ops-notification done">
-          ${renderNotificationOpenSurface(note,{
-            badgeKind:'done',
-            badgeLabel:'Done',
-            title:'Done',
+        <article class="menu-notification-item menu-notification-item--agent-done">
+          <div class="menu-notification-body">
+            ${renderNotificationOpenSurface(note,{
+            badgeLabel,
+            title:notificationTitle(note),
             message:note.message||'Session finished.',
             meta,
           })}
-          <div class="ops-notification-actions">
-            <button class="ops-btn" type="button" data-ops-action="dismiss-notification" data-notification-id="${esc(note.id)}">Dismiss</button>
+          </div>
+          <div class="menu-notification-actions">
+            <button class="menu-action-btn secondary small menu-notification-dismiss-btn" type="button" data-ops-action="dismiss-notification" data-notification-id="${esc(note.id)}">Dismiss</button>
           </div>
         </article>
       `;
@@ -602,21 +642,22 @@
       if(playStatus)meta.push(playStatus);
       if(!inspectUrl&&!needsRepair)meta.push('Inspect URL missing');
       return `
-        <article class="ops-notification play">
-          ${renderNotificationOpenSurface(note,{
-            badgeKind:'play',
+        <article class="menu-notification-item menu-notification-item--${esc(needsRepair?'play-fallback':'play-ready')}">
+          <div class="menu-notification-body">
+            ${renderNotificationOpenSurface(note,{
             badgeLabel:needsRepair?'Play fallback':'Play',
-            title:needsRepair?'Play fallback':'Play ready',
+            title:notificationTitle(note),
             message:note.message||(needsRepair
               ? 'Play handoff failed. Open the project and repair Play with the captured error.'
               : 'Play finished building. The app is ready to inspect.'
             ),
-            extra:needsRepair&&fallbackError?`<div class="ops-notification-fallback-error">${esc(`Play handoff error: ${fallbackError}`)}</div>`:'',
+            extra:needsRepair&&fallbackError?`<div class="menu-notification-fallback-error">${esc(`Play handoff error: ${fallbackError}`)}</div>`:'',
             meta,
           })}
-          <div class="ops-notification-actions">
-            ${needsRepair&&repairAvailable&&target.projectId?`<button class="ops-btn" type="button" data-ops-action="repair-play-notification" data-notification-id="${esc(note.id)}">${svg.edit}<span>Repair Play</span></button>`:''}
-            <button class="ops-btn" type="button" data-ops-action="dismiss-notification" data-notification-id="${esc(note.id)}">Dismiss</button>
+          </div>
+          <div class="menu-notification-actions">
+            ${needsRepair&&repairAvailable&&target.projectId?`<button class="menu-action-btn secondary small menu-notification-repair-btn" type="button" data-ops-action="repair-play-notification" data-notification-id="${esc(note.id)}">Repair Play</button>`:''}
+            <button class="menu-action-btn secondary small menu-notification-dismiss-btn" type="button" data-ops-action="dismiss-notification" data-notification-id="${esc(note.id)}">Dismiss</button>
           </div>
         </article>
       `;
@@ -630,9 +671,9 @@
 
     function renderNotifications(){
       const list=OPS.notifications||[];
-      if(!list.length)return '<div class="ops-notification-empty">No notifications.</div>';
+      if(!list.length)return '<div class="menu-notification-empty">No notifications.</div>';
       return `
-        <div class="ops-notification-list">
+        <div class="menu-notification-list">
           ${list.map(renderNotification).join('')}
         </div>
       `;
@@ -906,6 +947,8 @@
       '/api/notifications/auto-approval',
       '/api/notifications/respond',
       '/api/notifications/dismiss',
+      '/api/ops/notifications/dismissed',
+      '/api/ops/notifications/dismiss',
       'static/hermes-push-sw.js',
     ],
     actions:[

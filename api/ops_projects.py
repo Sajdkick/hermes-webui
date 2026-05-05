@@ -18,6 +18,7 @@ DEFAULT_CORE_BRANCH = "main"
 DEFAULT_TASKS_SCOPE = "default"
 DEFAULT_TASK_GRADE = "green"
 TASK_GRADE_VALUES = {"green", "orange", "red"}
+TASK_QA_STATUS_VALUES = {"ready-for-test", "needs-more-work", "not-synced"}
 TASKS_DIR_NAME = "project_tasks"
 LEGACY_TASKS_FILE_NAME = "project_tasks.json"
 LEGACY_OPS_CAPABILITIES = {
@@ -197,7 +198,7 @@ def _paths_equal(left: str | Path, right: str | Path) -> bool:
 
 
 def _project_path(project: dict, *, strict: bool = True) -> Path:
-    raw = str(project.get("path") or "").strip()
+    raw = str(project.get("path") or project.get("resolvedPath") or "").strip()
     if not raw:
         raise OpsProjectError("Project path is missing.", 500)
     path = Path(raw).expanduser().resolve()
@@ -286,6 +287,10 @@ def _normalize_string_list(value) -> list[str]:
         seen.add(text)
         result.append(text)
     return result
+
+
+def _normalize_task_qa_status(value) -> str:
+    return str(value or "").strip().lower().replace("_", "-").replace(" ", "-")
 
 
 def _normalize_task(task) -> tuple[dict | None, bool]:
@@ -698,9 +703,141 @@ def update_ops_project_task(project_id: str, task_id: str, updates: dict) -> dic
             else:
                 updated_task.pop(field, None)
 
+    if "qaStatus" in updates:
+        qa_status = _normalize_task_qa_status(updates.get("qaStatus"))
+        if qa_status and qa_status not in TASK_QA_STATUS_VALUES:
+            raise OpsProjectError("Task QA status is invalid.")
+        if qa_status:
+            updated_task["qaStatus"] = qa_status
+        else:
+            updated_task.pop("qaStatus", None)
+
+    for field in ("moreWork", "sessionId", "lastSessionAt", "startedAt", "completedAt", "archivedAt", "images"):
+        if field not in updates:
+            continue
+        value = updates.get(field)
+        if field == "images":
+            normalized = ", ".join(_normalize_string_list(value))
+            if normalized:
+                updated_task[field] = normalized
+            else:
+                updated_task.pop(field, None)
+            continue
+        text = str(value or "").strip()
+        if text:
+            updated_task[field] = text
+        else:
+            updated_task.pop(field, None)
+
+    for field in ("inProgress", "archived"):
+        if field not in updates:
+            continue
+        if bool(updates.get(field)):
+            updated_task[field] = True
+        else:
+            updated_task.pop(field, None)
+
+    if updated_task.get("done") and not str(updated_task.get("completedAt") or "").strip():
+        updated_task["completedAt"] = _now_iso()
+
     tasks = list(source_epic.get("tasks") or [])
     tasks[task_index] = updated_task
     source_epic["tasks"] = tasks
     epics[epic_index] = source_epic
     _write_tasks_data(project, {**data, "epics": epics})
     return {"task": updated_task}
+
+
+def promote_not_synced_tasks_to_ready_for_test(project_id: str) -> dict:
+    project = get_ops_project(project_id)
+    data, _, _ = _read_tasks_data(project)
+    updated_count = 0
+    updated_task_ids: list[str] = []
+    updated_epics: list[dict] = []
+    touched_any = False
+
+    for epic in data.get("epics") or []:
+        tasks = []
+        touched_epic = False
+        for task in epic.get("tasks") or []:
+            if bool(task.get("done")) or _normalize_task_qa_status(task.get("qaStatus")) != "not-synced":
+                tasks.append(task)
+                continue
+            updated_task = dict(task)
+            updated_task["qaStatus"] = "ready-for-test"
+            updated_task.pop("inProgress", None)
+            updated_task.pop("moreWork", None)
+            task_id = str(updated_task.get("id") or "").strip()
+            if task_id:
+                updated_task_ids.append(task_id)
+            updated_count += 1
+            touched_epic = True
+            tasks.append(updated_task)
+        if touched_epic:
+            touched_any = True
+            updated_epics.append({**epic, "tasks": tasks})
+        else:
+            updated_epics.append(epic)
+
+    if touched_any:
+        _write_tasks_data(project, {**data, "epics": updated_epics})
+
+    return {"updatedCount": updated_count, "updatedTaskIds": updated_task_ids}
+
+
+def delete_ops_project_task(project_id: str, task_id: str) -> dict:
+    project = get_ops_project(project_id)
+    task_key = str(task_id or "").strip()
+    if not task_key:
+        raise OpsProjectError("Task id is required.")
+
+    data, _, _ = _read_tasks_data(project)
+    epics = list(data.get("epics") or [])
+    epic_index, task_index = _find_task(epics, task_key)
+    if epic_index < 0:
+        raise OpsProjectError("Task not found.", 404)
+
+    source_epic = dict(epics[epic_index])
+    tasks = list(source_epic.get("tasks") or [])
+    deleted = dict(tasks.pop(task_index))
+    source_epic["tasks"] = tasks
+    epics[epic_index] = source_epic
+    _write_tasks_data(project, {**data, "epics": epics})
+    return {"ok": True, "task": deleted}
+
+
+def delete_ops_project_epic(project_id: str, epic_id: str) -> dict:
+    project = get_ops_project(project_id)
+    epic_key = str(epic_id or "").strip()
+    if not epic_key:
+        raise OpsProjectError("Epic id is required.")
+
+    data, _, _ = _read_tasks_data(project)
+    epics = list(data.get("epics") or [])
+    remaining = [dict(epic) for epic in epics if str(epic.get("id") or "").strip() != epic_key]
+    if len(remaining) == len(epics):
+        raise OpsProjectError("Epic not found.", 404)
+    _write_tasks_data(project, {**data, "epics": remaining})
+    return {"ok": True, "epics": remaining}
+
+
+def archive_completed_ops_project_tasks(project_id: str) -> dict:
+    project = get_ops_project(project_id)
+    data, _, _ = _read_tasks_data(project)
+    epics = []
+    archived_count = 0
+    archived_at = _now_iso()
+    for epic in data.get("epics") or []:
+        next_epic = dict(epic)
+        next_tasks = []
+        for task in epic.get("tasks") or []:
+            next_task = dict(task)
+            if next_task.get("done") and not next_task.get("archived"):
+                next_task["archived"] = True
+                next_task["archivedAt"] = archived_at
+                archived_count += 1
+            next_tasks.append(next_task)
+        next_epic["tasks"] = next_tasks
+        epics.append(next_epic)
+    _write_tasks_data(project, {**data, "epics": epics})
+    return {"ok": True, "archived": archived_count}

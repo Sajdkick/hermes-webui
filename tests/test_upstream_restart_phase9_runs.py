@@ -106,6 +106,31 @@ def test_phase9_task_launch_creates_run_activity_and_readable_output_route(monke
     assert listing_payload["runs"][0]["id"] == run["id"]
     assert listing_payload["runs"][0]["status"] == "running"
 
+    compat_create = _FakeHandler(
+        {
+            "projectId": project["id"],
+            "taskId": task["id"],
+            "sessionId": session["session_id"],
+            "status": "waiting-approval",
+            "summary": "Awaiting approval from the ops dashboard.",
+            "metadata": {"source": "ops-dashboard", "engine": "hermes-session"},
+        }
+    )
+    assert handle_post(compat_create, urlparse("http://example.com/api/ops/runs")) is True
+    compat_run = _response_json(compat_create)["run"]
+    assert compat_run["id"] == run["id"]
+    assert compat_run["status"] == "waiting-approval"
+    assert compat_run["summary"] == "Awaiting approval from the ops dashboard."
+    assert compat_run["metadata"]["source"] == "ops-dashboard"
+    assert compat_run["metadata"]["engine"] == "hermes-session"
+
+    compat_update = _FakeHandler({"status": "running", "summary": "Task execution was started from the ops dashboard."})
+    assert handle_post(compat_update, urlparse(f"http://example.com/api/ops/runs/{run['id']}")) is True
+    updated_run = _response_json(compat_update)["run"]
+    assert updated_run["id"] == run["id"]
+    assert updated_run["status"] == "running"
+    assert updated_run["summary"] == "Task execution was started from the ops dashboard."
+
     requests = _FakeHandler()
     assert handle_get(requests, urlparse(f"http://example.com/api/ops/runs/{run['id']}/requests")) is True
     assert _response_json(requests)["count"] == 0
@@ -129,6 +154,73 @@ def test_phase9_task_launch_creates_run_activity_and_readable_output_route(monke
     detail_payload = _response_json(detail)["run"]
     assert detail_payload["status"] == "succeeded"
     assert detail_payload["readableOutput"]["available"] is True
+
+
+def test_phase9_run_follows_lineage_tip_and_marks_completed_without_readable_output(monkeypatch, tmp_path, git_available):
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
+
+    repo = init_project_repo(tmp_path)
+
+    from api.routes import handle_get, handle_post
+    from api import session_sidecars
+
+    create = _FakeHandler({"name": "Phase 9 Lineage Project", "path": str(repo), "coreBranch": "main"})
+    assert handle_post(create, urlparse("http://example.com/api/ops/projects")) is True
+    project = _response_json(create)["project"]
+
+    epic_create = _FakeHandler({"title": "Phase 9"})
+    assert handle_post(epic_create, urlparse(f"http://example.com/api/ops/projects/{project['id']}/epics")) is True
+    epic_id = _response_json(epic_create)["epic"]["id"]
+
+    task_create = _FakeHandler({"epicId": epic_id, "text": "Follow the latest run session tip"})
+    assert handle_post(task_create, urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks")) is True
+    task = _response_json(task_create)["task"]
+
+    launch = _FakeHandler()
+    assert handle_post(
+        launch,
+        urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks/{task['id']}/sessions/launch"),
+    ) is True
+    launch_payload = _response_json(launch)
+    run = launch_payload["run"]
+    root_session_id = launch_payload["session"]["session_id"]
+
+    tip_summary = {
+        "session_id": "tiprun12345",
+        "title": "Tip run session",
+        "workspace": str(repo.resolve()),
+        "model": "gpt-5.5",
+        "model_provider": "openai-codex",
+        "message_count": 3,
+        "created_at": launch_payload["session"]["created_at"],
+        "updated_at": launch_payload["session"]["updated_at"] + 15,
+        "last_message_at": launch_payload["session"]["updated_at"] + 15,
+        "pinned": False,
+        "archived": False,
+        "project_id": project["id"],
+        "profile": "default",
+        "active_stream_id": None,
+        "pending_user_message": None,
+        "has_pending_user_message": False,
+        "is_cli_session": False,
+        "source_tag": "ops_task",
+        "raw_source": None,
+        "session_source": None,
+        "source_label": "Ops task",
+        "enabled_toolsets": None,
+        "is_streaming": False,
+        "_lineage_root_id": root_session_id,
+        "_lineage_tip_id": "tiprun12345",
+    }
+    monkeypatch.setattr(session_sidecars, "resolve_session_summary", lambda _sid: dict(tip_summary))
+    monkeypatch.setattr(session_sidecars, "resolve_session_id", lambda _sid: "tiprun12345")
+
+    detail = _FakeHandler()
+    assert handle_get(detail, urlparse(f"http://example.com/api/ops/runs/{run['id']}")) is True
+    detail_payload = _response_json(detail)["run"]
+    assert detail_payload["sessionId"] == "tiprun12345"
+    assert detail_payload["linkedSessionId"] == root_session_id
+    assert detail_payload["status"] == "succeeded"
 
 
 def test_phase9_ops_ui_renders_run_activity_panel():

@@ -87,6 +87,15 @@ def handle_get(handler, parsed) -> bool:
 
 def handle_post(handler, parsed, body: dict) -> bool:
     try:
+        if _RUNS_RE.match(parsed.path):
+            j(handler, {"run": ops_runs.create_ops_run(body)}, status=201)
+            return True
+
+        match = _RUN_RE.match(parsed.path)
+        if match:
+            j(handler, {"run": ops_runs.update_ops_run(unquote(match.group(1)), body)})
+            return True
+
         match = _RUN_COMPLETE_RE.match(parsed.path)
         if match:
             j(handler, {"run": ops_runs.complete_ops_run(unquote(match.group(1)), body)})

@@ -313,53 +313,39 @@
 
     function renderTaskFilters(summary){
       const filters=currentTaskFilters();
-      const archived=filters.status==='archived';
-      const doneCount=Number(summary&&summary.done||0);
-      const actionableCount=actionableTaskCount(summary);
-      const projectId=String(OPS.currentProject&&OPS.currentProject.id||'').trim();
-      const executeReadyBusy=projectId&&OPS.taskAutomationBusyByProject[projectId]==='execute-ready';
-      const createExpanded=!OPS.taskCreateCollapsed;
       const filtersExpanded=!OPS.taskFiltersCollapsed;
       const filterActive=taskFilterPanelActive(filters);
       return `
-        <div class="ops-task-workspace ops-task-filters">
-          <div class="ops-task-filter-primary">
-            <div class="ops-task-filter-segments" role="tablist" aria-label="Task list view">
-              <button class="ops-segment ${archived?'':'active'}" type="button" role="tab" aria-selected="${archived?'false':'true'}" data-ops-action="show-active">
-                Active ${taskVisibleCount(summary,{status:'active'})}
-              </button>
-              <button class="ops-segment ${archived?'active':''}" type="button" role="tab" aria-selected="${archived?'true':'false'}" data-ops-action="show-archived">
-                Archived ${taskVisibleCount(summary,{status:'archived'})}
-              </button>
-            </div>
-            <div class="ops-task-filter-actions">
-              <span class="ops-task-filter-count">${esc(taskWorkspaceCountText(summary,filters))}</span>
-              <button class="ops-btn primary" type="button" data-ops-action="execute-ready-tasks" ${archived||!projectId||(!actionableCount&&!executeReadyBusy)?'disabled':''} title="${archived?'Switch to Active to execute ready tasks.':'Ask Codex to execute ready and needs-more-work tasks in sequence.'}">
-                ${svg.play}<span>${executeReadyBusy?'Starting...':'Execute ready tasks with AI'}${!executeReadyBusy&&actionableCount?` (${actionableCount})`:''}</span>
-              </button>
-              ${archived?'':`<button class="ops-btn" type="button" data-ops-action="archive-completed" ${doneCount?'':'disabled'}>${svg.folder}<span>Archive completed${doneCount?` (${doneCount})`:''}</span></button>`}
-              <button class="ops-btn" type="button" data-ops-action="toggle-task-create" aria-expanded="${createExpanded?'true':'false'}">${svg.plus}<span>${createExpanded?'Hide create fields':'New epic/task'}</span></button>
-              <button class="ops-btn" type="button" data-ops-action="toggle-task-filters" aria-expanded="${filtersExpanded?'true':'false'}">${svg.grid}<span>${filtersExpanded?'Hide filters':'Show filters'}</span></button>
+        <div class="tasks-card tasks-card-filters">
+          <div class="tasks-card-header">
+            <div>
+              <div class="tasks-card-title">Filter and sort</div>
+              <div class="tasks-card-subtitle">Focus on the work that matters right now.</div>
             </div>
           </div>
           ${filtersExpanded?`
-            <div class="ops-task-filter-fields">
-              <label>
-                <span>Grade</span>
-                <select data-ops-filter="grade">
-                  <option value="">Any grade</option>
-                  ${['green','orange','red'].map(grade=>`<option value="${grade}" ${filters.grade===grade?'selected':''}>${grade}</option>`).join('')}
-                </select>
-              </label>
-              <label>
-                <span>Marker or flag</span>
-                <input data-ops-filter="token" autocomplete="off" value="${esc(filters.token)}" placeholder="ui, backend, ai suggestion">
-              </label>
-              <div class="ops-form-actions">
-                <button class="ops-btn" type="button" data-ops-action="reset-task-filters" ${filterActive?'':'disabled'}>${svg.close}<span>Reset</span></button>
+            <div class="tasks-filters">
+              <div class="tasks-filter-group">
+                <div class="tasks-filter-title">Task filters</div>
+                <div class="tasks-filter-row">
+                  <label class="tasks-field">
+                    <span class="tasks-field-label">Grade</span>
+                    <select class="task-select task-filter-select" data-ops-filter="grade">
+                      <option value="">Any grade</option>
+                      ${['green','orange','red'].map(grade=>`<option value="${grade}" ${filters.grade===grade?'selected':''}>${grade}</option>`).join('')}
+                    </select>
+                  </label>
+                  <label class="tasks-field">
+                    <span class="tasks-field-label">Marker or flag</span>
+                    <input class="task-input" data-ops-filter="token" autocomplete="off" value="${esc(filters.token)}" placeholder="ui, backend, ai suggestion">
+                  </label>
+                  <div class="tasks-form-actions">
+                    <button class="menu-action-btn secondary small" type="button" data-ops-action="reset-task-filters" ${filterActive?'':'disabled'}>${svg.close}<span>Reset</span></button>
+                  </div>
+                </div>
               </div>
             </div>
-          `:''}
+          `:`<div class="repo-empty">Filters are hidden.</div>`}
         </div>
       `;
     }
@@ -492,22 +478,41 @@
       setDashboardTopbar(nameOf(project),`${counts.active} active | ${counts.done} done | ${OPS.taskData.branch||project.coreBranch||'main'}`);
       const edit=OPS.editingTask;
       const showCreateBand=!OPS.taskCreateCollapsed||!!edit;
+      const filtersExpanded=!OPS.taskFiltersCollapsed;
       const selectedEpicId=edit?edit.epic.id:(epics[0]&&epics[0].id)||'';
       const epicOptions=epics.map(epic=>`<option value="${esc(epic.id)}" ${epic.id===selectedEpicId?'selected':''}>${esc(epic.title)}</option>`).join('');
       const taskForm=epics.length?`
-        <form class="ops-task-form" data-ops-submit="save-task">
+        <form class="tasks-form" data-ops-submit="save-task">
           <input type="hidden" name="taskId" value="${edit?esc(edit.task.id):''}">
-          <label class="wide"><span>Task</span><input name="text" autocomplete="off" required value="${edit?esc(edit.task.text):''}"></label>
-          <label><span>Epic</span><select name="epicId">${epicOptions}</select></label>
-          <label><span>Grade</span><select name="grade">
+          <label class="tasks-field">
+            <span class="tasks-field-label">New task</span>
+            <input class="task-input" name="text" autocomplete="off" required value="${edit?esc(edit.task.text):''}" placeholder="Add a task for this epic">
+          </label>
+          <label class="tasks-field">
+            <span class="tasks-field-label">Epic</span>
+            <select class="task-select" name="epicId">${epicOptions}</select>
+          </label>
+          <label class="tasks-field">
+            <span class="tasks-field-label">Grade</span>
+            <select class="task-select task-grade-select" name="grade">
             ${['green','orange','red'].map(grade=>`<option value="${grade}" ${(edit&&edit.task.grade===grade)?'selected':''}>${grade}</option>`).join('')}
-          </select></label>
-          <label><span>Flags</span><input name="flags" autocomplete="off" value="${edit?esc((edit.task.flags||[]).join(', ')):''}"></label>
-          <label><span>Markers</span><input name="markers" autocomplete="off" value="${edit?esc((edit.task.markers||[]).join(', ')):''}"></label>
-          <label><span>Images</span><input name="images" autocomplete="off" value="${edit?esc(taskImageRefs(edit.task).join(', ')):''}" placeholder="path or URL"></label>
-          <div class="ops-form-actions">
-            <button class="ops-btn primary" type="submit">${edit?svg.check:svg.plus}<span>${edit?'Save task':'Add task'}</span></button>
-            ${edit?'<button class="ops-btn" type="button" data-ops-action="cancel-edit">Cancel</button>':''}
+            </select>
+          </label>
+          <label class="tasks-field task-field-flags">
+            <span class="tasks-field-label">Flags</span>
+            <input class="task-input" name="flags" autocomplete="off" value="${edit?esc((edit.task.flags||[]).join(', ')):''}" placeholder="Comma-separated, e.g. search">
+          </label>
+          <label class="tasks-field">
+            <span class="tasks-field-label">Markers</span>
+            <input class="task-input" name="markers" autocomplete="off" value="${edit?esc((edit.task.markers||[]).join(', ')):''}" placeholder="Comma-separated markers">
+          </label>
+          <label class="tasks-field task-field-images">
+            <span class="tasks-field-label">Images</span>
+            <input class="task-input" name="images" autocomplete="off" value="${edit?esc(taskImageRefs(edit.task).join(', ')):''}" placeholder="path or URL">
+          </label>
+          <div class="tasks-form-actions">
+            <button class="task-add-btn" type="submit">${edit?'Save task':'Add task'}</button>
+            ${edit?'<button class="menu-action-btn secondary" type="button" data-ops-action="cancel-edit">Cancel edit</button>':''}
           </div>
         </form>
       `:'';
@@ -537,46 +542,91 @@
         renderProjectRunActivity(project),
         renderRunDetailPanel({hideProject:true}),
       ].filter(Boolean).join('');
+      const archived=filters.status==='archived';
+      const doneCount=Number(filterSummary&&filterSummary.done||0);
+      const actionableCount=actionableTaskCount(filterSummary);
+      const projectId=String(OPS.currentProject&&OPS.currentProject.id||'').trim();
+      const executeReadyBusy=projectId&&OPS.taskAutomationBusyByProject[projectId]==='execute-ready';
+      const archivedCount=taskVisibleCount(filterSummary,{status:'archived'});
+      const activeScopedTotal=Math.max(0,Number(filterSummary.total||0)-archivedCount);
+      const heroCount=archived?`${archivedCount} archived`:`${Math.min(doneCount,activeScopedTotal)}/${activeScopedTotal} done`;
 
       root().innerHTML=`
-        <div class="ops-dashboard ops-project-detail">
-          <div class="ops-toolbar">
-            <button class="ops-icon-btn" type="button" data-ops-action="back-projects" title="Back">${svg.arrow}</button>
-            <div class="ops-title-block">
-              <h2>${esc(nameOf(project))}</h2>
-              <span>${esc(projectPath(project))}</span>
+        <div class="ops-dashboard ops-project-detail project-page-content">
+          <div class="tasks-wrapper show" aria-label="Project epics">
+            <div class="tasks-hero">
+              <div>
+                <div class="tasks-title">Project epics</div>
+                <div class="tasks-subtitle">${esc(`${nameOf(project)} • ${OPS.taskData.branch||project.coreBranch||'main'} • ${projectPath(project)}`)}</div>
+              </div>
+              <div class="tasks-hero-actions">
+                <div class="tasks-count">${esc(heroCount)}</div>
+                <div class="tasks-view-tabs" role="tablist" aria-label="Task list view">
+                  <button class="tasks-view-tab ${archived?'':'active'}" type="button" role="tab" aria-selected="${archived?'false':'true'}" data-ops-action="show-active">
+                    Active
+                  </button>
+                  <button class="tasks-view-tab ${archived?'active':''}" type="button" role="tab" aria-selected="${archived?'true':'false'}" data-ops-action="show-archived">
+                    Archived
+                  </button>
+                </div>
+                <button class="tasks-archive-btn" type="button" data-ops-action="archive-completed" ${archived||!doneCount?'disabled':''}>Archive completed</button>
+                <button class="tasks-form-toggle" type="button" data-ops-action="toggle-task-create" aria-expanded="${showCreateBand?'true':'false'}">
+                  ${showCreateBand?'Hide create fields':'Show create fields'}
+                </button>
+                <button class="tasks-filters-toggle" type="button" data-ops-action="toggle-task-filters" aria-expanded="${filtersExpanded?'true':'false'}">
+                  ${filtersExpanded?'Hide filters':'Show filters'}
+                </button>
+                <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-detail">${svg.refresh}<span>Refresh</span></button>
+              </div>
             </div>
-            <div class="ops-toolbar-actions">
-              ${renderProjectPlayControls(project,{detail:true})}
-              <button class="ops-btn" type="button" data-ops-action="refresh-detail">${svg.refresh}<span>Refresh</span></button>
-              <button class="ops-btn danger" type="button" data-ops-action="delete-project" data-project-id="${esc(project.id)}">${svg.trash}<span>Delete</span></button>
+            <div class="tasks-layout">
+              <section class="tasks-controls">
+                ${showCreateBand?`
+                  <div class="tasks-card tasks-card-create">
+                    <div class="tasks-card-header">
+                      <div>
+                        <div class="tasks-card-title">Create</div>
+                        <div class="tasks-card-subtitle">Add an epic or drop tasks into an epic.</div>
+                      </div>
+                    </div>
+                    <div class="tasks-form-area">
+                      <form class="tasks-form" data-ops-submit="create-epic">
+                        <label class="tasks-field">
+                          <span class="tasks-field-label">New epic</span>
+                          <input class="task-input" name="title" autocomplete="off" placeholder="Clean up the UI" required>
+                        </label>
+                        <div class="tasks-form-actions">
+                          <button class="task-add-btn" type="submit">Add epic</button>
+                        </div>
+                      </form>
+                      ${taskForm}
+                    </div>
+                  </div>
+                `:''}
+                ${renderTaskFilters(filterSummary)}
+                <div class="tasks-card tasks-card-tools">
+                  <div class="tasks-card-header">
+                    <div>
+                      <div class="tasks-card-title">Project tools</div>
+                      <div class="tasks-card-subtitle">${esc(`Profile ${projectProfileLabel(project)} • ${project.active===false?'Inactive':'Active'} • ${counts.epics} epics`)}</div>
+                    </div>
+                  </div>
+                  <div class="tasks-card-body">
+                    <div class="tasks-card-actions">
+                      <button class="menu-action-btn secondary small" type="button" data-ops-action="back-projects">Back to projects</button>
+                      ${renderProjectPlayControls(project,{detail:true})}
+                      <button class="menu-action-btn danger small" type="button" data-ops-action="delete-project" data-project-id="${esc(project.id)}">Delete project</button>
+                    </div>
+                    ${!archived?`<button class="menu-action-btn secondary small" type="button" data-ops-action="execute-ready-tasks" ${!projectId||(!actionableCount&&!executeReadyBusy)?'disabled':''} title="Ask Codex to execute ready and needs-more-work tasks in sequence.">${executeReadyBusy?'Starting...':'Execute ready tasks with AI'}${!executeReadyBusy&&actionableCount?` (${actionableCount})`:''}</button>`:''}
+                    ${secondaryPanels||'<div class="repo-empty">No secondary tools for this project.</div>'}
+                  </div>
+                </div>
+              </section>
+              <section class="tasks-content">
+                <div class="tasks-list">${epicList}</div>
+              </section>
             </div>
           </div>
-          <div class="ops-summary-strip">
-            <span>Branch ${esc(OPS.taskData.branch||project.coreBranch||'main')}</span>
-            <span>Profile ${esc(projectProfileLabel(project))}</span>
-            <span>${project.active===false?'Inactive':'Active'}</span>
-            <span>${counts.epics} epics</span>
-            <span>${counts.active} active</span>
-            <span>${counts.done} done</span>
-          </div>
-          ${renderTaskFilters(filterSummary)}
-          ${showCreateBand?`
-            <div class="ops-create-band">
-              <form class="ops-epic-form" data-ops-submit="create-epic">
-                <input name="title" autocomplete="off" placeholder="Epic title" required>
-                <button class="ops-btn primary" type="submit">${svg.plus}<span>Epic</span></button>
-              </form>
-              ${taskForm}
-            </div>
-          `:''}
-          <div class="ops-epic-list">${epicList}</div>
-          <details class="ops-project-secondary-panels">
-            <summary>Project tools</summary>
-            <div class="ops-project-secondary-panels-body">
-              ${secondaryPanels||'<div class="ops-empty">No secondary tools for this project.</div>'}
-            </div>
-          </details>
         </div>
       `;
       restoreTaskFilterFocus();
@@ -593,25 +643,23 @@
       const totalCount=allEpicTasks.length;
       const rows=tasks.map(task=>renderTask(epic,task,taskById)).join('');
       return `
-        <section class="ops-epic ${collapsed?'collapsed':''}" data-epic-id="${esc(epicId)}" style="${epicAccentStyle(index,epic)}">
-          <div class="ops-epic-header">
-            <div class="ops-epic-header-main">
-              <button class="ops-epic-toggle" type="button" data-ops-action="toggle-epic" data-epic-id="${esc(epicId)}" aria-expanded="${collapsed?'false':'true'}" title="${collapsed?'Expand epic':'Collapse epic'}">
-                <span class="ops-epic-caret" aria-hidden="true">${svg.chevron}</span>
+        <section class="epic-card ${collapsed?'collapsed':''}" data-epic-id="${esc(epicId)}" style="${epicAccentStyle(index,epic)}">
+          <div class="epic-header">
+            <div class="epic-header-main">
+              <button class="epic-toggle" type="button" data-ops-action="toggle-epic" data-epic-id="${esc(epicId)}" aria-expanded="${collapsed?'false':'true'}" title="${collapsed?'Expand epic':'Collapse epic'}">
+                <span class="epic-caret" aria-hidden="true"></span>
               </button>
-              <div class="ops-epic-title-block">
-                <div class="ops-epic-title-line">
-                  <h3>${esc(epic.title)}</h3>
-                  ${markers.map(marker=>`<span class="ops-epic-marker ${String(marker).trim().toLowerCase()==='ai suggestion'?'ai-suggestion':''}">${esc(marker)}</span>`).join('')}
-                </div>
+              <div class="epic-title">
+                <span>${esc(epic.title)}</span>
+                ${markers.length?`<span class="task-markers">${markers.map(marker=>`<span class="task-marker ${String(marker).trim().toLowerCase()==='ai suggestion'?'ai-suggestion':''}">${esc(marker)}</span>`).join('')}</span>`:''}
               </div>
             </div>
-            <div class="ops-epic-header-actions">
-              <span class="ops-epic-meta">${totalCount?`${doneCount}/${totalCount} done${visibleCount!==totalCount?` • ${visibleCount} shown`:''}`:'No tasks yet'}</span>
-              <button class="ops-btn danger" type="button" data-ops-action="delete-epic" data-epic-id="${esc(epic.id)}">Delete</button>
+            <div class="epic-header-actions">
+              <span class="epic-meta">${totalCount?`${doneCount}/${totalCount} done${visibleCount!==totalCount?` • ${visibleCount} shown`:''}`:'No tasks yet'}</span>
+              <button class="menu-action-btn danger small" type="button" data-ops-action="delete-epic" data-epic-id="${esc(epic.id)}">Delete</button>
             </div>
           </div>
-          <div class="ops-task-list">${rows}</div>
+          <div class="epic-tasks">${rows || '<div class="epic-empty">No tasks yet. Add one above.</div>'}</div>
         </section>
       `;
     }
@@ -639,42 +687,40 @@
         ['Completed',formatTaskTimestamp(task&&task.completedAt)],
       ];
       if(task&&task.archived)stampEntries.push(['Archived',formatTaskTimestamp(task&&task.archivedAt)]);
-      const taskClasses=['ops-task',statusKey];
+      const taskClasses=['task-item',statusKey];
+      if(editing)taskClasses.push('editing');
       if(task&&task.done)taskClasses.push('done');
       if(task&&task.archived)taskClasses.push('archived');
       return `
         <div class="${taskClasses.join(' ')}">
-          <div class="ops-task-body">
-            <div class="ops-task-title-row">
-              <span class="ops-task-grade-badge grade-${esc(grade)}">${esc(grade)}</span>
-              <span class="ops-task-status-badge ${esc(statusKey)}">${esc(taskFilterLabel(statusKey))}</span>
-              <div class="ops-task-text">${esc(task.text)}</div>
-              ${markers.map(marker=>`<span class="ops-task-chip">${esc(marker)}</span>`).join('')}
-            </div>
-            <div class="ops-task-meta"><span>${esc(metaText)}</span></div>
-            <div class="ops-task-stamps">
+          <div class="task-title-row">
+            <span class="task-grade-badge grade-${esc(grade)}">${esc(grade)}</span>
+            <div class="task-text">${esc(task.text)}</div>
+            ${markers.length?`<span class="task-markers">${markers.map(marker=>`<span class="task-marker ${String(marker).trim().toLowerCase()==='ai suggestion'?'ai-suggestion':''}">${esc(marker)}</span>`).join('')}</span>`:''}
+          </div>
+          <div class="task-meta"><span>${esc(metaText)}</span></div>
+          <div class="task-stamps">
               ${stampEntries.map(([label,value])=>`
-                <span class="ops-task-stamp">
-                  <span class="ops-task-stamp-label">${esc(label)}:</span>
-                  <span class="ops-task-stamp-value">${esc(value)}</span>
+                <span class="task-stamp">
+                  <span class="task-stamp-label">${esc(label)}:</span>
+                  <span class="task-stamp-value">${esc(value)}</span>
                 </span>
               `).join('')}
-            </div>
-            ${dependencies.length?`<div class="ops-task-detail">Depends on: ${esc(dependencies.join(', '))}</div>`:''}
-            ${flags.length?`<div class="ops-task-detail">Flags: ${esc(flags.join(', '))}</div>`:''}
-            ${imageRefs.length?`<div class="ops-task-detail" title="${esc(imageTitle)}">Images: ${esc(String(imageRefs.length))}</div>`:''}
-            ${qaStatus==='needs-more-work'||moreWork?`<div class="ops-task-detail ops-task-more-work">Needs more work: ${esc(moreWork||'No details provided.')}</div>`:''}
           </div>
+          ${dependencies.length?`<div class="task-dependencies">Depends on: ${esc(dependencies.join(', '))}</div>`:''}
+          ${flags.length?`<div class="task-flags">Flags: ${esc(flags.join(', '))}</div>`:''}
+          ${imageRefs.length?`<div class="task-images" title="${esc(imageTitle)}">Images: ${esc(String(imageRefs.length))}</div>`:''}
+          ${qaStatus==='needs-more-work'||moreWork?`<div class="task-more-work">Needs more work: ${esc(moreWork||'No details provided.')}</div>`:''}
           ${task.archived?'':`
-            <div class="ops-task-actions">
-              <select class="ops-task-select ops-task-grade-select grade-${esc(grade)}" data-ops-task-grade="${esc(task.id)}" aria-label="Task grade">
+            <div class="task-actions">
+              <select class="task-select task-grade-select grade-${esc(grade)}" data-ops-task-grade="${esc(task.id)}" aria-label="Task grade">
                 ${TASK_GRADE_VALUES.map(value=>`<option value="${value}" ${value===grade?'selected':''}>${value.charAt(0).toUpperCase()+value.slice(1)}</option>`).join('')}
               </select>
-              <button class="ops-btn primary" type="button" data-ops-action="task-primary" data-task-id="${esc(task.id)}" data-task-mode="${esc(actionState.action)}" ${actionState.sessionKey?`data-session-key="${esc(actionState.sessionKey)}"`:''} ${actionState.disabled?'disabled':''} ${actionState.title?`title="${esc(actionState.title)}"`:''}>${esc(actionState.label)}</button>
-              ${qaStatus==='ready-for-test'&&!task.done?`<button class="ops-btn danger" type="button" data-ops-action="task-needs-more-work" data-task-id="${esc(task.id)}">Needs more work</button>`:''}
-              ${qaStatus==='ready-for-test'&&!task.done?`<button class="ops-btn" type="button" data-ops-action="complete-task" data-task-id="${esc(task.id)}" ${isBlocked?'disabled title="Complete dependencies to unlock this task."':''}>Complete</button>`:''}
-              <button class="ops-btn" type="button" data-ops-action="edit-task" data-task-id="${esc(task.id)}" ${editing?'disabled':''}>${editing?'Editing':'Edit'}</button>
-              <button class="ops-btn danger" type="button" data-ops-action="delete-task" data-task-id="${esc(task.id)}">Delete</button>
+              <button class="menu-action-btn small" type="button" data-ops-action="task-primary" data-task-id="${esc(task.id)}" data-task-mode="${esc(actionState.action)}" ${actionState.sessionKey?`data-session-key="${esc(actionState.sessionKey)}"`:''} ${actionState.disabled?'disabled':''} ${actionState.title?`title="${esc(actionState.title)}"`:''}>${esc(actionState.label)}</button>
+              ${qaStatus==='ready-for-test'&&!task.done?`<button class="menu-action-btn danger small" type="button" data-ops-action="task-needs-more-work" data-task-id="${esc(task.id)}">Needs more work</button>`:''}
+              ${qaStatus==='ready-for-test'&&!task.done?`<button class="menu-action-btn secondary small" type="button" data-ops-action="complete-task" data-task-id="${esc(task.id)}" ${isBlocked?'disabled title="Complete dependencies to unlock this task."':''}>Complete</button>`:''}
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="edit-task" data-task-id="${esc(task.id)}" ${editing?'disabled':''}>${editing?'Editing':'Edit'}</button>
+              <button class="menu-action-btn danger small" type="button" data-ops-action="delete-task" data-task-id="${esc(task.id)}">Delete</button>
             </div>
           `}
         </div>

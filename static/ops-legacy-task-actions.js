@@ -280,17 +280,96 @@
       return buildTaskExecutionPrompt(retryPrompt);
     }
 
+    function providerFromModelValue(modelId){
+      const value=String(modelId||'').trim();
+      if(value.startsWith('@')&&value.includes(':')){
+        return value.slice(1,value.lastIndexOf(':')).trim().toLowerCase();
+      }
+      return '';
+    }
+
+    function normalizeModelState(model,provider){
+      const normalizedModel=String(model||'').trim();
+      const normalizedProvider=String(provider||'').trim().toLowerCase()||providerFromModelValue(normalizedModel)||null;
+      return {
+        model:normalizedModel,
+        model_provider:normalizedProvider||null,
+      };
+    }
+
+    function selectedOpsModelState(){
+      const modelSelect=domLookup('modelSelect');
+      if(!modelSelect)return null;
+      if(typeof _modelStateForSelect==='function'){
+        const state=_modelStateForSelect(modelSelect,modelSelect.value||'');
+        if(state&&state.model)return normalizeModelState(state.model,state.model_provider);
+      }
+      const selectedOption=modelSelect.selectedOptions&&modelSelect.selectedOptions[0];
+      const group=selectedOption&&selectedOption.parentElement;
+      const provider=group&&group.tagName==='OPTGROUP'&&group.dataset
+        ? group.dataset.provider
+        : '';
+      return normalizeModelState(modelSelect.value||'',provider);
+    }
+
+    function readStoredOpsModelState(){
+      if(typeof _readPersistedModelState==='function'){
+        const stored=_readPersistedModelState();
+        if(stored&&stored.model)return normalizeModelState(stored.model,stored.model_provider);
+      }
+      if(!windowRef||!windowRef.localStorage)return null;
+      try{
+        const raw=windowRef.localStorage.getItem('hermes-webui-model-state');
+        if(raw){
+          const parsed=JSON.parse(raw);
+          if(parsed&&parsed.model){
+            return normalizeModelState(parsed.model,parsed.model_provider);
+          }
+        }
+      }catch(_){}
+      try{
+        const legacyModel=windowRef.localStorage.getItem('hermes-webui-model');
+        if(legacyModel)return normalizeModelState(legacyModel,'');
+      }catch(_){}
+      return null;
+    }
+
+    function currentOpsModelState(){
+      const selectedState=selectedOpsModelState();
+      if(selectedState&&selectedState.model)return selectedState;
+      const state=stateRef();
+      const sessionState=state&&state.session&&state.session.model
+        ? normalizeModelState(state.session.model,state.session.model_provider)
+        : null;
+      if(sessionState&&sessionState.model)return sessionState;
+      const storedState=readStoredOpsModelState();
+      if(storedState&&storedState.model)return storedState;
+      const defaultModel=windowRef&&windowRef._defaultModel;
+      const activeProvider=windowRef&&windowRef._activeProvider;
+      return normalizeModelState(defaultModel||'',activeProvider||'');
+    }
+
+    function currentOpsProfile(project){
+      const state=stateRef();
+      const activeProfile=String(state&&state.activeProfile||'').trim();
+      if(activeProfile)return activeProfile;
+      const projectProfile=String(project&&project.profile||'').trim();
+      return projectProfile||'default';
+    }
+
     async function newChatInProject(projectOverride){
       const project=projectOverride||OPS.currentProject;
       if(!project)return;
       await api(projectUrl(project.id,'/ensure-workspace'),{method:'POST',body:JSON.stringify({})});
-      const model=domLookup('modelSelect')&&domLookup('modelSelect').value;
+      const modelState=currentOpsModelState();
+      const state=stateRef();
       const payload={
         workspace:projectPath(project),
-        model,
+        model:modelState.model||undefined,
+        model_provider:modelState.model_provider||null,
         ops_project_id:project.id,
+        profile:currentOpsProfile(project),
       };
-      if(project.profile)payload.use_profile_default_model=true;
       const data=await AgentBridgeRef.sessions.create(payload);
       if(data.session&&data.session.session_id){
         await AgentBridgeRef.sessions.rename(data.session,`${nameOf(project)} session`);
@@ -424,13 +503,14 @@
       if(!project)throw new Error('Project not found.');
       const {epic,task}=match;
       await api(projectUrl(project.id,'/ensure-workspace'),{method:'POST',body:JSON.stringify({})});
-      const model=domLookup('modelSelect')&&domLookup('modelSelect').value;
+      const modelState=currentOpsModelState();
       const payload={
         workspace:projectPath(project),
-        model,
+        model:modelState.model||undefined,
+        model_provider:modelState.model_provider||null,
+        profile:currentOpsProfile(project),
         title:task.text.slice(0,80)||'Project task',
       };
-      if(project.profile)payload.use_profile_default_model=true;
       const data=await AgentBridgeRef.sessions.ensureTask(project.id,task.id,payload);
       const session=data&&data.session;
       if(!session||!session.session_id)throw new Error('Unable to create task session.');
@@ -464,6 +544,7 @@
       if(!match||!project)return;
       const opts=options&&typeof options==='object'?options:{};
       const pendingQuickTaskFiles=Array.isArray(opts.files)?opts.files.filter(Boolean):[];
+      const goalMode=!!opts.goalMode;
       setBusy(true);
       try{
         const {sessionId,sessionKey,alreadyRunning,epic,task}=await ensureTaskSession(match,project);
@@ -487,11 +568,14 @@
               if(typeof renderTray==='function')renderTray();
             }
           }
-          msg.value=buildTaskPrompt(project,epic,task);
+          const taskPrompt=buildTaskPrompt(project,epic,task);
+          // Targeted WebUI /goal bridge: prefix only when the user opted in.
+          // Remove this once upstream Hermes WebUI ships native goal-mode support.
+          msg.value=goalMode?`/goal ${taskPrompt}`:taskPrompt;
           if(typeof autoResize==='function')autoResize();
           await sendTurn();
-          await recordOpsRun(project,epic,task,sessionId,'running','Task execution was started from the ops dashboard.');
-          showToast('Task execution started',2400);
+          await recordOpsRun(project,epic,task,sessionId,'running',goalMode?'Task goal execution was started from the ops dashboard.':'Task execution was started from the ops dashboard.');
+          showToast(goalMode?'Task goal started':'Task execution started',2400);
         }else{
           showToast('Opened task session',2400);
           closeOpsDashboard();
@@ -501,10 +585,10 @@
       }
     }
 
-    async function executeTask(taskId){
+    async function executeTask(taskId,options){
       const match=findTask(taskId);
       if(!match||!OPS.currentProject)return;
-      return executeTaskMatch(OPS.currentProject,match);
+      return executeTaskMatch(OPS.currentProject,match,options);
     }
 
     async function ensureProjectEpic(projectId,title){
@@ -570,6 +654,7 @@
       const project=findProject(projectId);
       const taskText=String(text||'').trim();
       const pendingQuickTaskImages=(OPS.quickTaskImages||[]).slice();
+      const goalMode=!!OPS.quickTaskGoalMode;
       if(!project)throw new Error('Choose a project first.');
       if(!taskText)throw new Error('Enter a task before creating it.');
       if(OPS.quickTaskDictationActive||OPS.quickTaskDictationBusy){
@@ -608,12 +693,12 @@
         const pendingQuickTaskFiles=pendingQuickTaskImages.map(entry=>entry&&entry.file).filter(Boolean);
         OPS.quickTaskText='';
         clearQuickTaskImages();
-        OPS.quickTaskStatus='Quick task created. Starting Codex...';
+        OPS.quickTaskStatus=goalMode?'Quick task created. Starting Hermes goal...':'Quick task created. Starting Hermes...';
         OPS.quickTaskStatusKind='info';
         if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
         try{
-          await executeTaskMatch(project,match,{files:pendingQuickTaskFiles});
-          OPS.quickTaskStatus='Quick task created and execution started.';
+          await executeTaskMatch(project,match,{files:pendingQuickTaskFiles,goalMode});
+          OPS.quickTaskStatus=goalMode?'Quick task created and goal started.':'Quick task created and execution started.';
           OPS.quickTaskStatusKind='success';
         }catch(execErr){
           const message=execErr&&execErr.message?execErr.message:'Unable to start the task session.';

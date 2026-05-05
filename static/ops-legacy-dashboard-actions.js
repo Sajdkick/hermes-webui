@@ -300,6 +300,7 @@
         if(kind==='quick-task'){
           OPS.quickTaskProjectId=String(data.projectId||'').trim();
           OPS.quickTaskText=String(data.text||'');
+          OPS.quickTaskGoalMode=data.goalMode==='on';
           await createQuickTask(OPS.quickTaskProjectId,OPS.quickTaskText);
           return;
         }
@@ -343,7 +344,12 @@
             await api(projectUrl(OPS.currentProject.id,`/tasks/${encodeURIComponent(data.taskId)}`),{method:'POST',body:JSON.stringify(body)});
             OPS.editingTask=null;
           }else{
-            await api(projectUrl(OPS.currentProject.id,'/tasks'),{method:'POST',body:JSON.stringify(body)});
+            const created=await api(projectUrl(OPS.currentProject.id,'/tasks'),{method:'POST',body:JSON.stringify(body)});
+            if(data.goalMode==='on'&&created&&created.task&&created.task.id){
+              await refreshDetail();
+              await executeTask(created.task.id,{goalMode:true});
+              return;
+            }
           }
           return await refreshDetail();
         }

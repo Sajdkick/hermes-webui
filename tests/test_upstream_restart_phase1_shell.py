@@ -1,5 +1,7 @@
 import json
 from pathlib import Path
+import subprocess
+import textwrap
 from urllib.parse import urlparse
 
 
@@ -110,10 +112,18 @@ def test_legacy_ops_shell_keeps_restart_compatibility_contract():
     quick_actions_source = Path("static/ops-legacy-dashboard-quick-actions.js").read_text(encoding="utf-8")
     health_source = Path("static/ops-legacy-health.js").read_text(encoding="utf-8")
     deployments_source = Path("static/ops-legacy-deployments.js").read_text(encoding="utf-8")
+    task_actions_source = Path("static/ops-legacy-task-actions.js").read_text(encoding="utf-8")
 
     assert "window.projectUrl = projectUrl;" in host_source
+    assert "function ensureLocalDialog(){" in host_source
+    assert "const LOCAL_DIALOG = {" in host_source
     assert "api('/api/ops/notifications/pending')" in bridge_source
-    assert "return api('/api/sessions').then(fallback=>({" in bridge_source
+    assert "api('/api/ops/runs')" in bridge_source
+    assert "return api('/api/ops/sessions').catch(()=>api('/api/sessions'));" in bridge_source
+    assert "return api('/api/ops/sessions').then(data=>({" in bridge_source
+    assert "/sessions/launch" in bridge_source
+    assert "/session/close" in bridge_source
+    assert "/session/ensure" not in bridge_source
     assert "function normalizeRunStatus(value){" in dashboard_source
     assert "function runStatusLabel(status){" in dashboard_source
     assert "function runStatusKind(status){" in dashboard_source
@@ -123,6 +133,11 @@ def test_legacy_ops_shell_keeps_restart_compatibility_contract():
     assert "async function renderProjectPlayQuickAction(project){" not in quick_actions_source
     assert "if(!capabilities.dependencyHealth){" in health_source
     assert "if(!capabilities.deployment){" in deployments_source
+    assert "function currentOpsModelState(){" in task_actions_source
+    assert "function currentOpsProfile(project){" in task_actions_source
+    assert "typeof _readPersistedModelState==='function'" in task_actions_source
+    assert "model_provider:modelState.model_provider||null" in task_actions_source
+    assert "profile:currentOpsProfile(project)" in task_actions_source
 
 
 def test_ops_shell_assets_are_served_by_static_route():
@@ -182,3 +197,95 @@ def test_ops_shell_assets_are_served_by_static_route():
     assert handle_get(projects_script, urlparse("http://example.com/static/ops-projects.js")) is True
     assert projects_script.status == 200
     assert (projects_script.header("Content-Type") or "").startswith("application/javascript")
+
+
+def test_legacy_bridge_merges_done_notifications_from_runs():
+    script = textwrap.dedent(
+        """
+        (async () => {
+        const fs = require('fs');
+        const vm = require('vm');
+
+        const bridgeSource = fs.readFileSync('static/ops-legacy-agent-bridge.js', 'utf8');
+        const api = async (path) => {
+          if (path === '/api/ops/notifications/pending'){
+            return {
+              notifications: [{
+                notificationKey: 'approval:session-1:a1',
+                kind: 'approval',
+                sessionId: 'session-1',
+                project: { id: 'project-1', name: 'Hermes' },
+                task: { id: 'task-1', text: 'Pending approval' },
+                session: { title: 'Approval session' },
+                approvalId: 'a1',
+                description: 'Need approval',
+                command: 'git push'
+              }]
+            };
+          }
+          if (path === '/api/ops/runs'){
+            return {
+              runs: [{
+                id: 'run-1',
+                status: 'succeeded',
+                summary: 'Task completed successfully.',
+                completedAt: '2026-05-05T10:00:00Z',
+                sessionId: 'session-2',
+                projectId: 'project-1',
+                taskId: 'task-2',
+                project: { id: 'project-1', name: 'Hermes' },
+                task: { id: 'task-2', text: 'Completed task' },
+                session: { session_id: 'session-2', title: 'Completed session' }
+              }]
+            };
+          }
+          throw new Error('Unexpected API path: ' + path);
+        };
+
+        const context = {
+          console,
+          api,
+          projectUrl: (projectId, suffix='') => '/api/ops/projects/' + projectId + suffix,
+          fetch: async () => ({ ok: true, json: async () => ({}) }),
+          location: { href: 'http://example.com/ops' },
+          URL,
+          URLSearchParams,
+          EventSource: function EventSource(){},
+          FormData: function FormData(){},
+          window: {},
+          document: {},
+          setTimeout,
+          clearTimeout,
+          Date,
+        };
+        context.window = context;
+        vm.createContext(context);
+        vm.runInContext(bridgeSource, context);
+        const payload = await context.window.AgentBridge.notifications.list();
+        if (!Array.isArray(payload.notifications) || payload.notifications.length !== 2){
+          throw new Error('Expected pending and done notifications.');
+        }
+        const done = payload.notifications.find((entry) => entry.kind === 'done');
+        if (!done){
+          throw new Error('Expected a synthesized done notification.');
+        }
+        if (done.run_id !== 'run-1'){
+          throw new Error('Done notification did not preserve run id.');
+        }
+        if (done.message !== 'Task completed successfully.'){
+          throw new Error('Done notification did not use run summary.');
+        }
+        console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"

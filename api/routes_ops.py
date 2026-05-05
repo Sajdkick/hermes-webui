@@ -50,6 +50,8 @@ def handle_post(handler, parsed, body: dict) -> bool:
         return True
     if routes_ops_database.handle_post(handler, parsed, body):
         return True
+    if routes_ops_git.handle_post(handler, parsed, body):
+        return True
     if routes_ops_upstream_sync.handle_post(handler, parsed, body):
         return True
     if routes_ops_runs.handle_post(handler, parsed, body):

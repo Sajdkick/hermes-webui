@@ -37,13 +37,15 @@
     const isSessionForProject=ctx&&ctx.isSessionForProject;
     const taskImageLabel=ctx&&ctx.taskImageLabel;
     const writeStoredJson=ctx&&ctx.writeStoredJson;
-    const sessionGroupStorageKey=ctx&&ctx.sessionGroupStorageKey;
+    const sessionActivityStorageKey=ctx&&ctx.sessionActivityStorageKey;
     const navigatorRef=ctx&&ctx.navigatorRef;
     const windowRef=ctx&&ctx.windowRef;
     const documentRef=ctx&&ctx.documentRef;
     const URLRef=ctx&&ctx.URLRef;
     const MediaRecorderRef=ctx&&ctx.MediaRecorderRef;
     const FileRef=ctx&&ctx.FileRef;
+    const showPromptDialog=ctx&&ctx.showPromptDialog;
+    const showConfirmDialog=ctx&&ctx.showConfirmDialog;
     const requestAnimationFrameRef=ctx&&ctx.requestAnimationFrameRef;
     const taskDictationPrompt=ctx&&ctx.taskDictationPrompt;
     const taskDictationAudioBitsPerSecond=ctx&&ctx.taskDictationAudioBitsPerSecond;
@@ -79,6 +81,8 @@
       || typeof isSessionForProject!=='function'
       || typeof taskImageLabel!=='function'
       || typeof writeStoredJson!=='function'
+      || typeof showPromptDialog!=='function'
+      || typeof showConfirmDialog!=='function'
     ){
       return {};
     }
@@ -408,31 +412,157 @@
       }
     }
 
-    function sessionGroupKey(group){
-      const key=String((group&&group.key)||((group&&group.projectId)?`project:${group.projectId}`:'')).trim();
-      return key||`group:${Math.random().toString(36).slice(2,10)}`;
+    function sessionActivityEntries(){
+      return Array.isArray(OPS.sessionActivity)?OPS.sessionActivity:[];
     }
 
-    function isSessionGroupCollapsed(key){
-      return !!(key&&OPS.sessionGroupCollapsed&&OPS.sessionGroupCollapsed[key]);
+    function sessionActivityGroups(){
+      return Array.isArray(OPS.sessionActivityGroups)?OPS.sessionActivityGroups:[];
     }
 
-    function setSessionGroupCollapsed(key,collapsed){
-      const groupKey=String(key||'').trim();
-      if(!groupKey)return;
-      OPS.sessionGroupCollapsed={...(OPS.sessionGroupCollapsed||{}),[groupKey]:!!collapsed};
-      if(!collapsed)delete OPS.sessionGroupCollapsed[groupKey];
-      writeStoredJson(sessionGroupStorageKey,OPS.sessionGroupCollapsed);
+    function sessionActivityGroupCollapseKey(group){
+      if(group&&group.isUngrouped)return '__ungrouped__';
+      return String(group&&group.id||'').trim();
     }
 
-    function syncSessionGroupState(groups){
-      const activeKeys=new Set((groups||[]).map(group=>sessionGroupKey(group)).filter(Boolean));
-      const next={};
-      Object.entries(OPS.sessionGroupCollapsed||{}).forEach(([key,value])=>{
-        if(activeKeys.has(key)&&value)next[key]=true;
+    function isSessionActivityGroupCollapsed(group){
+      const groupKey=sessionActivityGroupCollapseKey(group);
+      return !!(groupKey&&OPS.sessionActivityCollapsed&&OPS.sessionActivityCollapsed[groupKey]);
+    }
+
+    function setSessionActivityGroupCollapsed(groupKey,collapsed){
+      const normalizedKey=String(groupKey||'').trim();
+      if(!normalizedKey)return;
+      OPS.sessionActivityInitialized={...(OPS.sessionActivityInitialized||{}),[normalizedKey]:true};
+      OPS.sessionActivityCollapsed={...(OPS.sessionActivityCollapsed||{})};
+      if(collapsed)OPS.sessionActivityCollapsed[normalizedKey]=true;
+      else delete OPS.sessionActivityCollapsed[normalizedKey];
+      writeStoredJson(sessionActivityStorageKey,OPS.sessionActivityCollapsed);
+    }
+
+    function syncSessionActivityCollapsedGroups(groups){
+      const validKeys=(groups||[])
+        .map(group=>sessionActivityGroupCollapseKey(group))
+        .filter(Boolean);
+      const validKeySet=new Set(validKeys);
+      const nextCollapsed={};
+      const nextInitialized={};
+      validKeys.forEach(groupKey=>{
+        const known=!!(OPS.sessionActivityInitialized&&OPS.sessionActivityInitialized[groupKey]);
+        if(known&&OPS.sessionActivityCollapsed&&OPS.sessionActivityCollapsed[groupKey]){
+          nextCollapsed[groupKey]=true;
+        }
+        if(!known){
+          nextCollapsed[groupKey]=true;
+        }
+        nextInitialized[groupKey]=true;
       });
-      OPS.sessionGroupCollapsed=next;
-      writeStoredJson(sessionGroupStorageKey,OPS.sessionGroupCollapsed);
+      OPS.sessionActivityCollapsed=nextCollapsed;
+      OPS.sessionActivityInitialized=nextInitialized;
+      writeStoredJson(sessionActivityStorageKey,OPS.sessionActivityCollapsed);
+    }
+
+    function sessionActivityStatus(session){
+      const status=session&&session.activityStatus;
+      const key=String(status&&status.key||'').trim().toLowerCase();
+      const toneClass=String(status&&status.toneClass||key||'idle').trim().toLowerCase()||'idle';
+      const labelText=String(status&&status.labelText||'Quiet').trim()||'Quiet';
+      const title=String(status&&status.title||'No recent Codex activity detected for this session.').trim()
+        || 'No recent Codex activity detected for this session.';
+      return {key:key||'idle',toneClass,labelText,title};
+    }
+
+    function sessionActivitySortKey(session){
+      return Math.max(
+        Number(session&&session.lastOutputAt)||0,
+        Number(session&&session.lastActive)||0,
+        0,
+      );
+    }
+
+    function formatSessionActivityTitle(session){
+      return String(
+        session&&(
+          session.label
+          || session.taskText
+          || session.branchLabel
+          || session.projectName
+          || session.title
+          || 'Untitled'
+        )||'Untitled'
+      ).trim()||'Untitled';
+    }
+
+    function formatSessionActivityRepoLabel(session){
+      return String(session&&session.repoLabel||session&&session.projectName||'').trim();
+    }
+
+    function formatSessionActivitySummary(entries,groups,refreshedLabel){
+      const counts={
+        active:0,
+        connecting:0,
+        waiting:0,
+        approval:0,
+        degraded:0,
+        done:0,
+        prompt:0,
+        idle:0,
+        readableOutputPending:0,
+      };
+      (entries||[]).forEach(session=>{
+        const state=sessionActivityStatus(session);
+        if(Object.prototype.hasOwnProperty.call(counts,state.key))counts[state.key]+=1;
+        if(session&&session.readableOutputPending)counts.readableOutputPending+=1;
+      });
+      const parts=[];
+      if(counts.active>0)parts.push(`${counts.active} working`);
+      if(counts.connecting>0)parts.push(`${counts.connecting} connecting`);
+      if(counts.waiting>0)parts.push(`${counts.waiting} waiting`);
+      if(counts.approval>0)parts.push(`${counts.approval} approval`);
+      if(counts.degraded>0)parts.push(`${counts.degraded} degraded`);
+      if(counts.prompt>0)parts.push(`${counts.prompt} at prompt`);
+      if(counts.done>0)parts.push(`${counts.done} done`);
+      if(counts.idle>0)parts.push(`${counts.idle} quiet`);
+      if(counts.readableOutputPending>0){
+        parts.push(`${counts.readableOutputPending} unread output${counts.readableOutputPending===1?'':'s'}`);
+      }
+      const groupCount=Array.isArray(groups)?groups.length:0;
+      const summaryParts=parts.length?` ${parts.join(' • ')}.`:'';
+      const groupPart=groupCount?` ${groupCount} group${groupCount===1?'':'s'}.`:'';
+      const refreshedPart=refreshedLabel?` Last checked ${refreshedLabel}.`:'';
+      return `${entries.length} active session${entries.length===1?'':'s'}.${groupPart}${summaryParts}${refreshedPart}`;
+    }
+
+    function buildSessionActivitySections(entries,groups){
+      const normalizedGroups=Array.isArray(groups)?groups:[];
+      const sections=normalizedGroups.map(group=>({
+        ...group,
+        sessions:[],
+        isUngrouped:false,
+      }));
+      const sectionsById=new Map(sections.map(group=>[String(group&&group.id||'').trim(),group]));
+      const ungrouped={
+        id:'',
+        label:'Ungrouped',
+        position:Number.MAX_SAFE_INTEGER,
+        sessions:[],
+        isUngrouped:true,
+      };
+      (entries||[]).forEach(session=>{
+        const target=session&&session.groupId?sectionsById.get(String(session.groupId||'').trim()):null;
+        if(target){
+          target.sessions.push(session);
+          return;
+        }
+        ungrouped.sessions.push(session);
+      });
+      sections.forEach(group=>{
+        group.sessions=(group.sessions||[]).slice().sort((left,right)=>sessionActivitySortKey(right)-sessionActivitySortKey(left));
+      });
+      ungrouped.sessions=(ungrouped.sessions||[]).slice().sort((left,right)=>sessionActivitySortKey(right)-sessionActivitySortKey(left));
+      if(ungrouped.sessions.length||sections.length===0)sections.push(ungrouped);
+      syncSessionActivityCollapsedGroups(sections);
+      return sections;
     }
 
     function sessionDisplayProject(group){
@@ -528,63 +658,16 @@
     }
 
     function activeUngroupedSessions(){
-      return (OPS.sessions||[])
-        .filter(session=>!session.archived&&!OPS.projects.some(project=>isSessionForProject(session,project)))
-        .sort((a,b)=>(Number(b.updated_at)||0)-(Number(a.updated_at)||0));
+      const sections=buildSessionActivitySections(sessionActivityEntries(),sessionActivityGroups());
+      const ungrouped=sections.find(group=>group&&group.isUngrouped);
+      return Array.isArray(ungrouped&&ungrouped.sessions)?ungrouped.sessions:[];
     }
 
     function pendingRequestCountForSessions(sessions){
-      return (sessions||[]).reduce((total,session)=>total+Number(session&&session.ops_pending_request_count||0),0);
-    }
-
-    function sessionWorkspaceGroups(){
-      const hasExplicitGroups=!!(OPS.sessionGroups&&Array.isArray(OPS.sessionGroups.groups));
-      const explicit=hasExplicitGroups?OPS.sessionGroups.groups:[];
-      const explicitSections=explicit.filter(group=>String(group&&group.groupType||'activity').trim().toLowerCase()==='activity');
-      const legacyGroupedSessions=explicit
-        .filter(group=>String(group&&group.groupType||'').trim().toLowerCase()!=='activity')
-        .flatMap(group=>Array.isArray(group&&group.sessions)?group.sessions:[]);
-      const sourceUngrouped=hasExplicitGroups
-        ? [...legacyGroupedSessions,...(Array.isArray(OPS.sessionGroups&&OPS.sessionGroups.ungrouped)?OPS.sessionGroups.ungrouped:[])]
-        : (OPS.sessions||[]).filter(session=>session&&!session.archived);
-      const sessionSortKey=session=>Math.max(
-        Number(session&&session.lastActivityAt)||0,
-        Number(session&&session.lastOutputAt)||0,
-        Number(session&&session.updated_at)||0,
-        Number(session&&session.created_at)||0,
-      );
-      const sections=(explicitSections||[]).map((group,index)=>{
-        const sessions=canonicalTaskSessions(Array.isArray(group&&group.sessions)?group.sessions:[]).sort((left,right)=>sessionSortKey(right)-sessionSortKey(left));
-        return {
-          ...group,
-          key:String(group&&group.key||group&&group.groupId||`group:${index}`),
-          groupType:String(group&&group.groupType||'activity'),
-          sessions,
-          sessionCount:Number(group&&group.sessionCount)||sessions.length,
-          activeCount:Number(group&&group.activeCount)||sessions.length,
-          pendingRequestCount:Number(group&&group.pendingRequestCount)||pendingRequestCountForSessions(sessions),
-          waitingCount:Number(group&&group.waitingCount)||sessions.filter(session=>session&&(session.waitingForInput||session.waitingForApproval)).length,
-          latestUpdatedAt:Number(group&&group.latestUpdatedAt)||Math.max(0,...sessions.map(session=>sessionSortKey(session))),
-          isUngrouped:false,
-        };
-      });
-      const ungrouped=canonicalTaskSessions(sourceUngrouped).sort((left,right)=>sessionSortKey(right)-sessionSortKey(left));
-      if(ungrouped.length){
-        sections.push({
-          key:'ungrouped',
-          groupType:'ungrouped',
-          label:'Ungrouped',
-          sessions:ungrouped,
-          sessionCount:ungrouped.length,
-          activeCount:ungrouped.length,
-          pendingRequestCount:pendingRequestCountForSessions(ungrouped),
-          waitingCount:ungrouped.filter(session=>session&&(session.waitingForInput||session.waitingForApproval)).length,
-          latestUpdatedAt:Math.max(0,...ungrouped.map(session=>sessionSortKey(session))),
-          isUngrouped:true,
-        });
-      }
-      syncSessionGroupState(sections);
-      return sections;
+      return (sessions||[]).reduce((total,session)=>{
+        const state=sessionActivityStatus(session);
+        return total+((state.key==='waiting'||state.key==='approval')?1:0);
+      },0);
     }
 
     function rememberQuickTaskFocus(){
@@ -687,51 +770,119 @@
       `;
     }
 
-    function renderSessionWorkspaceGroup(group,index){
-      const groupKey=sessionGroupKey(group);
-      const collapsed=isSessionGroupCollapsed(groupKey);
-      const sessions=Array.isArray(group&&group.sessions)?group.sessions:[];
-      const waitingCount=Number(group&&group.waitingCount)||sessions.filter(session=>session&&(session.waitingForInput||session.waitingForApproval)).length;
-      const title=String(group&&group.label||'Session activity').trim()||'Session activity';
-      const context=String(group&&group.contextLabel||'').trim();
-      const meta=[
-        `${sessions.length} active session${sessions.length===1?'':'s'}`,
-        waitingCount?`${waitingCount} waiting`:'',
-        Number(group&&group.pendingRequestCount)?`${Number(group&&group.pendingRequestCount)} open request${Number(group&&group.pendingRequestCount)===1?'':'s'}`:'',
-      ].filter(Boolean).join(' • ');
-      const style=sessionGroupAccentStyle(group,index,'ops-card');
-      const rows=sessions.length
-        ? sessions.map(session=>renderSessionWorkspaceRow(session,sessionWorkspaceProject(session))).join('')
-        : `<div class="ops-project-session-empty">${group&&group.isUngrouped?'No active sessions.':'No active sessions in this group.'}</div>`;
+    function focusSessionActivityGroupInput(){
+      const targetGroupId=String(OPS.sessionActivityFocusGroupId||'').trim();
+      if(!targetGroupId||!root())return;
+      OPS.sessionActivityFocusGroupId='';
+      requestAnimationFrameRef(()=>{
+        const input=Array.from(root().querySelectorAll('[data-ops-session-group-label="true"]'))
+          .find(field=>String(field&&field.dataset&&field.dataset.groupId||'').trim()===targetGroupId);
+        if(!input||input.disabled)return;
+        input.focus({preventScroll:true});
+        if(typeof input.select==='function')input.select();
+      });
+    }
+
+    function renderSessionActivityControls(session,groups){
+      if(!Array.isArray(groups)||!groups.length)return '<div class="menu-session-activity-controls"></div>';
+      const sessionKey=sessionRefValue(session);
       return `
-        <section class="ops-session-group-card ops-session-activity-group ${group&&group.isUngrouped?'ungrouped':''} ${waitingCount?'has-waiting':''} ${collapsed?'collapsed':''}" data-session-group-key="${esc(groupKey)}" ${style?`style="${esc(style)}"`:''}>
-          <div class="ops-session-group-header">
-            <div class="ops-session-group-main">
-              <button class="ops-session-group-toggle" type="button" data-ops-action="toggle-session-group" data-session-group-key="${esc(groupKey)}" aria-expanded="${collapsed?'false':'true'}" title="${collapsed?'Expand sessions':'Collapse sessions'}">
-                <span class="ops-session-group-caret" aria-hidden="true">${svg.arrow}</span>
-              </button>
-              <div class="ops-session-group-title-block">
-                <div class="ops-session-group-title-line">
-                  <span class="ops-session-group-title">${esc(title)}</span>
-                  ${group&&group.isUngrouped?'<span class="ops-session-group-badge neutral">Sessions</span>':''}
+        <div class="menu-session-activity-controls">
+          <label class="menu-session-activity-group-select-wrap" title="Move session between groups.">
+            <span class="menu-session-activity-group-select-label">Group</span>
+            <select class="menu-session-activity-group-select" data-ops-session-group-select="true" data-session-key="${esc(sessionKey)}">
+              <option value="">Ungrouped</option>
+              ${groups.map(group=>`<option value="${esc(group.id)}" ${String(session&&session.groupId||'').trim()===String(group.id||'').trim()?'selected':''}>${esc(String(group&&group.label||''))}</option>`).join('')}
+            </select>
+          </label>
+        </div>
+      `;
+    }
+
+    function renderSessionActivityItem(session,groups){
+      const state=sessionActivityStatus(session);
+      const title=formatSessionActivityTitle(session);
+      const repoLabel=formatSessionActivityRepoLabel(session);
+      const sessionKey=sessionRefValue(session);
+      const hasReadableOutput=session&&session.readableOutputPending===true;
+      return `
+        <div class="menu-session-activity-item interactive ${hasReadableOutput?'has-readable-output':''}" tabindex="0" role="button" data-ops-action="open-session" data-session-key="${esc(sessionKey)}" data-ops-session-activity-item="true" data-readable-output-pending="${hasReadableOutput?'true':'false'}">
+          <div class="menu-session-activity-main">
+            <div class="menu-session-activity-heading">
+              <div class="menu-session-activity-copy">
+                <div class="menu-session-activity-title-line">
+                  <div class="menu-session-activity-title">${esc(title)}</div>
+                  <span class="menu-session-activity-state state-${esc(state.toneClass||'idle')}" title="${esc(state.title||'')}">${esc(state.labelText||'Quiet')}</span>
+                  ${hasReadableOutput?'<span class="menu-session-activity-badge readable-output">Unread output</span>':''}
                 </div>
-                ${context?`<div class="ops-session-group-context">${esc(context)}</div>`:''}
-                <div class="ops-session-group-meta">${esc(meta)}</div>
+                ${repoLabel&&repoLabel!==title?`<div class="menu-session-activity-repo">${esc(repoLabel)}</div>`:''}
               </div>
+              ${renderSessionActivityControls(session,groups)}
             </div>
           </div>
-          <div class="ops-project-sessions">
-            ${rows}
+        </div>
+      `;
+    }
+
+    function renderSessionActivityGroupSection(group,index,groups){
+      const sessions=Array.isArray(group&&group.sessions)?group.sessions:[];
+      const collapsed=isSessionActivityGroupCollapsed(group);
+      const groupKey=sessionActivityGroupCollapseKey(group);
+      const waitingCount=sessions.filter(session=>{
+        const state=sessionActivityStatus(session);
+        return state.key==='waiting'||state.key==='approval';
+      }).length;
+      const readableOutputCount=sessions.filter(session=>session&&session.readableOutputPending).length;
+      const style=group&&group.isUngrouped?'':sessionGroupAccentStyle(group,index,'menu-session-activity-group');
+      const meta=`${sessions.length} active session${sessions.length===1?'':'s'}${waitingCount?` • ${waitingCount} waiting`:''}${readableOutputCount?` • ${readableOutputCount} unread output${readableOutputCount===1?'':'s'}`:''}`;
+      return `
+        <section class="menu-session-activity-group ${group&&group.isUngrouped?'ungrouped':''} ${collapsed?'collapsed':''} ${readableOutputCount?'has-readable-output':''}" ${group&&group.isUngrouped?'':`data-group-id="${esc(String(group&&group.id||''))}"`} ${style?`style="${esc(style)}"`:''}>
+          <div class="menu-session-activity-group-header">
+            <div class="menu-session-activity-group-header-main">
+              <button class="menu-session-activity-group-toggle" type="button" data-ops-action="toggle-session-activity-group" data-session-activity-group-key="${esc(groupKey)}" aria-expanded="${collapsed?'false':'true'}" title="${collapsed?'Expand this group.':'Collapse this group.'}">
+                <span class="menu-session-activity-group-caret" aria-hidden="true"></span>
+                <span class="menu-session-activity-group-toggle-label">${collapsed?'Show':'Hide'}</span>
+              </button>
+              <div class="menu-session-activity-group-title-wrap">
+                ${group&&group.isUngrouped
+                  ? `<div class="menu-session-activity-group-title">${esc(String(group&&group.label||'Ungrouped'))}</div>`
+                  : `<input type="text" class="menu-session-activity-group-input" data-ops-session-group-label="true" data-group-id="${esc(String(group&&group.id||''))}" data-initial-label="${esc(String(group&&group.label||''))}" value="${esc(String(group&&group.label||''))}" maxlength="80" aria-label="Session group label" title="Rename this session group.">`
+                }
+                <div class="menu-session-activity-group-meta">${esc(meta)}</div>
+              </div>
+            </div>
+            ${group&&group.isUngrouped?'':`<button class="menu-action-btn secondary small" type="button" data-ops-action="delete-session-activity-group" data-group-id="${esc(String(group&&group.id||''))}" title="Delete this session group and move its sessions back to Ungrouped.">Delete</button>`}
+          </div>
+          <div class="menu-session-activity-group-sessions">
+            ${sessions.length
+              ? sessions.map(session=>renderSessionActivityItem(session,groups)).join('')
+              : `<div class="menu-session-activity-group-empty">${group&&group.isUngrouped?'No active sessions without a group.':'No active sessions in this group.'}</div>`
+            }
           </div>
         </section>
       `;
     }
 
     function renderHomeSessionOverview(){
-      if(OPS.loading)return '<div class="ops-empty">Loading sessions...</div>';
-      const groups=sessionWorkspaceGroups();
-      if(!groups.length)return '<div class="ops-empty">No active sessions.</div>';
-      return `<div class="ops-home-project-list">${groups.map((group,index)=>renderSessionWorkspaceGroup(group,index)).join('')}</div>`;
+      if(OPS.loading&&OPS.sessionActivityBusy&&!sessionActivityEntries().length){
+        return '<div class="repo-status">Loading sessions...</div><p class="repo-empty">No active sessions.</p>';
+      }
+      const entries=sessionActivityEntries();
+      const groups=sessionActivityGroups();
+      const sections=buildSessionActivitySections(entries,groups);
+      const refreshedLabel=OPS.sessionActivityLastRefreshedAt
+        ? new Date(OPS.sessionActivityLastRefreshedAt).toLocaleTimeString()
+        : '';
+      const statusText=OPS.sessionActivityError
+        ? String(OPS.sessionActivityError||'').trim()
+        : formatSessionActivitySummary(entries,groups,refreshedLabel);
+      const statusClass=OPS.sessionActivityError?' error':'';
+      const showList=OPS.sessionActivityExpanded!==false;
+      return `
+        <div class="repo-status${statusText?statusClass:''}${statusText?'':' hidden'}">${esc(statusText||'')}</div>
+        ${showList?`<div class="menu-session-activity-list">${sections.map((group,index)=>renderSessionActivityGroupSection(group,index,groups)).join('')}</div>`:''}
+        <p class="repo-empty ${showList&&entries.length?'hidden':''}">${OPS.sessionActivityExpanded===false?'':'No active sessions.'}</p>
+      `;
     }
 
     function renderProjectSessionRows(project,sessionsOverride){
@@ -752,10 +903,38 @@
       return renderSessionWorkspaceRow(session,null);
     }
 
+    function ensureSessionActivityAutoRefresh(){
+      if(OPS.sessionActivityAutoRefreshTimer)return;
+      OPS.sessionActivityAutoRefreshTimer=windowRef.setInterval(()=>{
+        if(!windowRef||!windowRef._opsDashboardOpen||OPS.view!=='home'||OPS.sessionActivityBusy)return;
+        void loadSessionActivity();
+      },5000);
+    }
+
+    async function loadSessionActivity(options){
+      const settings=options||{};
+      OPS.sessionActivityBusy=true;
+      try{
+        const payload=await AgentBridgeRef.sessions.activity();
+        OPS.sessionActivity=Array.isArray(payload&&payload.sessions)?payload.sessions:[];
+        OPS.sessionActivityGroups=Array.isArray(payload&&payload.groups)?payload.groups:[];
+        OPS.sessionActivityLastRefreshedAt=Date.now();
+        OPS.sessionActivityError='';
+      }catch(error){
+        OPS.sessionActivityError=error&&error.message?error.message:'Unable to load session activity.';
+      }finally{
+        OPS.sessionActivityBusy=false;
+        if(settings.render!==false&&windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home'){
+          renderHome();
+        }
+      }
+    }
+
     function renderHome(){
-      setDashboardTopbar('Dashboard','');
+      setDashboardTopbar('Menu','');
       const el=root();
       if(!el)return;
+      ensureSessionActivityAutoRefresh();
       rememberQuickTaskFocus();
       const selectedProjectId=normalizeQuickTaskProjectSelection();
       const projectOptions=OPS.projects.length
@@ -763,9 +942,13 @@
         : '<option value="">No projects available</option>';
       const quickTaskDisabled=OPS.loading||OPS.quickTaskBusy||OPS.quickTaskDictationActive||OPS.quickTaskDictationBusy||!selectedProjectId;
       const quickTaskAttachDisabled=OPS.loading||OPS.quickTaskBusy||!selectedProjectId;
+      const quickTaskStatusKind=String(OPS.quickTaskStatusKind||'').trim().toLowerCase();
+      const quickTaskStatusClass=quickTaskStatusKind==='error'
+        ? ' error'
+        : (quickTaskStatusKind==='success'?' success':'');
       const quickTaskStatus=OPS.quickTaskStatus
-        ? `<div class="ops-status ${esc(OPS.quickTaskStatusKind||'info')}">${esc(OPS.quickTaskStatus)}</div>`
-        : '';
+        ? `<div class="repo-status${quickTaskStatusClass}">${esc(OPS.quickTaskStatus)}</div>`
+        : '<div class="repo-status hidden"></div>';
       const quickTaskMicState=quickTaskMicButtonState();
       const quickTaskMicStatus=OPS.quickTaskDictationStatus
         ? `<div class="task-mic-status ${esc(OPS.quickTaskDictationStatusKind||'info')}">${esc(OPS.quickTaskDictationStatus)}</div>`
@@ -775,50 +958,49 @@
       const sessionOverview=renderHomeSessionOverview();
       const autoPolicy=normalizedAutoApprovalPolicy();
       const notificationsBusy=!!OPS.notificationBusy;
+      const sessionActivityExpanded=OPS.sessionActivityExpanded!==false;
       el.innerHTML=`
-        <div class="ops-dashboard ops-home-dashboard">
-          <div class="ops-home-top">
-            <button class="ops-home-projects-btn" type="button" data-ops-action="open-projects">
-              ${svg.folder}
-              <span>Projects</span>
-            </button>
-            <button class="ops-btn" type="button" data-ops-action="refresh-home">${svg.refresh}<span>Refresh</span></button>
-          </div>
-          <section class="ops-panel ops-notifications-panel">
-            <div class="ops-panel-header">
-              <div>
-                <h2>Notifications</h2>
-                <span>Sessions that need input or have finished.</span>
+        <div class="ops-dashboard ops-home-dashboard menu-page-content">
+          <h2>Menu</h2>
+          <p class="menu-description">Use the navigation buttons below and review active agent notifications.</p>
+          <section class="ops-panel repo-panel menu-notification-panel ops-notifications-panel">
+            <div class="menu-notification-header">
+              <div class="menu-notification-header-copy">
+                <div class="quick-response-title">Notifications</div>
+                <div class="menu-notification-header-help">Auto-approve routine inline approvals while leaving important requests for manual review.</div>
               </div>
-              <div class="ops-notification-diagnostics-actions">
-                <button class="ops-btn" type="button" data-ops-action="toggle-auto-approval-policy" ${notificationsBusy?'disabled':''}>${autoPolicy.enabled?svg.check:svg.close}<span>${autoPolicy.enabled?'Auto-approve on':'Auto-approve off'}</span></button>
-                <button class="ops-btn" type="button" data-ops-action="refresh-notification-diagnostics" ${notificationsBusy?'disabled':''}>${svg.refresh}<span>Refresh</span></button>
+              <div class="menu-notification-header-actions">
+                <label class="menu-inline-toggle" for="opsAutoApproveRoutine" data-ops-action="toggle-auto-approval-policy">
+                  <input id="opsAutoApproveRoutine" type="checkbox" ${autoPolicy.enabled?'checked':''} ${notificationsBusy?'disabled':''}>
+                  <span>Auto-approve routine requests</span>
+                </label>
+                <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-notification-diagnostics" ${notificationsBusy?'disabled':''}>Refresh</button>
               </div>
             </div>
             ${notifications}
           </section>
-          <section class="ops-panel ops-quick-task-panel">
-            <div class="ops-panel-header">
-              <div>
-                <h2>Quick task runner</h2>
-                <span>Create the task under the Quick tasks epic and start it immediately.</span>
+          <section class="ops-panel repo-panel menu-quick-task-panel ops-quick-task-panel">
+            <div class="menu-notification-header">
+              <div class="menu-notification-header-copy">
+                <div class="quick-response-title">Quick task runner</div>
+                <div class="menu-notification-header-help">Pick a project, describe the work, and Hermes will create the task under the Quick tasks epic and start Codex on it immediately.</div>
               </div>
             </div>
-            <form class="ops-quick-task-form" data-ops-submit="quick-task">
-              <label>
-                <span>Project</span>
-                <select name="projectId" data-ops-quick-field="projectId" ${OPS.loading||OPS.quickTaskBusy?'disabled':''}>${projectOptions}</select>
+            <form class="menu-quick-task-form" data-ops-submit="quick-task">
+              <label class="tasks-field">
+                <span class="tasks-field-label">Project</span>
+                <select class="task-select" name="projectId" data-ops-quick-field="projectId" ${OPS.loading||OPS.quickTaskBusy?'disabled':''}>${projectOptions}</select>
               </label>
-              <label class="wide">
-                <span>Task</span>
-                <textarea name="text" data-ops-quick-field="text" rows="3" required ${quickTaskDisabled?'disabled':''} placeholder="${OPS.projects.length?'Describe the task you want Codex to execute...':'Create a project first to use quick tasks.'}">${esc(OPS.quickTaskText)}</textarea>
+              <label class="tasks-field">
+                <span class="tasks-field-label">Task</span>
+                <textarea class="task-input menu-quick-task-input" name="text" data-ops-quick-field="text" rows="3" required ${quickTaskDisabled?'disabled':''} placeholder="${OPS.projects.length?'Describe the task you want Codex to execute...':'Create a project first to use quick tasks.'}">${esc(OPS.quickTaskText)}</textarea>
               </label>
-              <div class="ops-quick-task-actions">
-                <div class="ops-quick-task-secondary-actions">
-                  <button class="ops-btn task-mic-btn ${quickTaskMicState.listening?'listening':''}" type="button" data-ops-action="toggle-quick-task-dictation" ${quickTaskMicState.disabled?'disabled':''} aria-pressed="${quickTaskMicState.listening?'true':'false'}" title="${esc(quickTaskMicState.title)}">${svg.chat}<span>${esc(quickTaskMicState.label)}</span></button>
-                  <button class="ops-btn" type="button" data-ops-action="attach-quick-task-images" ${quickTaskAttachDisabled?'disabled':''}>${svg.folder}<span>Attach screenshots</span></button>
+              <div class="todo-form-row menu-quick-task-actions">
+                <div class="menu-quick-task-secondary-actions">
+                  <button class="menu-action-btn secondary small" type="button" data-ops-action="attach-quick-task-images" ${quickTaskAttachDisabled?'disabled':''}>Attach screenshots</button>
+                  <button class="task-mic-btn ${quickTaskMicState.listening?'listening':''}" type="button" data-ops-action="toggle-quick-task-dictation" ${quickTaskMicState.disabled?'disabled':''} aria-pressed="${quickTaskMicState.listening?'true':'false'}" title="${esc(quickTaskMicState.title)}">${esc(quickTaskMicState.label)}</button>
                 </div>
-                <button class="ops-btn primary" type="submit" ${quickTaskDisabled?'disabled':''}>${svg.play}<span>${OPS.quickTaskBusy?'Creating...':'Create & run'}</span></button>
+                <button class="task-add-btn" type="submit" ${quickTaskDisabled?'disabled':''}>${OPS.quickTaskBusy?'Creating...':'Create & run'}</button>
               </div>
               <input id="opsQuickTaskImagesInput" type="file" accept="image/*" multiple hidden data-ops-quick-field="images">
             </form>
@@ -826,18 +1008,30 @@
             ${quickTaskMicStatus}
             ${quickTaskStatus}
           </section>
-          <section class="ops-panel ops-session-overview-panel">
-            <div class="ops-panel-header">
-              <div>
-                <h2>Active sessions</h2>
-                <span>Session activity, state, and the next action from one place.</span>
+          <section class="ops-panel repo-panel menu-session-activity-panel ops-session-overview-panel" aria-live="polite">
+            <div class="menu-notification-header">
+              <div class="menu-notification-header-copy">
+                <div class="quick-response-title">Active sessions</div>
+                <div class="menu-session-activity-header-help">Heartbeat only, plus repo and branch. Group sessions with freeform labels. Refreshes every 5 seconds while this menu is visible.</div>
+              </div>
+              <div class="menu-notification-header-actions">
+                <button class="menu-action-btn secondary small" type="button" data-ops-action="create-session-activity-group" ${OPS.sessionActivityBusy?'disabled':''}>Add group</button>
+                <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-session-activity" ${OPS.sessionActivityBusy?'disabled':''}>${OPS.sessionActivityBusy?'Refreshing...':'Refresh'}</button>
+                <button class="menu-action-btn secondary small" type="button" data-ops-action="toggle-session-activity" aria-expanded="${sessionActivityExpanded?'true':'false'}">${sessionActivityExpanded?'Collapse':'Expand'}</button>
               </div>
             </div>
             ${sessionOverview}
           </section>
+          <div class="menu-actions">
+            <button class="menu-action-btn" type="button" data-ops-action="open-projects">Projects</button>
+            <button class="menu-action-btn" type="button" data-ops-action="show-create-project">Create project</button>
+            <button class="menu-action-btn" type="button" data-ops-action="go-recovery">Recovery</button>
+            <button class="menu-action-btn secondary" type="button" data-ops-action="back-to-hermes">Back to Hermes</button>
+          </div>
         </div>
       `;
       restoreQuickTaskFocus();
+      focusSessionActivityGroupInput();
     }
 
     async function loadDashboardHome(){
@@ -847,6 +1041,7 @@
           loadProjects(),
           loadNotifications(),
           loadOpsRuns(),
+          loadSessionActivity({render:false}),
           loadNotificationDiagnostics({render:false}).catch(()=>null),
         ]);
         normalizeQuickTaskProjectSelection();
@@ -862,6 +1057,59 @@
 
     async function handleHomeAction(action,btn){
       if(action==='refresh-home')return await loadDashboardHome();
+      if(action==='show-create-project'){
+        OPS.view='projects';
+        OPS.currentProject=null;
+        OPS.taskData=null;
+        OPS.showCreate=true;
+        setDashboardTopbar('Projects','');
+        await loadProjects();
+        return renderCurrentOpsView();
+      }
+      if(action==='go-recovery'){
+        if(windowRef&&windowRef.location&&typeof windowRef.location.assign==='function'){
+          windowRef.location.assign('/recovery');
+        }
+        return null;
+      }
+      if(action==='back-to-hermes'){
+        if(windowRef&&windowRef.location&&typeof windowRef.location.assign==='function'){
+          windowRef.location.assign('/');
+        }
+        return null;
+      }
+      if(action==='refresh-session-activity')return await loadSessionActivity();
+      if(action==='toggle-session-activity'){
+        OPS.sessionActivityExpanded=OPS.sessionActivityExpanded===false?true:false;
+        return renderCurrentOpsView();
+      }
+      if(action==='create-session-activity-group'){
+        const label=await showPromptDialog({
+          title:'Create session group',
+          message:'Give this activity group a short label.',
+          confirmLabel:'Create',
+          placeholder:'New group',
+          initialValue:'New group',
+        });
+        if(label===null)return null;
+        const created=await AgentBridgeRef.sessions.createActivityGroup(label);
+        OPS.sessionActivityFocusGroupId=String(created&&created.group&&created.group.id||'').trim();
+        return await loadSessionActivity();
+      }
+      if(action==='delete-session-activity-group'){
+        const groupId=String(btn&&btn.dataset&&btn.dataset.groupId||'').trim();
+        if(!groupId)return null;
+        const ok=await showConfirmDialog({
+          title:'Delete session group',
+          message:'Delete this group? Sessions in it will move back to Ungrouped.',
+          confirmLabel:'Delete',
+          danger:true,
+          focusCancel:true,
+        });
+        if(!ok)return null;
+        await AgentBridgeRef.sessions.deleteActivityGroup(groupId);
+        return await loadSessionActivity();
+      }
       if(action==='attach-quick-task-images'){
         const input=root()&&root().querySelector('#opsQuickTaskImagesInput');
         if(input&&!input.disabled)input.click();
@@ -876,14 +1124,51 @@
         if(OPS.quickTaskDictationActive)return stopQuickTaskDictation();
         return await startQuickTaskDictation();
       }
-      if(action==='toggle-session-group'){
-        setSessionGroupCollapsed(btn&&btn.dataset&&btn.dataset.sessionGroupKey,!isSessionGroupCollapsed(btn&&btn.dataset&&btn.dataset.sessionGroupKey));
+      if(action==='toggle-session-activity-group'){
+        const groupKey=String(btn&&btn.dataset&&btn.dataset.sessionActivityGroupKey||'').trim();
+        if(!groupKey)return null;
+        setSessionActivityGroupCollapsed(groupKey,!isSessionActivityGroupCollapsed({id:groupKey,isUngrouped:groupKey==='__ungrouped__'}));
         return renderCurrentOpsView();
       }
       return false;
     }
 
     function handleQuickTaskField(event){
+      const sessionGroupLabelField=event.target.closest('[data-ops-session-group-label]');
+      if(sessionGroupLabelField&&root()&&root().contains(sessionGroupLabelField)&&event.type==='change'){
+        const groupId=String(sessionGroupLabelField.dataset.groupId||'').trim();
+        const initialLabel=String(sessionGroupLabelField.dataset.initialLabel||'').trim();
+        const nextLabel=String(sessionGroupLabelField.value||'').replace(/\s+/g,' ').trim();
+        if(!groupId)return true;
+        if(!nextLabel){
+          sessionGroupLabelField.value=initialLabel;
+          return true;
+        }
+        if(nextLabel===initialLabel)return true;
+        sessionGroupLabelField.disabled=true;
+        AgentBridgeRef.sessions.renameActivityGroup(groupId,nextLabel)
+          .then(()=>loadSessionActivity())
+          .catch(error=>{
+            sessionGroupLabelField.disabled=false;
+            sessionGroupLabelField.value=initialLabel;
+            OPS.sessionActivityError=error&&error.message?error.message:'Unable to rename session group.';
+            if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
+          });
+        return true;
+      }
+      const sessionGroupSelect=event.target.closest('[data-ops-session-group-select]');
+      if(sessionGroupSelect&&root()&&root().contains(sessionGroupSelect)&&event.type==='change'){
+        const sessionKey=String(sessionGroupSelect.dataset.sessionKey||'').trim();
+        sessionGroupSelect.disabled=true;
+        AgentBridgeRef.sessions.assignActivityGroup(sessionKey,sessionGroupSelect.value||null)
+          .then(()=>loadSessionActivity())
+          .catch(error=>{
+            sessionGroupSelect.disabled=false;
+            OPS.sessionActivityError=error&&error.message?error.message:'Unable to move session.';
+            if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
+          });
+        return true;
+      }
       const field=event.target.closest('[data-ops-quick-field]');
       if(!field||!root()||!root().contains(field))return false;
       if(field.dataset.opsQuickField==='projectId'){
@@ -891,12 +1176,48 @@
         OPS.quickTaskProjectId=field.value;
       }
       if(field.dataset.opsQuickField==='text')OPS.quickTaskText=field.value;
+      if(field.dataset.opsQuickField==='goalMode')OPS.quickTaskGoalMode=!!field.checked;
       if(field.dataset.opsQuickField==='images'){
         addQuickTaskImages(field.files);
         field.value='';
         if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
       }
       return true;
+    }
+
+    function handleHomeClick(event){
+      if(!root()||!root().contains(event.target))return false;
+      if(event.target.closest('[data-ops-session-group-select]')||event.target.closest('[data-ops-session-group-label]')){
+        event.stopImmediatePropagation();
+        return true;
+      }
+      return false;
+    }
+
+    function handleHomeKeydown(event){
+      if(!root()||!root().contains(event.target))return false;
+      const item=event.target.closest('[data-ops-session-activity-item="true"]');
+      if(item&&!event.target.closest('[data-ops-session-group-select]')&&!event.target.closest('[data-ops-session-group-label]')){
+        if(event.key==='Enter'||event.key===' '){
+          event.preventDefault();
+          item.click();
+          return true;
+        }
+      }
+      const groupInput=event.target.closest('[data-ops-session-group-label]');
+      if(groupInput){
+        if(event.key==='Enter'){
+          event.preventDefault();
+          groupInput.blur();
+          return true;
+        }
+        if(event.key==='Escape'){
+          groupInput.value=String(groupInput.dataset.initialLabel||'');
+          groupInput.blur();
+          return true;
+        }
+      }
+      return false;
     }
 
     return {
@@ -916,6 +1237,8 @@
       renderProjectSessionRow,
       renderGenericSessionRow,
       handleHomeAction,
+      handleHomeClick,
+      handleHomeKeydown,
       handleQuickTaskField,
     };
   }

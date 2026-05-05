@@ -17,6 +17,7 @@
     const getCurrentProject=ctx&&ctx.getCurrentProject;
     const loadProjects=ctx&&ctx.loadProjects;
     const openProjectDetail=ctx&&ctx.openProjectDetail;
+    const refreshDetail=ctx&&ctx.refreshDetail;
     const renderProjects=ctx&&ctx.renderProjects;
     if(!OPS||typeof api!=='function'||typeof projectUrl!=='function'||typeof renderCurrentOpsView!=='function'||typeof showToast!=='function'||typeof esc!=='function'||!svg){
       return {};
@@ -55,11 +56,26 @@
         delete OPS.gitPlansByProject[id];
         const data=await api(projectUrl(id,`/git/${op}`),{
           method:'POST',
-          body:JSON.stringify({confirm:op}),
+          body:JSON.stringify({
+            confirm:op,
+            message:`Sync changes from Codex Terminal (${new Date().toISOString()})`,
+          }),
         });
         const operationRecord=data.operation||data;
         OPS.gitOperationsByProject[id]=operationRecord;
         if(operationRecord.finalStatus)OPS.gitStatusByProject[id]=operationRecord.finalStatus;
+        if(typeof loadProjects==='function'){
+          await loadProjects().catch(()=>null);
+        }
+        const currentProject=typeof getCurrentProject==='function'?getCurrentProject():null;
+        if(
+          currentProject
+          && currentProject.id===id
+          && Number(operationRecord.taskUpdates||0)>0
+          && typeof refreshDetail==='function'
+        ){
+          await refreshDetail().catch(()=>null);
+        }
         showToast(operationRecord.summary||`${label} finished`,3200);
         return operationRecord;
       }finally{

@@ -293,3 +293,95 @@ def test_phase8_ops_ui_renders_git_status_panel():
         text=True,
     )
     assert completed.stdout.strip() == "ok"
+
+
+def test_phase8_push_refreshes_projects_and_detail_after_task_promotion():
+    script = textwrap.dedent(
+        """
+        (async () => {
+        const fs = require('fs');
+        const vm = require('vm');
+
+        const source = fs.readFileSync('static/ops-legacy-git.js', 'utf8');
+        const events = [];
+
+        const context = {
+          console,
+          window: { HermesOpsModules: {} },
+          setTimeout,
+          clearTimeout,
+        };
+        vm.createContext(context);
+        vm.runInContext(source, context);
+
+        const OPS = {
+          gitBusyByProject: {},
+          gitPlansByProject: {},
+          gitOperationsByProject: {},
+          gitStatusByProject: {},
+        };
+
+        const apiCalls = [];
+        const git = context.window.HermesOpsModules.git.bindDashboard({
+          OPS,
+          api: async (path, options) => {
+            apiCalls.push({ path, body: JSON.parse(options.body || '{}') });
+            return {
+              operation: {
+                summary: 'Pushed main to origin/main. Marked 1 task ready for test.',
+                taskUpdates: 1,
+                readyForTestTaskIds: ['task-1'],
+                finalStatus: { branch: 'main', dirty: false, ahead: 0 },
+              },
+            };
+          },
+          projectUrl: (projectId, suffix) => `/api/ops/projects/${projectId}${suffix}`,
+          renderCurrentOpsView: () => events.push('render'),
+          showToast: (message) => events.push(`toast:${message}`),
+          esc: (value) => String(value == null ? '' : value),
+          svg: { refresh: '', git: '', check: '' },
+          getCurrentProject: () => ({ id: 'project-1' }),
+          loadProjects: async () => { events.push('loadProjects'); },
+          refreshDetail: async () => { events.push('refreshDetail'); },
+          findProject: () => ({ id: 'project-1', coreBranch: 'main' }),
+          openProjectDetail: async () => {},
+          renderProjects: () => {},
+        });
+
+        const result = await git.executeProjectGitOperation('project-1', 'push');
+
+        if (!apiCalls.length || apiCalls[0].path !== '/api/ops/projects/project-1/git/push') {
+          throw new Error('Push endpoint was not called.');
+        }
+        if (apiCalls[0].body.confirm !== 'push') {
+          throw new Error('Push confirmation payload was not sent.');
+        }
+        if (!String(apiCalls[0].body.message || '').startsWith('Sync changes from Codex Terminal (')) {
+          throw new Error('Push commit message payload was not sent.');
+        }
+        if (!events.includes('loadProjects')) {
+          throw new Error('Projects were not reloaded after push.');
+        }
+        if (!events.includes('refreshDetail')) {
+          throw new Error('Project detail was not refreshed after task promotion.');
+        }
+        if (OPS.gitStatusByProject['project-1'].branch !== 'main') {
+          throw new Error('Final git status was not cached.');
+        }
+        if (result.taskUpdates !== 1) {
+          throw new Error('Push result did not preserve task update metadata.');
+        }
+        console.log('ok');
+        })().catch((error) => {
+          console.error(error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"

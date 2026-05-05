@@ -111,6 +111,213 @@ def test_phase4_launch_task_session_creates_persisted_linked_session(monkeypatch
     assert linked_task["linkedSessions"][0]["sessionUrl"] == payload["sessionUrl"]
     assert linked_task["linkedSessions"][0]["available"] is True
 
+    legacy_launch = _FakeHandler()
+    assert handle_post(
+        legacy_launch,
+        urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks/{task['id']}/session/ensure"),
+    ) is True
+    assert legacy_launch.status == 201
+    legacy_payload = _response_json(legacy_launch)
+    assert legacy_payload["session"]["source_tag"] == "ops_task"
+    assert legacy_payload["sessionUrl"].endswith(legacy_payload["session"]["session_id"])
+
+
+def test_phase4_ops_sessions_route_enriches_latest_task_session_tip(monkeypatch, tmp_path, git_available):
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
+
+    repo = init_project_repo(tmp_path)
+
+    from api.routes import handle_get, handle_post
+    from api import ops_sessions, session_sidecars
+
+    create = _FakeHandler({"name": "Session Route Project", "path": str(repo), "coreBranch": "main"})
+    assert handle_post(create, urlparse("http://example.com/api/ops/projects")) is True
+    project = _response_json(create)["project"]
+
+    epic_create = _FakeHandler({"title": "Phase 4"})
+    assert handle_post(epic_create, urlparse(f"http://example.com/api/ops/projects/{project['id']}/epics")) is True
+    epic_id = _response_json(epic_create)["epic"]["id"]
+
+    task_create = _FakeHandler({"epicId": epic_id, "text": "Show the latest task session tip"})
+    assert handle_post(task_create, urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks")) is True
+    task = _response_json(task_create)["task"]
+
+    launch = _FakeHandler()
+    assert handle_post(
+        launch,
+        urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks/{task['id']}/sessions/launch"),
+    ) is True
+    launch_payload = _response_json(launch)
+    root_session_id = launch_payload["session"]["session_id"]
+
+    tip_summary = {
+        "session_id": "tiproute12345",
+        "title": "Route tip session",
+        "workspace": str(repo.resolve()),
+        "model": "gpt-5.5",
+        "model_provider": "openai-codex",
+        "message_count": 4,
+        "created_at": launch_payload["session"]["created_at"],
+        "updated_at": launch_payload["session"]["updated_at"] + 30,
+        "last_message_at": launch_payload["session"]["updated_at"] + 30,
+        "pinned": False,
+        "archived": False,
+        "project_id": project["id"],
+        "profile": "default",
+        "active_stream_id": None,
+        "pending_user_message": None,
+        "has_pending_user_message": False,
+        "is_cli_session": False,
+        "source_tag": "ops_task",
+        "raw_source": None,
+        "session_source": None,
+        "source_label": "Ops task",
+        "enabled_toolsets": None,
+        "is_streaming": False,
+        "_lineage_root_id": root_session_id,
+        "_lineage_tip_id": "tiproute12345",
+    }
+    monkeypatch.setattr(session_sidecars, "all_sessions", lambda: [tip_summary])
+    monkeypatch.setattr(ops_sessions, "all_sessions", lambda: [tip_summary])
+
+    grouped = _FakeHandler()
+    assert handle_get(grouped, urlparse(f"http://example.com/api/ops/sessions?projectId={project['id']}")) is True
+    payload = _response_json(grouped)
+
+    assert payload["groups"][0]["projectId"] == project["id"]
+    assert payload["groups"][0]["sessions"][0]["session_id"] == "tiproute12345"
+    assert payload["groups"][0]["sessions"][0]["ops_task_id"] == task["id"]
+    assert payload["groups"][0]["sessions"][0]["ops_project_id"] == project["id"]
+
+
+def test_phase4_close_task_session_archives_linked_session_and_stops_run(monkeypatch, tmp_path, git_available):
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
+
+    repo = init_project_repo(tmp_path)
+
+    from api.routes import handle_get, handle_post
+    from api.models import get_session
+
+    create = _FakeHandler({"name": "Session Close Project", "path": str(repo), "coreBranch": "main"})
+    assert handle_post(create, urlparse("http://example.com/api/ops/projects")) is True
+    project = _response_json(create)["project"]
+
+    epic_create = _FakeHandler({"title": "Phase 4"})
+    assert handle_post(epic_create, urlparse(f"http://example.com/api/ops/projects/{project['id']}/epics")) is True
+    epic_id = _response_json(epic_create)["epic"]["id"]
+
+    task_create = _FakeHandler({"epicId": epic_id, "text": "Close this linked session"})
+    assert handle_post(task_create, urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks")) is True
+    task = _response_json(task_create)["task"]
+
+    launch = _FakeHandler()
+    assert handle_post(
+        launch,
+        urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks/{task['id']}/sessions/launch"),
+    ) is True
+    launch_payload = _response_json(launch)
+    session_id = launch_payload["session"]["session_id"]
+    run_id = launch_payload["run"]["id"]
+
+    close = _FakeHandler({"sessionId": session_id})
+    assert handle_post(
+        close,
+        urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks/{task['id']}/session/close"),
+    ) is True
+    close_payload = _response_json(close)
+
+    assert close_payload["ok"] is True
+    assert close_payload["sessionId"] == session_id
+    assert close_payload["run"]["id"] == run_id
+    assert close_payload["run"]["status"] == "stopped"
+    assert get_session(session_id).archived is True
+
+    tasks = _FakeHandler()
+    assert handle_get(tasks, urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks")) is True
+    linked_task = next(epic["tasks"][0] for epic in _response_json(tasks)["epics"] if epic["id"] == epic_id)
+    assert "inProgress" not in linked_task
+
+
+def test_phase4_complete_task_route_marks_task_done_and_run_succeeded(monkeypatch, tmp_path, git_available):
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
+
+    repo = init_project_repo(tmp_path)
+
+    from api.routes import handle_get, handle_post
+
+    create = _FakeHandler({"name": "Session Complete Project", "path": str(repo), "coreBranch": "main"})
+    assert handle_post(create, urlparse("http://example.com/api/ops/projects")) is True
+    project = _response_json(create)["project"]
+
+    epic_create = _FakeHandler({"title": "Phase 4"})
+    assert handle_post(epic_create, urlparse(f"http://example.com/api/ops/projects/{project['id']}/epics")) is True
+    epic_id = _response_json(epic_create)["epic"]["id"]
+
+    task_create = _FakeHandler({"epicId": epic_id, "text": "Complete this linked session"})
+    assert handle_post(task_create, urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks")) is True
+    task = _response_json(task_create)["task"]
+
+    launch = _FakeHandler()
+    assert handle_post(
+        launch,
+        urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks/{task['id']}/sessions/launch"),
+    ) is True
+    launch_payload = _response_json(launch)
+    session_id = launch_payload["session"]["session_id"]
+
+    complete = _FakeHandler({"sessionId": session_id})
+    assert handle_post(
+        complete,
+        urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks/{task['id']}/complete"),
+    ) is True
+    complete_payload = _response_json(complete)
+
+    assert complete_payload["ok"] is True
+    assert complete_payload["task"]["done"] is True
+    assert complete_payload["task"]["completedAt"]
+    assert complete_payload["run"]["status"] == "succeeded"
+
+    tasks = _FakeHandler()
+    assert handle_get(tasks, urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks")) is True
+    linked_task = next(epic["tasks"][0] for epic in _response_json(tasks)["epics"] if epic["id"] == epic_id)
+    assert linked_task["done"] is True
+
+
+def test_phase4_plain_task_update_route_accepts_legacy_qa_fields(monkeypatch, tmp_path, git_available):
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
+
+    repo = init_project_repo(tmp_path)
+
+    from api.routes import handle_get, handle_post
+
+    create = _FakeHandler({"name": "Session Update Project", "path": str(repo), "coreBranch": "main"})
+    assert handle_post(create, urlparse("http://example.com/api/ops/projects")) is True
+    project = _response_json(create)["project"]
+
+    epic_create = _FakeHandler({"title": "Phase 4"})
+    assert handle_post(epic_create, urlparse(f"http://example.com/api/ops/projects/{project['id']}/epics")) is True
+    epic_id = _response_json(epic_create)["epic"]["id"]
+
+    task_create = _FakeHandler({"epicId": epic_id, "text": "Carry QA state"})
+    assert handle_post(task_create, urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks")) is True
+    task = _response_json(task_create)["task"]
+
+    update = _FakeHandler({"qaStatus": "needs-more-work", "moreWork": "Fix the regression", "inProgress": True})
+    assert handle_post(
+        update,
+        urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks/{task['id']}"),
+    ) is True
+    updated_task = _response_json(update)["task"]
+    assert updated_task["qaStatus"] == "needs-more-work"
+    assert updated_task["moreWork"] == "Fix the regression"
+    assert updated_task["inProgress"] is True
+
+    tasks = _FakeHandler()
+    assert handle_get(tasks, urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks")) is True
+    linked_task = next(epic["tasks"][0] for epic in _response_json(tasks)["epics"] if epic["id"] == epic_id)
+    assert linked_task["qaStatus"] == "needs-more-work"
+    assert linked_task["moreWork"] == "Fix the regression"
+
 
 def test_phase4_boot_keeps_ops_task_sessions_active():
     boot_js = Path("static/boot.js").read_text(encoding="utf-8")
@@ -258,6 +465,134 @@ def test_phase4_ops_ui_renders_resume_link_and_launches_task_session():
         }
         if (!fetchCalls.some((call) => call.path === '/api/ops/projects/project-1/tasks/task-1/sessions/launch')){
           throw new Error('Task launch endpoint was not called');
+        }
+        console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_phase4_legacy_execute_uses_persisted_model_state_when_ops_has_no_dropdown():
+    script = textwrap.dedent(
+        """
+        (async () => {
+        const fs = require('fs');
+        const vm = require('vm');
+
+        const source = fs.readFileSync('static/ops-legacy-task-actions.js', 'utf8');
+        let ensuredPayload = null;
+
+        const windowRef = {
+          HermesOpsModules: {},
+          localStorage: {
+            getItem(key){
+              if (key === 'hermes-webui-model-state'){
+                return JSON.stringify({ model: 'gpt-5.5', model_provider: 'openai' });
+              }
+              return null;
+            }
+          }
+        };
+
+        const context = {
+          console,
+          window: windowRef,
+          document: {},
+          setTimeout,
+          clearTimeout,
+        };
+        vm.createContext(context);
+        vm.runInContext(source, context);
+
+        const project = { id: 'project-1', name: 'Hermes', path: '/tmp/hermes', profile: 'hermes' };
+        const task = { id: 'task-1', text: 'Execute from ops', grade: 'green' };
+        const dashboard = context.window.HermesOpsModules.taskActions.bindDashboard({
+          OPS: {
+            currentProject: project,
+            sessions: [],
+            taskDataByProject: {},
+            taskAutomationBusyByProject: {},
+            quickTaskImages: [],
+            view: 'project-detail',
+          },
+          AgentBridge: {
+            sessions: {
+              ensureTask: async (_projectId, _taskId, payload) => {
+                ensuredPayload = payload;
+                return { session: { session_id: 'sess-1' } };
+              },
+            },
+            runs: {
+              create: async () => ({ id: 'run-1' }),
+            },
+          },
+          api: async () => ({}),
+          projectUrl: (projectId, suffix='') => '/api/ops/projects/' + projectId + suffix,
+          projectPath: (entry) => entry.path,
+          nameOf: (entry) => entry.name,
+          findProject: () => project,
+          findTask: () => ({ epic: { id: 'epic-1' }, task }),
+          findTaskInData: () => null,
+          allTasks: () => [],
+          findSession: () => null,
+          sessionTaskId: () => '',
+          latestSessionForTask: () => null,
+          sessionRefValue: (value) => typeof value === 'string' ? value : ((value && value.session_id) || ''),
+          normalizeTaskGrade: (value) => value,
+          getTaskQaStatus: () => '',
+          getTaskMoreWork: () => '',
+          actionableTaskCount: () => 1,
+          summarizeTaskFilters: () => ({}),
+          renderProjectDetail: () => {},
+          loadProjectDetail: async () => {},
+          refreshOpsSessions: async () => [],
+          reloadProjectTasks: async () => ({}),
+          loadProjects: async () => {},
+          renderProjects: () => {},
+          renderHome: () => {},
+          loadSession: async () => {},
+          renderSessionList: async () => {},
+          closeOpsDashboard: () => {},
+          showToast: () => {},
+          showPromptDialog: async () => null,
+          showConfirmDialog: async () => false,
+          setBusy: () => {},
+          domLookup: () => null,
+          documentRef: {},
+          windowRef,
+          FileReaderRef: null,
+          SRef: () => ({ session: null, activeProfile: 'default' }),
+          addFiles: () => {},
+          renderTray: () => {},
+          clearSessionReadableOutput: () => {},
+          clearPersistedSessionId: () => {},
+          sendTurn: async () => {},
+          autoResize: () => {},
+          clearQuickTaskImages: () => {},
+        });
+
+        await dashboard.executeTask('task-1');
+        if (!ensuredPayload){
+          throw new Error('Expected ensureTask to be called.');
+        }
+        if (ensuredPayload.model !== 'gpt-5.5'){
+          throw new Error('Expected persisted model to be forwarded to ensureTask.');
+        }
+        if (ensuredPayload.model_provider !== 'openai'){
+          throw new Error('Expected persisted model_provider to be forwarded to ensureTask.');
+        }
+        if (ensuredPayload.profile !== 'default'){
+          throw new Error('Expected active profile to be forwarded to ensureTask.');
         }
         console.log('ok');
         })().catch((error) => {

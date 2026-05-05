@@ -77,8 +77,134 @@
       return {};
     }
 
+    let activeProjectsLoadToken=0;
+
     function normalizePath(value){
       return String(value||'').replace(/\/+$/,'');
+    }
+
+    function currentProjectCounts(projectId){
+      const key=String(projectId||'').trim();
+      const value=key&&OPS.counts&&OPS.counts[key];
+      return value&&typeof value==='object'?value:{};
+    }
+
+    function numericProjectCount(summary,key){
+      const value=Number(summary&&summary[key]);
+      return Number.isFinite(value)?value:null;
+    }
+
+    function visibleProjectsView(){
+      return OPS.view==='projects'&&!!root();
+    }
+
+    function rerenderProjectsView(){
+      if(visibleProjectsView())renderProjects();
+    }
+
+    function setProjectsHydrationPending(count){
+      const normalized=Math.max(0,Number(count)||0);
+      OPS.projectsHydrationPending=normalized;
+      OPS.projectsHydrating=normalized>0;
+    }
+
+    function consumeProjectsHydrationPending(token){
+      if(token!==activeProjectsLoadToken)return;
+      setProjectsHydrationPending((Number(OPS.projectsHydrationPending)||0)-1);
+    }
+
+    function projectSessionCount(project){
+      return projectSessionsFor(project,OPS.sessions).length;
+    }
+
+    function seedProjectHydrationState(projects){
+      const existingTaskData=OPS.taskDataByProject&&typeof OPS.taskDataByProject==='object'?OPS.taskDataByProject:{};
+      const nextTaskData={};
+      const nextCounts={};
+      (projects||[]).forEach(project=>{
+        if(!project||!project.id)return;
+        const current=currentProjectCounts(project.id);
+        if(existingTaskData[project.id])nextTaskData[project.id]=existingTaskData[project.id];
+        nextCounts[project.id]={
+          ...current,
+          sessions:numericProjectCount(current,'sessions') ?? projectSessionCount(project),
+          loading:true,
+        };
+      });
+      OPS.counts=nextCounts;
+      OPS.taskDataByProject=nextTaskData;
+      setProjectsHydrationPending((projects||[]).length+1);
+    }
+
+    async function hydrateProjectSessions(projects,token){
+      try{
+        const groupsData=await AgentBridgeRef.sessions.grouped();
+        if(token!==activeProjectsLoadToken)return;
+        OPS.sessionGroups=groupsData;
+        OPS.sessions=Array.isArray(groupsData&&groupsData.sessions)?groupsData.sessions:[];
+      }catch(e){
+        if(token!==activeProjectsLoadToken)return;
+        OPS.sessionGroups=null;
+        try{
+          const sessionsData=await AgentBridgeRef.sessions.list();
+          if(token!==activeProjectsLoadToken)return;
+          OPS.sessions=Array.isArray(sessionsData&&sessionsData.sessions)?sessionsData.sessions:[];
+        }catch(err){
+          if(token!==activeProjectsLoadToken)return;
+          OPS.sessions=[];
+        }
+      }finally{
+        if(token!==activeProjectsLoadToken)return;
+        (projects||[]).forEach(project=>{
+          if(!project||!project.id)return;
+          OPS.counts[project.id]={
+            ...currentProjectCounts(project.id),
+            sessions:projectSessionCount(project),
+          };
+        });
+        consumeProjectsHydrationPending(token);
+        rerenderProjectsView();
+      }
+    }
+
+    async function hydrateProjectWorkspace(project,token){
+      const projectId=String(project&&project.id||'').trim();
+      if(!projectId){
+        consumeProjectsHydrationPending(token);
+        return;
+      }
+      const playResult=refreshProjectPlayStatus(projectId,{render:false});
+      const gitResult=refreshProjectGitStatus(projectId,{render:false});
+      try{
+        const tasks=await api(projectUrl(projectId,'/tasks'));
+        if(token!==activeProjectsLoadToken)return;
+        OPS.taskDataByProject[projectId]=tasks;
+        OPS.counts[projectId]={
+          ...currentProjectCounts(projectId),
+          ...summarizeEpics(tasks.epics||[]),
+          sessions:numericProjectCount(currentProjectCounts(projectId),'sessions') ?? projectSessionCount(project),
+          error:'',
+          loading:false,
+        };
+      }catch(e){
+        if(token!==activeProjectsLoadToken)return;
+        OPS.counts[projectId]={
+          ...currentProjectCounts(projectId),
+          active:0,
+          done:0,
+          archived:0,
+          total:0,
+          epics:0,
+          sessions:numericProjectCount(currentProjectCounts(projectId),'sessions') ?? projectSessionCount(project),
+          error:e.message||'Unavailable',
+          loading:false,
+        };
+      }finally{
+        await Promise.allSettled([playResult,gitResult]);
+        if(token!==activeProjectsLoadToken)return;
+        consumeProjectsHydrationPending(token);
+        rerenderProjectsView();
+      }
     }
 
     function projectSessionRefValue(sessionLike){
@@ -192,11 +318,15 @@
 
     function projectWorkspaceMeta(project,counts){
       const summary=counts||{};
+      const sessions=numericProjectCount(summary,'sessions');
+      const active=numericProjectCount(summary,'active');
+      const epics=numericProjectCount(summary,'epics');
+      const done=numericProjectCount(summary,'done');
       const values=[
-        `${Number(summary.sessions)||0} active session${Number(summary.sessions)===1?'':'s'}`,
-        `${Number(summary.active)||0} active task${Number(summary.active)===1?'':'s'}`,
-        `Epics ${Number(summary.epics)||0}`,
-        `Done ${Number(summary.done)||0}`,
+        sessions==null?(summary.loading?'Loading sessions...':''):`${sessions} active session${sessions===1?'':'s'}`,
+        active==null?(summary.loading?'Loading task counts...':''):`${active} active task${active===1?'':'s'}`,
+        epics==null?'':`Epics ${epics}`,
+        done==null?'':`Done ${done}`,
         `Profile ${projectProfileLabel(project)}`,
         project&&project.active===false?'Inactive':'',
         summary.error?'Task data unavailable':'',
@@ -212,25 +342,28 @@
       const showBranchBadge=!!(branch&&!projectUsesBranchTitle(project,OPS.projects));
       const playStatus=playStatusFor(project.id);
       const style=projectAccentStyle(project,index,'ops-card');
+      const sessionsHtml=renderProjectSessionRows(project);
       return `
-        <section class="ops-project-card ops-session-group-card ${project.active===false?'inactive':''}" ${style?`style="${esc(style)}"`:''}>
-          <div class="ops-session-group-header">
-            <div class="ops-session-group-main">
+        <section class="quick-response-project-card ${project.active===false?'project-inactive':''}" ${style?`style="${esc(style)}"`:''}>
+          <div class="quick-response-project-header">
+            <div class="quick-response-project-main">
               <button class="ops-project-open ops-project-open-group" type="button" data-ops-action="open-project" data-project-id="${esc(project.id)}">
-                <div class="ops-session-group-title-block">
-                  <div class="ops-session-group-title-line">
-                    <span class="ops-session-group-title">${esc(title)}</span>
-                    ${showBranchBadge?`<span class="ops-session-group-badge">${esc(`Branch: ${branch}`)}</span>`:''}
-                    ${playStatus?`<span class="ops-session-group-badge ${esc(playStatusKind(playStatus))}">${esc(playStatusLabel(playStatus))}</span>`:''}
+                <div class="quick-response-project-title-block">
+                  <div class="quick-response-project-title-line">
+                    <span class="quick-response-project-title">${esc(title)}</span>
+                    ${showBranchBadge?`<span class="menu-session-activity-badge quick-response-project-branch">${esc(`Branch: ${branch}`)}</span>`:''}
+                    ${playStatus?`<span class="menu-session-activity-badge ${esc(playStatusKind(playStatus))}">${esc(playStatusLabel(playStatus))}</span>`:''}
                   </div>
-                  ${context?`<div class="ops-session-group-context">${esc(context)}</div>`:''}
-                  <div class="ops-session-group-meta">${esc(projectWorkspaceMeta(project,counts))}</div>
+                  ${context?`<div class="quick-response-project-repo">${esc(context)}</div>`:''}
+                  <div class="quick-response-project-meta">${esc(projectWorkspaceMeta(project,counts))}</div>
                 </div>
               </button>
             </div>
-            ${renderSessionWorkspaceActions({projectId:project.id,project})}
+            <div class="quick-response-project-actions">
+              ${renderSessionWorkspaceActions({projectId:project.id,project})}
+            </div>
           </div>
-          ${renderProjectSessionRows(project)}
+          ${sessionsHtml}
         </section>
       `;
     }
@@ -238,38 +371,55 @@
     function renderProjects(){
       setDashboardTopbar('Projects',`${OPS.projects.length} project${OPS.projects.length===1?'':'s'}`);
       const createForm=OPS.showCreate?`
-        <form class="ops-inline-form" data-ops-submit="create-project">
-          <label><span>Name</span><input name="name" id="opsProjectName" autocomplete="off" required></label>
-          <label><span>Path</span><input name="path" autocomplete="off" required placeholder="/path/to/project"></label>
-          <label><span>Core branch</span><input name="coreBranch" autocomplete="off" value="main"></label>
-          <label><span>Profile</span><select name="profile">${renderProjectProfileOptions('',{allowBlank:false})}</select></label>
-          <div class="ops-form-actions">
-            <button class="ops-btn primary" type="submit">${svg.plus}<span>Create</span></button>
-            <button class="ops-btn" type="button" data-ops-action="cancel-create">Cancel</button>
+        <section class="repo-panel">
+          <div class="menu-notification-header">
+            <div class="menu-notification-header-copy">
+              <div class="quick-response-title">Create project</div>
+              <div class="menu-notification-header-help">Register a local repo so the restored ops shell can manage tasks, sessions, and upstream maintenance against it.</div>
+            </div>
           </div>
-        </form>
+          <form class="ops-inline-form" data-ops-submit="create-project">
+            <label><span>Name</span><input name="name" id="opsProjectName" autocomplete="off" required></label>
+            <label><span>Path</span><input name="path" autocomplete="off" required placeholder="/path/to/project"></label>
+            <label><span>Core branch</span><input name="coreBranch" autocomplete="off" value="main"></label>
+            <label><span>Profile</span><select name="profile">${renderProjectProfileOptions('',{allowBlank:false})}</select></label>
+            <div class="ops-form-actions">
+              <button class="ops-btn primary" type="submit">${svg.plus}<span>Create</span></button>
+              <button class="ops-btn" type="button" data-ops-action="cancel-create">Cancel</button>
+            </div>
+          </form>
+        </section>
       `:'';
-      const rows=OPS.projects.length?OPS.projects.map((project,index)=>renderProjectWorkspaceCard(project,index)).join(''):`<div class="ops-empty">No projects</div>`;
+      const rows=OPS.projects.length?OPS.projects.map((project,index)=>renderProjectWorkspaceCard(project,index)).join(''):`<div class="repo-empty">No projects.</div>`;
       const el=root();
       if(!el)return '';
       el.innerHTML=`
-        <div class="ops-dashboard">
-          <div class="ops-toolbar">
-            <button class="ops-icon-btn" type="button" data-ops-action="back-home" title="Back">${svg.arrow}</button>
-            <div class="ops-title-block"><h2>Projects</h2><span>${esc(OPS.projects.length+' loaded')}</span></div>
-            <div class="ops-toolbar-actions">
-              <button class="ops-btn" type="button" data-ops-action="refresh-projects">${svg.refresh}<span>Refresh</span></button>
-              <button class="ops-btn primary" type="button" data-ops-action="show-create">${svg.plus}<span>New project</span></button>
+        <div class="ops-dashboard ops-projects-dashboard project-page-content">
+          <h2>Projects</h2>
+          <p class="menu-description">Create projects, monitor active sessions, and reply when the agent asks for input.</p>
+          <section class="quick-response-panel list-view" aria-live="polite">
+            <div class="quick-response-header">
+              <div>
+                <div class="quick-response-title">Project workspace</div>
+                <div class="quick-response-subtitle">${esc(OPS.projects.length+' loaded'+(OPS.projectsHydrating?' • syncing workspace status...':''))}</div>
+              </div>
+              <div class="quick-response-nav">
+                <button class="menu-action-btn secondary small" type="button" data-ops-action="back-home">Menu</button>
+                <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-projects">Refresh projects</button>
+                <button class="menu-action-btn secondary small" type="button" data-ops-action="show-create">Create project</button>
+              </div>
             </div>
-          </div>
-          ${createForm}
-          <details class="ops-project-secondary-panels">
-            <summary>Import from GitHub</summary>
-            <div class="ops-project-secondary-panels-body">
-              ${renderGitHubDiscovery()}
+            <div class="quick-response-body">
+              ${createForm}
+              <details class="ops-project-secondary-panels">
+                <summary>Import from GitHub</summary>
+                <div class="ops-project-secondary-panels-body">
+                  ${renderGitHubDiscovery()}
+                </div>
+              </details>
+              <div class="quick-response-projects">${rows}</div>
             </div>
-          </details>
-          <div class="ops-project-list">${rows}</div>
+          </section>
         </div>
       `;
       if(OPS.showCreate&&document.getElementById('opsProjectName'))document.getElementById('opsProjectName').focus();
@@ -277,51 +427,20 @@
     }
 
     async function loadProjects(){
+      const token=++activeProjectsLoadToken;
       const [data,profileData]=await Promise.all([
         api('/api/ops/projects'),
         AgentBridgeRef.profiles.list().catch(()=>null),
       ]);
+      if(token!==activeProjectsLoadToken)return OPS.projects;
       OPS.projects=Array.isArray(data.projects)?data.projects:[];
       OPS.profiles=Array.isArray(profileData&&profileData.profiles)?profileData.profiles:[];
-      OPS.counts={};
-      OPS.taskDataByProject={};
-      try{
-        const groupsData=await AgentBridgeRef.sessions.grouped();
-        OPS.sessionGroups=groupsData;
-        OPS.sessions=Array.isArray(groupsData.sessions)?groupsData.sessions:[];
-      }catch(e){
-        OPS.sessionGroups=null;
-        try{
-          const sessionsData=await AgentBridgeRef.sessions.list();
-          OPS.sessions=Array.isArray(sessionsData.sessions)?sessionsData.sessions:[];
-        }catch(err){
-          OPS.sessions=[];
-        }
-      }
-      await Promise.all((OPS.projects||[]).map(async(project)=>{
-        const sessionsCount=projectSessionsFor(project,OPS.sessions).length;
-        const tasksResult=api(projectUrl(project.id,'/tasks'));
-        const playResult=refreshProjectPlayStatus(project.id,{render:false});
-        const gitResult=refreshProjectGitStatus(project.id,{render:false});
-        try{
-          const tasks=await tasksResult;
-          OPS.taskDataByProject[project.id]=tasks;
-          OPS.counts[project.id]={
-            ...summarizeEpics(tasks.epics||[]),
-            sessions:sessionsCount,
-          };
-        }catch(e){
-          OPS.counts[project.id]={
-            active:0,
-            done:0,
-            archived:0,
-            sessions:sessionsCount,
-            error:e.message||'Unavailable',
-          };
-        }
-        await playResult.catch(()=>{});
-        await gitResult.catch(()=>{});
-      }));
+      seedProjectHydrationState(OPS.projects);
+      rerenderProjectsView();
+      void hydrateProjectSessions(OPS.projects,token);
+      (OPS.projects||[]).forEach(project=>{
+        void hydrateProjectWorkspace(project,token);
+      });
       return OPS.projects;
     }
 

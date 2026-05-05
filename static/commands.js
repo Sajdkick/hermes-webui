@@ -31,6 +31,8 @@ const COMMANDS=[
   {name:'reasoning', desc:t('cmd_reasoning'), fn:cmdReasoning, arg:'show|hide|none|minimal|low|medium|high|xhigh', subArgs:['show','hide','none','minimal','low','medium','high','xhigh'], noEcho:true},
   {name:'yolo', desc:t('cmd_yolo'), fn:cmdYolo, noEcho:true},
   {name:'branch', desc:t('cmd_branch'), fn:cmdBranch, arg:'[name]', noEcho:true},
+  // Targeted /goal bridge for this fork. Remove once upstream Hermes WebUI ships native /goal support.
+  {name:'goal', desc:'Set, inspect, pause, resume, or clear a standing goal', fn:cmdGoal, arg:'[status|pause|resume|clear|goal text]', noEcho:true},
 ];
 
 const SLASH_SUBARG_SOURCES={
@@ -54,6 +56,7 @@ function executeCommand(text){
   // A handler may return `false` to opt out of interception — e.g. /reasoning
   // with an effort level falls through so the agent's own handler sees it,
   // preserving the pre-existing pass-through behaviour for that subcommand.
+  // /goal also falls through intentionally to the targeted WebUI backend bridge.
   if(cmd.fn(parsed.args)===false)return null;
   // Return noEcho flag so send() knows whether to echo the command as a user message (#840).
   return {noEcho:!!cmd.noEcho};
@@ -285,6 +288,13 @@ function cmdHelp(){
   S.messages.push(msg);
   renderMessages();
   showToast(t('type_slash'));
+}
+
+// The backend owns /goal so it can use Hermes Agent's GoalManager instead of
+// sending `/goal ...` to the model as plain text. Delete with the backend bridge
+// once upstream Hermes WebUI ships native /goal support.
+function cmdGoal(){
+  return false;
 }
 
 function cmdClear(){

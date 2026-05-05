@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import subprocess
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from api import ops_projects
 
 
-STATUS_EXCLUDED_PATHS = [".hermes", "project_tasks", "project_tasks.json"]
+STATUS_EXCLUDED_PATHS = [".cloud-terminal", ".hermes", "project_tasks", "project_tasks.json"]
 
 
 class OpsGitError(Exception):
@@ -47,6 +49,16 @@ def _status_args() -> list[str]:
         "status",
         "--porcelain=v1",
         "-b",
+        "--",
+        ".",
+        *[f":(exclude){path}" for path in STATUS_EXCLUDED_PATHS],
+    ]
+
+
+def _stage_args() -> list[str]:
+    return [
+        "add",
+        "-A",
         "--",
         ".",
         *[f":(exclude){path}" for path in STATUS_EXCLUDED_PATHS],
@@ -172,6 +184,17 @@ def _git_ref_exists(repo_path: Path, ref: str) -> bool:
     return _run_git(repo_path, ["rev-parse", "--verify", ref], timeout=8.0).returncode == 0
 
 
+def _local_branch_exists(repo_path: Path, branch: str) -> bool:
+    return _git_ref_exists(repo_path, f"refs/heads/{str(branch or '').strip()}")
+
+
+def _remote_branch_exists(repo_path: Path, branch: str, remote: str = "origin") -> bool:
+    name = str(branch or "").strip()
+    if not name:
+        return False
+    return _git_ref_exists(repo_path, f"refs/remotes/{remote}/{name}")
+
+
 def _comparison_ref(repo_path: Path, core_branch: str, upstream: str) -> str:
     remote_core = f"origin/{core_branch}"
     if _git_ref_exists(repo_path, remote_core):
@@ -251,3 +274,181 @@ def get_project_git_status(project_id: str) -> dict:
         "lastCommit": _last_commit(repo_path),
         **operation_state,
     }
+
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _git_failure_detail(result: subprocess.CompletedProcess) -> str:
+    return (result.stderr or result.stdout or "").strip()[:1600]
+
+
+def _remote_exists(repo_path: Path, remote: str) -> bool:
+    result = _run_git(repo_path, ["remote", "get-url", remote], timeout=6.0)
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def _configured_upstream_parts(configured_upstream: str) -> tuple[str, str]:
+    value = str(configured_upstream or "").strip()
+    if not value or "/" not in value:
+        return "", ""
+    remote, branch = value.split("/", 1)
+    return remote.strip(), branch.strip()
+
+
+def _push_target(repo_path: Path, status: dict) -> tuple[str, str, bool]:
+    remote, remote_branch = _configured_upstream_parts(str(status.get("configuredUpstream") or ""))
+    branch = str(status.get("branch") or "").strip()
+    if not branch or branch == "HEAD" or status.get("detached"):
+        raise OpsGitError("Cannot push a detached HEAD from the project page.", 409)
+    if remote and remote_branch:
+        return remote, remote_branch, False
+    if _remote_exists(repo_path, "origin"):
+        return "origin", branch, True
+    raise OpsGitError("No configured upstream or origin remote is available for this project.", 409)
+
+
+def _core_branch_push_target(repo_path: Path, core_branch: str, status: dict) -> tuple[str, str, bool]:
+    branch = str(core_branch or "").strip()
+    if not branch:
+        raise OpsGitError("Project core branch is unavailable.", 409)
+    if not _remote_exists(repo_path, "origin"):
+        raise OpsGitError("No origin remote is available for this project.", 409)
+    upstream_remote, upstream_branch = _configured_upstream_parts(str(status.get("configuredUpstream") or ""))
+    set_upstream = not (upstream_remote == "origin" and upstream_branch == branch)
+    return "origin", branch, set_upstream
+
+
+def _checked_git(repo_path: Path, args: list[str], *, timeout: float = 60.0) -> subprocess.CompletedProcess:
+    result = _run_git(repo_path, args, timeout=timeout)
+    if result.returncode != 0:
+        raise OpsGitError(_git_failure_detail(result) or f"Git {' '.join(args[:1] or ['operation'])} failed.", 409)
+    return result
+
+
+def _default_push_commit_message() -> str:
+    return f"Sync changes from Codex Terminal ({_now_iso()})"
+
+
+def _commit_project_changes_if_needed(repo_path: Path, commit_message: str | None) -> bool:
+    status_output = _git_stdout(repo_path, _status_args(), timeout=8.0) or ""
+    if not status_output.strip():
+        return False
+    _checked_git(repo_path, _stage_args(), timeout=30.0)
+    message = str(commit_message or "").strip() or _default_push_commit_message()
+    _checked_git(
+        repo_path,
+        [
+            "-c",
+            "user.name=Codex Terminal",
+            "-c",
+            "user.email=terminal@example.com",
+            "commit",
+            "-m",
+            message,
+        ],
+        timeout=90.0,
+    )
+    return True
+
+
+def _ensure_local_core_branch(repo_path: Path, core_branch: str) -> None:
+    branch = str(core_branch or "").strip()
+    if not branch:
+        raise OpsGitError("Project core branch is unavailable.", 409)
+    if _local_branch_exists(repo_path, branch):
+        return
+    if _remote_branch_exists(repo_path, branch):
+        _checked_git(repo_path, ["checkout", "-B", branch, f"origin/{branch}"], timeout=30.0)
+        return
+    raise OpsGitError(f'Core branch "{branch}" does not exist on origin.', 409)
+
+
+def _operation_record(project_id: str, operation: str, status: str, summary: str, *, final_status: dict | None = None) -> dict:
+    return {
+        "id": f"git-{operation}-{uuid.uuid4().hex[:12]}",
+        "projectId": project_id,
+        "operation": operation,
+        "status": status,
+        "summary": summary,
+        "createdAt": _now_iso(),
+        "updatedAt": _now_iso(),
+        "finalStatus": final_status,
+    }
+
+
+def _execute_project_push(project_id: str, body: dict | None = None) -> dict:
+    project, repo_path = _project_repo_path(project_id)
+    status = get_project_git_status(project_id)
+    if not status.get("isGitRepo"):
+        raise OpsGitError("Project path is not inside a Git repository.", 409)
+    if status.get("operationInProgress") or int(status.get("conflicts") or 0) > 0:
+        raise OpsGitError("Resolve the in-progress Git operation or conflicts before pushing.", 409)
+    current_branch = str(status.get("branch") or "").strip()
+    core_branch = str(status.get("coreBranch") or project.get("coreBranch") or current_branch or "main").strip() or "main"
+    if int(status.get("behind") or 0) > 0:
+        raise OpsGitError("This branch is behind its sync target. Sync before pushing.", 409)
+    if not current_branch or current_branch == "HEAD" or status.get("detached"):
+        raise OpsGitError("Cannot push a detached HEAD from the project page.", 409)
+
+    commit_message = str((body or {}).get("message") or "").strip() or _default_push_commit_message()
+    committed_changes = False
+    if bool(status.get("dirty")):
+        committed_changes = _commit_project_changes_if_needed(repo_path, commit_message)
+        status = get_project_git_status(project_id)
+
+    merged_branch = ""
+    if current_branch != core_branch:
+        _ensure_local_core_branch(repo_path, core_branch)
+        if str(status.get("branch") or "").strip() != core_branch:
+            _checked_git(repo_path, ["checkout", core_branch], timeout=30.0)
+        _checked_git(repo_path, ["merge", current_branch], timeout=90.0)
+        merged_branch = current_branch
+        status = get_project_git_status(project_id)
+
+    ahead = int(status.get("ahead") or 0)
+    if ahead <= 0 and not committed_changes and not merged_branch:
+        raise OpsGitError("This project has no committed changes to push.", 409)
+
+    remote, remote_branch, set_upstream = _core_branch_push_target(repo_path, core_branch, status)
+    push_args = ["push"]
+    if set_upstream:
+        push_args.append("-u")
+    push_args.extend([remote, f"HEAD:refs/heads/{remote_branch}"])
+    _checked_git(repo_path, push_args, timeout=90.0)
+    task_updates = ops_projects.promote_not_synced_tasks_to_ready_for_test(str(project.get("id") or project_id))
+    final_status = get_project_git_status(project_id)
+    summary_parts: list[str] = []
+    if committed_changes:
+        summary_parts.append("Committed local changes.")
+    if merged_branch:
+        summary_parts.append(f"Merged {merged_branch} into {core_branch}.")
+    summary_parts.append(f"Pushed {core_branch} to {remote}/{remote_branch}.")
+    if int(task_updates.get("updatedCount") or 0) > 0:
+        count = int(task_updates["updatedCount"])
+        summary_parts.append(f"Marked {count} task{'s' if count != 1 else ''} ready for test.")
+    summary = " ".join(summary_parts)
+    operation = _operation_record(
+        str(project.get("id") or project_id),
+        "push",
+        "succeeded",
+        summary,
+        final_status=final_status,
+    )
+    operation["taskUpdates"] = int(task_updates.get("updatedCount") or 0)
+    operation["readyForTestTaskIds"] = list(task_updates.get("updatedTaskIds") or [])
+    return operation
+
+
+def execute_project_git_operation(project_id: str, operation: str, body: dict | None = None) -> dict:
+    op = str(operation or "").strip().lower()
+    confirm = str((body or {}).get("confirm") or "").strip().lower()
+    if op not in {"push", "sync"}:
+        raise OpsGitError("Unsupported Git operation.", 404)
+    if confirm and confirm != op:
+        raise OpsGitError("Git operation confirmation did not match the requested operation.", 400)
+    if op == "push":
+        return _execute_project_push(project_id, body)
+    raise OpsGitError("Project-page sync is not available from this endpoint yet. Use the upstream sync review flow before pushing.", 501)

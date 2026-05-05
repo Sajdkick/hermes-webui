@@ -61,9 +61,25 @@
     return payload;
   }
 
+  const LOCAL_DIALOG = {
+    resolve: null,
+    kind: 'confirm',
+    lastFocus: null,
+  };
+
+  function ensureToast(){
+    let toast = $('toast');
+    if(toast)return toast;
+    toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.id = 'toast';
+    document.body.appendChild(toast);
+    return toast;
+  }
+
   let toastTimer = null;
   function showToast(message, ms){
-    const toast = $('toast');
+    const toast = ensureToast();
     if(!toast)return;
     toast.textContent = String(message || '').trim();
     toast.classList.add('show');
@@ -71,6 +87,106 @@
     toastTimer = setTimeout(() => {
       toast.classList.remove('show');
     }, Number.isFinite(Number(ms)) ? Number(ms) : 2600);
+  }
+
+  function ensureLocalDialog(){
+    let overlay = $('appDialogOverlay');
+    if(overlay)return overlay;
+    overlay = document.createElement('div');
+    overlay.className = 'app-dialog-overlay';
+    overlay.id = 'appDialogOverlay';
+    overlay.style.display = 'none';
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.innerHTML = [
+      '<div class="app-dialog" id="appDialog" role="dialog" aria-modal="true" aria-labelledby="appDialogTitle" aria-describedby="appDialogDesc">',
+      '<div class="app-dialog-header">',
+      '<div class="app-dialog-title" id="appDialogTitle">Confirm action</div>',
+      '<button class="app-dialog-close" id="appDialogClose" type="button" aria-label="Close dialog">',
+      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+      '</button>',
+      '</div>',
+      '<div class="app-dialog-desc" id="appDialogDesc"></div>',
+      '<input class="app-dialog-input" id="appDialogInput" type="text" style="display:none">',
+      '<div class="app-dialog-actions">',
+      '<button class="app-dialog-btn" id="appDialogCancel" type="button">Cancel</button>',
+      '<button class="app-dialog-btn confirm" id="appDialogConfirm" type="button">Confirm</button>',
+      '</div>',
+      '</div>',
+    ].join('');
+    document.body.appendChild(overlay);
+
+    function finishDialog(result, restoreFocus){
+      const nextRestore = restoreFocus !== false;
+      const resolver = LOCAL_DIALOG.resolve;
+      const lastFocus = LOCAL_DIALOG.lastFocus;
+      LOCAL_DIALOG.resolve = null;
+      LOCAL_DIALOG.lastFocus = null;
+      LOCAL_DIALOG.kind = 'confirm';
+      overlay.style.display = 'none';
+      overlay.setAttribute('aria-hidden', 'true');
+      if(nextRestore && lastFocus && typeof lastFocus.focus === 'function'){
+        try{lastFocus.focus({preventScroll:true});}catch(_error){}
+      }
+      if(typeof resolver === 'function')resolver(result);
+    }
+
+    function focusableNodes(){
+      const selectors = [
+        '#appDialogClose',
+        '#appDialogCancel',
+        '#appDialogConfirm',
+        '#appDialogInput',
+      ];
+      return selectors
+        .map(selector=>overlay.querySelector(selector))
+        .filter(node=>node && node.offsetParent !== null && !node.disabled);
+    }
+
+    overlay.addEventListener('click', event => {
+      if(event.target === overlay){
+        finishDialog(LOCAL_DIALOG.kind === 'prompt' ? null : false);
+      }
+    });
+    overlay.querySelector('#appDialogClose').addEventListener('click', () => {
+      finishDialog(LOCAL_DIALOG.kind === 'prompt' ? null : false);
+    });
+    overlay.querySelector('#appDialogCancel').addEventListener('click', () => {
+      finishDialog(LOCAL_DIALOG.kind === 'prompt' ? null : false);
+    });
+    overlay.querySelector('#appDialogConfirm').addEventListener('click', () => {
+      const input = $('appDialogInput');
+      if(LOCAL_DIALOG.kind === 'prompt'){
+        finishDialog(input ? input.value : '');
+        return;
+      }
+      finishDialog(true);
+    });
+    overlay.addEventListener('keydown', event => {
+      if(event.key === 'Escape'){
+        event.preventDefault();
+        finishDialog(LOCAL_DIALOG.kind === 'prompt' ? null : false);
+        return;
+      }
+      if(event.key === 'Enter'){
+        const input = $('appDialogInput');
+        if(LOCAL_DIALOG.kind === 'prompt' && document.activeElement === input){
+          event.preventDefault();
+          finishDialog(input ? input.value : '');
+          return;
+        }
+      }
+      if(event.key === 'Tab'){
+        const nodes = focusableNodes();
+        if(!nodes.length)return;
+        const currentIndex = nodes.indexOf(document.activeElement);
+        const nextIndex = event.shiftKey
+          ? (currentIndex <= 0 ? nodes.length - 1 : currentIndex - 1)
+          : (currentIndex === -1 || currentIndex === nodes.length - 1 ? 0 : currentIndex + 1);
+        event.preventDefault();
+        nodes[nextIndex].focus();
+      }
+    });
+    return overlay;
   }
 
   const appPromptDialog = typeof window.showPromptDialog === 'function'
@@ -88,16 +204,81 @@
     if(appPromptDialog){
       return appPromptDialog(options);
     }
-    showToast('Input dialog is unavailable', 3200);
-    return null;
+    const opts = options && typeof options === 'object' ? options : {};
+    const overlay = ensureLocalDialog();
+    const dialog = $('appDialog');
+    const title = $('appDialogTitle');
+    const desc = $('appDialogDesc');
+    const input = $('appDialogInput');
+    const cancelBtn = $('appDialogCancel');
+    const confirmBtn = $('appDialogConfirm');
+    if(LOCAL_DIALOG.resolve)LOCAL_DIALOG.resolve(null);
+    LOCAL_DIALOG.kind = 'prompt';
+    LOCAL_DIALOG.lastFocus = document.activeElement;
+    if(title)title.textContent = opts.title || 'Enter value';
+    if(desc)desc.textContent = opts.message || '';
+    if(input){
+      input.type = opts.inputType || 'text';
+      input.style.display = '';
+      input.value = opts.value || '';
+      input.placeholder = opts.placeholder || '';
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+    }
+    if(cancelBtn)cancelBtn.textContent = opts.cancelLabel || 'Cancel';
+    if(confirmBtn){
+      confirmBtn.textContent = opts.confirmLabel || 'Confirm';
+      confirmBtn.classList.remove('danger');
+    }
+    if(dialog)dialog.setAttribute('role', 'dialog');
+    overlay.style.display = 'flex';
+    overlay.setAttribute('aria-hidden', 'false');
+    return new Promise(resolve => {
+      LOCAL_DIALOG.resolve = resolve;
+      setTimeout(() => {
+        if(input && input.style.display !== 'none'){
+          input.focus();
+          input.select();
+        }else if(confirmBtn){
+          confirmBtn.focus();
+        }
+      }, 0);
+    });
   }
 
   async function showConfirmDialog(options){
     if(appConfirmDialog){
       return appConfirmDialog(options);
     }
-    showToast('Confirmation dialog is unavailable', 3200);
-    return false;
+    const opts = options && typeof options === 'object' ? options : {};
+    const overlay = ensureLocalDialog();
+    const dialog = $('appDialog');
+    const title = $('appDialogTitle');
+    const desc = $('appDialogDesc');
+    const input = $('appDialogInput');
+    const cancelBtn = $('appDialogCancel');
+    const confirmBtn = $('appDialogConfirm');
+    if(LOCAL_DIALOG.resolve)LOCAL_DIALOG.resolve(false);
+    LOCAL_DIALOG.kind = 'confirm';
+    LOCAL_DIALOG.lastFocus = document.activeElement;
+    if(title)title.textContent = opts.title || 'Confirm action';
+    if(desc)desc.textContent = opts.message || '';
+    if(input){
+      input.style.display = 'none';
+      input.value = '';
+    }
+    if(cancelBtn)cancelBtn.textContent = opts.cancelLabel || 'Cancel';
+    if(confirmBtn){
+      confirmBtn.textContent = opts.confirmLabel || 'Confirm';
+      confirmBtn.classList.toggle('danger', !!opts.danger);
+    }
+    if(dialog)dialog.setAttribute('role', opts.danger ? 'alertdialog' : 'dialog');
+    overlay.style.display = 'flex';
+    overlay.setAttribute('aria-hidden', 'false');
+    return new Promise(resolve => {
+      LOCAL_DIALOG.resolve = resolve;
+      setTimeout(() => ((opts.focusCancel ? cancelBtn : confirmBtn) || confirmBtn || cancelBtn).focus(), 0);
+    });
   }
 
   function sessionUrlForSid(sid){

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import mimetypes
 import re
-from urllib.parse import quote, unquote
+from urllib.parse import parse_qs, quote, unquote
 
 from api.helpers import _security_headers, bad, j
-from api import session_readable_output
+from api import ops_sessions, session_readable_output
 
 
+_OPS_SESSIONS_RE = re.compile(r"^/api/ops/sessions/?$")
 _SESSION_READABLE_OUTPUT_RE = re.compile(r"^/api/ops/sessions/([^/]+)/readable-output/?$")
 _SESSION_READABLE_ASSET_RE = re.compile(r"^/api/ops/sessions/([^/]+)/readable-output/assets/(.+)$")
 
@@ -34,6 +35,14 @@ def _send_file(handler, target):
 
 
 def handle_get(handler, parsed) -> bool:
+    if _OPS_SESSIONS_RE.match(parsed.path):
+        try:
+            project_id = parse_qs(parsed.query).get("projectId", [""])[0] or None
+            j(handler, ops_sessions.list_ops_sessions(project_id))
+        except ops_sessions.OpsSessionError as exc:
+            return bad(handler, str(exc), exc.status)
+        return True
+
     match = _SESSION_READABLE_ASSET_RE.match(parsed.path)
     if match:
         try:

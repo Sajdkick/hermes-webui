@@ -1,30 +1,31 @@
-# Progress Answer
+# Project Push Parity Fix
 
-Yes, there has been real progress.
+## What changed
 
-No, it is not close to done yet.
+- The Hermes `/ops` project-page push flow now matches Cloud Terminal more closely.
+- `Push changes` now auto-commits dirty worktrees instead of failing on uncommitted changes.
+- Push now targets the project core branch on `origin`, and if you start from a non-core branch it merges that branch into the core branch before pushing, the same way Cloud Terminal does.
+- `.cloud-terminal` runtime artifacts are now excluded from project git status and staging, so the project page no longer treats readable-output/session metadata as repo changes.
+- Successful pushes now also promote `not-synced` tasks to `ready-for-test`, matching Cloud Terminal’s post-push task behavior.
+- The Ops UI now reloads project state after push and refreshes the current project detail when task promotion happened, so the page reflects the updated task state immediately.
+- I also hardened the project helpers to accept serialized project objects that only carry `resolvedPath`, which removed a brittle mismatch between the git helpers and the shared project/task helpers.
 
-## Concrete evidence
+## Files
 
-- The latest accepted backend reducer was real: `api/routes.py` improved from `144 / 4175` with `14` live conflict regions to `144 / 4161` with `12`.
-- The other current backend hotspot baselines are still:
-  - `api/streaming.py`: `142 / 2374` with `8`
-  - `api/models.py`: `177 / 305` with `9`
-  - `api/config.py`: `204 / 1167` with `1`
-- The adapter surface had already dropped earlier from `126` abstract bridge methods to `15`.
-- A large amount of route and frontend product logic has already been pushed out of Hermes-owned core files.
+- [api/ops_git.py](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/api/ops_git.py)
+- [api/ops_projects.py](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/api/ops_projects.py)
+- [static/ops-legacy-git.js](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/static/ops-legacy-git.js)
+- [tests/test_upstream_restart_phase8_git_status.py](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/tests/test_upstream_restart_phase8_git_status.py)
+- [tests/test_ops_git_push.py](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/tests/test_ops_git_push.py)
 
-## Honest read
+## Verification
 
-- This is real cumulative progress.
-- The hard part is still unfinished, because the remaining merge-risk is still concentrated in the same backend hotspot files:
-  - `api/routes.py`
-  - `api/streaming.py`
-  - `api/models.py`
-  - `api/config.py`
-- Some recent sessions did produce only small reducers or reverted attempts, so progress has not been fast enough relative to the time spent.
+- `python -m py_compile api/ops_git.py api/ops_projects.py api/routes_ops_git.py`
+- `node --check static/ops-legacy-git.js`
+- `python -m pytest tests/test_ops_git_push.py tests/test_upstream_restart_phase8_git_status.py`
+  - Result: `9 passed`
+- `git diff --check`
 
-## Bottom line
+## Scope
 
-- Real progress: yes.
-- Finished or close to merge-proof: no.
+This pass fixed the project-page git/push behavior and the adjacent UI refresh/task-promotion discrepancies around that same flow. I did not claim parity for unrelated parts of `/ops` in this slice.

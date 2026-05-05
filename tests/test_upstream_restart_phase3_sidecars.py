@@ -120,3 +120,59 @@ def test_phase3_invalid_sidecar_fails_closed(monkeypatch, tmp_path, git_availabl
     payload = ops_projects.read_ops_project_tasks(project["id"])
     assert payload["epics"][0]["tasks"][0]["text"] == "Keep task loading when sidecar is corrupt"
     assert payload["epics"][0]["tasks"][0]["linkedSessions"] == []
+
+
+def test_phase3_sidecar_linkage_resolves_latest_lineage_tip(monkeypatch, tmp_path, git_available):
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
+
+    repo = init_project_repo(tmp_path)
+
+    from api import ops_projects, session_sidecars
+    from api.models import Session
+
+    project = ops_projects.create_ops_project({"name": "Lineage Project", "path": str(repo), "coreBranch": "main"})
+    epic_id = ops_projects.add_ops_project_epic(project["id"], "Quick tasks")["epic"]["id"]
+    task = ops_projects.add_ops_project_task(project["id"], epic_id, "Follow the latest session tip")["task"]
+
+    root_session = Session(session_id="rootsess12345", title="Root session", workspace=str(repo), messages=[{"role": "user", "content": "hello"}])
+    root_session.save()
+    session_sidecars.set_session_linkage(root_session.session_id, project["id"], task["id"], run_id="run-tip")
+
+    monkeypatch.setattr(
+        session_sidecars,
+        "all_sessions",
+        lambda: [
+            {
+                "session_id": "tipsess67890",
+                "title": "Tip session",
+                "workspace": str(repo),
+                "message_count": 3,
+                "created_at": root_session.created_at,
+                "updated_at": root_session.updated_at + 50,
+                "last_message_at": root_session.updated_at + 50,
+                "pinned": False,
+                "archived": False,
+                "project_id": None,
+                "profile": "default",
+                "active_stream_id": None,
+                "pending_user_message": None,
+                "has_pending_user_message": False,
+                "is_cli_session": False,
+                "source_tag": "ops_task",
+                "raw_source": None,
+                "session_source": None,
+                "source_label": "Ops task",
+                "enabled_toolsets": None,
+                "is_streaming": False,
+                "_lineage_root_id": root_session.session_id,
+                "_lineage_tip_id": "tipsess67890",
+            }
+        ],
+    )
+
+    linkage = session_sidecars.get_session_linkage(root_session.session_id)
+    assert linkage["linkedSessionId"] == root_session.session_id
+    assert linkage["sessionId"] == "tipsess67890"
+    assert linkage["lineageRootId"] == root_session.session_id
+    assert linkage["lineageTipId"] == "tipsess67890"
+    assert linkage["session"]["title"] == "Tip session"

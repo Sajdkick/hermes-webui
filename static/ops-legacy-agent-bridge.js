@@ -55,6 +55,36 @@
     legacyNotificationCompatState.logs=legacyNotificationCompatState.logs.slice(0,20);
   }
 
+  async function loadCompatDismissedNotifications(){
+    try{
+      const response=await api('/api/ops/notifications/dismissed');
+      const dismissed=Array.isArray(response&&response.dismissed)?response.dismissed:[];
+      legacyNotificationCompatState.dismissed=new Set(dismissed.map(item=>String(item||'').trim()).filter(Boolean));
+    }catch(error){
+      compatNotificationLog('notification.dismissed-sync-unavailable');
+    }
+    return legacyNotificationCompatState.dismissed;
+  }
+
+  async function persistCompatDismissal(notificationId){
+    const id=String(notificationId||'').trim();
+    if(!id) throw new Error('Notification id is required.');
+    legacyNotificationCompatState.dismissed.add(id);
+    try{
+      return await api('/api/ops/notifications/dismiss',{
+        method:'POST',
+        body:JSON.stringify({notificationId:id}),
+      });
+    }catch(error){
+      compatNotificationLog('notification.dismissed-sync-unavailable',id);
+      return {ok:false,persisted:false,notificationId:id};
+    }
+  }
+
+  function isCompatNotificationDismissed(notificationId){
+    return legacyNotificationCompatState.dismissed.has(String(notificationId||'').trim());
+  }
+
   function mapCompatNotification(item){
     const source=item&&typeof item==='object'?item:{};
     const kind=String(source.kind||'').trim().toLowerCase();
@@ -103,18 +133,83 @@
     };
   }
 
+  function mapCompatDoneNotification(run){
+    const source=run&&typeof run==='object'?run:{};
+    const runId=String(source.id||'').trim();
+    if(!runId) return null;
+    const status=String(source.status||'').trim().toLowerCase();
+    if(!['succeeded','failed','stopped'].includes(status)) return null;
+    const createdAt=compatNotificationTimestamp(source.completedAt||source.updatedAt||source.createdAt||0);
+    const payload={
+      runId,
+      sessionId:String(source.sessionId||source.session_id||source.session&&source.session.session_id||'').trim(),
+      projectId:String(source.projectId||source.project_id||source.project&&source.project.id||'').trim(),
+      taskId:String(source.taskId||source.task_id||source.task&&source.task.id||'').trim(),
+      projectName:String(source.project&&source.project.name||source.project&&source.project.fullName||'').trim(),
+      status,
+      summary:String(source.summary||'').trim(),
+    };
+    const message=payload.summary
+      || (status==='failed'
+        ? 'Task run failed.'
+        : (status==='stopped' ? 'Task session was stopped.' : 'Task run completed.'));
+    return {
+      id:`run:${runId}`,
+      kind:'done',
+      run_status:status,
+      message,
+      run_id:runId,
+      session_id:payload.sessionId,
+      project_id:payload.projectId,
+      task_id:payload.taskId,
+      project_name:payload.projectName,
+      session_title:String(
+        source.session&&source.session.title
+        || source.title
+        || source.task&&source.task.text
+        || payload.projectName
+        || 'Session'
+      ).trim()||'Session',
+      created_at:createdAt,
+      updated_at:createdAt,
+      payload,
+      status:'open',
+    };
+  }
+
+  async function listCompatDoneNotifications(){
+    const response=await api('/api/ops/runs').catch(()=>({runs:[]}));
+    const items=Array.isArray(response&&response.runs)?response.runs:[];
+    const cutoff=Math.floor(Date.now()/1000)-(24*60*60);
+    return items
+      .map(mapCompatDoneNotification)
+      .filter(item=>item&&Number(item.created_at||0)>=cutoff);
+  }
+
   async function listCompatNotifications(){
-    const response=await api('/api/ops/notifications/pending').catch(()=>({notifications:[]}));
+    await loadCompatDismissedNotifications();
+    const [response,doneNotifications]=await Promise.all([
+      api('/api/ops/notifications/pending').catch(()=>({notifications:[]})),
+      listCompatDoneNotifications().catch(()=>[]),
+    ]);
     const items=Array.isArray(response&&response.notifications)?response.notifications:[];
     legacyNotificationCompatState.index.clear();
     const notifications=[];
     items.forEach(item=>{
       const mapped=mapCompatNotification(item);
       legacyNotificationCompatState.index.set(mapped.id, item);
-      if(!legacyNotificationCompatState.dismissed.has(mapped.id)){
+      if(!isCompatNotificationDismissed(mapped.id)){
         notifications.push(mapped);
       }
     });
+    doneNotifications.forEach(item=>{
+      if(!item) return;
+      legacyNotificationCompatState.index.set(item.id, item);
+      if(!isCompatNotificationDismissed(item.id)){
+        notifications.push(item);
+      }
+    });
+    notifications.sort((left,right)=>(Number(right&&right.updated_at)||0)-(Number(left&&left.updated_at)||0));
     return {notifications};
   }
 
@@ -275,7 +370,7 @@
         return `api/file/raw${q({session_id:rawId,path,download:options.download?1:''})}`;
       },
       list(){
-        return api('/api/sessions');
+        return api('/api/ops/sessions').catch(()=>api('/api/sessions'));
       },
       search(params={}){
         return api(`/api/sessions/search${q(params)}`);
@@ -304,10 +399,53 @@
         return api('/api/session/import',{method:'POST',body:JSON.stringify(payload||{})});
       },
       grouped(){
-        return api('/api/sessions').then(fallback=>({
+        return api('/api/ops/sessions').then(data=>({
+          sessions:Array.isArray(data&&data.sessions)?data.sessions:[],
+          groups:Array.isArray(data&&data.groups)?data.groups:[],
+          ungrouped:Array.isArray(data&&data.ungrouped)?data.ungrouped:[],
+        })).catch(()=>api('/api/sessions').then(fallback=>({
           sessions:Array.isArray(fallback&&fallback.sessions)?fallback.sessions:[],
           groups:[],
+          ungrouped:[],
+        })));
+      },
+      activity(){
+        return api('/api/sessions/activity').then(data=>({
+          generatedAt:data&&data.generatedAt||null,
+          detectionMode:data&&data.detectionMode||'',
+          refreshIntervalMs:Number(data&&data.refreshIntervalMs)||5000,
+          groupCount:Number(data&&data.groupCount)||0,
+          sessionCount:Number(data&&data.sessionCount)||0,
+          sessions:Array.isArray(data&&data.sessions)?data.sessions:[],
+          groups:Array.isArray(data&&data.groups)?data.groups:[],
         }));
+      },
+      createActivityGroup(label){
+        return api('/api/sessions/activity/groups',{
+          method:'POST',
+          body:JSON.stringify({label}),
+        });
+      },
+      renameActivityGroup(groupId,label){
+        return api(`/api/sessions/activity/groups/${encodeURIComponent(String(groupId||'').trim())}/rename`,{
+          method:'POST',
+          body:JSON.stringify({label}),
+        });
+      },
+      deleteActivityGroup(groupId){
+        return api(`/api/sessions/activity/groups/${encodeURIComponent(String(groupId||'').trim())}/delete`,{
+          method:'POST',
+          body:JSON.stringify({}),
+        });
+      },
+      assignActivityGroup(sessionId,groupId){
+        return api('/api/sessions/activity/group-assignment',{
+          method:'POST',
+          body:JSON.stringify({
+            sessionId,
+            groupId:groupId||null,
+          }),
+        });
       },
       openGatewayStream(){
         return new EventSource('api/sessions/gateway/stream');
@@ -405,7 +543,7 @@
         return api('/api/session/import_cli',{method:'POST',body:JSON.stringify({session_id:resolvedId})});
       },
       ensureTask(projectId,taskId,payload){
-        return api(compatProjectUrl(projectId,`/tasks/${encodeURIComponent(taskId)}/session/ensure`),{method:'POST',body:JSON.stringify(payload||{})});
+        return api(compatProjectUrl(projectId,`/tasks/${encodeURIComponent(taskId)}/sessions/launch`),{method:'POST',body:JSON.stringify(payload||{})});
       },
       closeTask(projectId,taskId,payload){
         return api(compatProjectUrl(projectId,`/tasks/${encodeURIComponent(taskId)}/session/close`),{method:'POST',body:JSON.stringify(payload||{})});
@@ -544,15 +682,15 @@
             response:body.response||body.answer||body.choice,
           }),
         });
-        legacyNotificationCompatState.dismissed.add(notificationId);
+        await persistCompatDismissal(notificationId);
         compatNotificationLog('notification.responded',notificationId);
         return response;
       },
-      dismiss(id){
+      async dismiss(id){
         const notificationId=String(id||'').trim();
-        legacyNotificationCompatState.dismissed.add(notificationId);
+        await persistCompatDismissal(notificationId);
         compatNotificationLog('notification.dismissed',notificationId);
-        return Promise.resolve({ok:true});
+        return {ok:true};
       },
     },
     play:{

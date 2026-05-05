@@ -8,7 +8,7 @@ from typing import Any
 from urllib.parse import quote
 
 from api.config import STATE_DIR
-from api.models import Session
+from api.models import Session, all_sessions
 
 
 class SessionSidecarError(Exception):
@@ -57,6 +57,70 @@ def _session_summary(session_id: str) -> dict[str, Any] | None:
     return session.compact()
 
 
+def _session_sort_key(summary: dict[str, Any] | None) -> float:
+    if not isinstance(summary, dict):
+        return 0.0
+    for field in ("last_message_at", "updated_at", "created_at"):
+        try:
+            value = float(summary.get(field) or 0)
+        except (TypeError, ValueError):
+            value = 0.0
+        if value > 0:
+            return value
+    return 0.0
+
+
+def _session_aliases(summary: dict[str, Any] | None) -> set[str]:
+    aliases: set[str] = set()
+    if not isinstance(summary, dict):
+        return aliases
+    for field in ("session_id", "_lineage_root_id", "_lineage_tip_id", "parent_session_id"):
+        value = str(summary.get(field) or "").strip()
+        if value:
+            aliases.add(value)
+    return aliases
+
+
+def resolve_session_summary(session_id: str) -> dict[str, Any] | None:
+    key = _validate_session_id(session_id)
+    candidates: dict[str, dict[str, Any]] = {}
+
+    direct = _session_summary(key)
+    if direct:
+        candidates[str(direct.get("session_id") or key)] = direct
+
+    try:
+        for session in all_sessions():
+            if not isinstance(session, dict):
+                continue
+            if key not in _session_aliases(session):
+                continue
+            session_key = str(session.get("session_id") or "").strip()
+            if session_key:
+                candidates[session_key] = dict(session)
+    except Exception:
+        pass
+
+    if not candidates:
+        return None
+    return max(
+        candidates.values(),
+        key=lambda session: (
+            0 if session.get("archived") else 1,
+            _session_sort_key(session),
+            str(session.get("session_id") or ""),
+        ),
+    )
+
+
+def resolve_session_id(session_id: str) -> str | None:
+    summary = resolve_session_summary(session_id)
+    if not summary:
+        return None
+    value = str(summary.get("session_id") or "").strip()
+    return value or None
+
+
 def _session_url(session_id: str) -> str:
     return f"/session/{quote(session_id, safe='')}"
 
@@ -66,11 +130,18 @@ def get_session_linkage(session_id: str) -> dict[str, Any] | None:
     payload = _read_json(_sidecar_path(key))
     if not payload:
         return None
-    summary = _session_summary(key)
+    summary = resolve_session_summary(key)
+    resolved_id = str(summary.get("session_id") or key).strip() if summary else key
+    lineage_root_id = str(summary.get("_lineage_root_id") or key).strip() if summary else key
+    lineage_tip_id = str(summary.get("_lineage_tip_id") or resolved_id).strip() if summary else resolved_id
     return {
         **payload,
+        "linkedSessionId": key,
+        "sessionId": resolved_id,
+        "lineageRootId": lineage_root_id,
+        "lineageTipId": lineage_tip_id,
         "session": summary,
-        "sessionUrl": _session_url(key),
+        "sessionUrl": _session_url(resolved_id),
         "available": summary is not None,
     }
 

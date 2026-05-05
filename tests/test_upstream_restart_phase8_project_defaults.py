@@ -148,6 +148,38 @@ def test_phase8_project_defaults_flow_into_task_launch(monkeypatch, tmp_path, gi
     assert override_payload["session"]["model"] == "openai/gpt-5.4-mini"
     assert override_payload["session"]["model_provider"] == "openai"
 
+    from api import routes as api_routes
+
+    monkeypatch.setattr(
+        api_routes,
+        "_session_model_state_from_request",
+        lambda model, provider, current_provider=None: ("custom/request-model", "custom-request-provider"),
+    )
+    launch_request_override = _FakeHandler(
+        {
+            "model": "@anthropic:claude-sonnet-4.6",
+            "model_provider": "anthropic",
+        }
+    )
+    assert handle_post(
+        launch_request_override,
+        urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks/{task['id']}/sessions/launch"),
+    ) is True
+    request_override_payload = _response_json(launch_request_override)
+    assert request_override_payload["session"]["profile"] == "default"
+    assert request_override_payload["session"]["model"] == "custom/request-model"
+    assert request_override_payload["session"]["model_provider"] == "custom-request-provider"
+
+    launch_profile_request_override = _FakeHandler({"profile": "research"})
+    assert handle_post(
+        launch_profile_request_override,
+        urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks/{task['id']}/sessions/launch"),
+    ) is True
+    profile_request_payload = _response_json(launch_profile_request_override)
+    assert profile_request_payload["session"]["profile"] == "research"
+    assert profile_request_payload["session"]["model"] == "qwen/qwen3-coder"
+    assert profile_request_payload["session"]["model_provider"] == "qwen"
+
 
 def test_phase8_ops_ui_renders_project_defaults_form_and_save():
     script = textwrap.dedent(

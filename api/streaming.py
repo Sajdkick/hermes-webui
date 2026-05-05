@@ -61,6 +61,12 @@ def _get_ai_agent():
     return AIAgent
 from api.models import get_session, title_from
 from api.workspace import set_last_workspace
+from api.goal_support import (
+    handle_goal_command_only,
+    handle_goal_set,
+    goal_manager_for_session,
+    parse_goal_command,
+)
 
 # Fields that are safe to send to LLM provider APIs.
 # Everything else (attachments, timestamp, _ts, etc.) is display-only
@@ -280,6 +286,46 @@ def _message_text(value) -> str:
                 parts.append(str(p.get('text') or p.get('content') or ''))
         return _strip_thinking_markup('\n'.join(parts).strip())
     return _strip_thinking_markup(str(value or '').strip())
+
+
+def _last_assistant_response_text(messages) -> str:
+    """Return the latest assistant text from an agent result."""
+    for msg in reversed(messages or []):
+        if not isinstance(msg, dict) or msg.get('role') != 'assistant':
+            continue
+        text = _message_text(msg.get('content', ''))
+        if text:
+            return text
+    return ''
+
+
+def _finish_webui_command_stream(session, msg_text, assistant_text, stream_id, put, agent_lock):
+    """Persist a display-only WebUI command exchange and close the stream."""
+    now = int(time.time())
+    with agent_lock:
+        session.messages.append({
+            'role': 'user',
+            'content': str(msg_text or ''),
+            'timestamp': now,
+            '_webui_command': True,
+        })
+        session.messages.append({
+            'role': 'assistant',
+            'content': str(assistant_text or ''),
+            'timestamp': now,
+            '_webui_command': True,
+        })
+        session.active_stream_id = None
+        session.pending_user_message = None
+        session.pending_attachments = []
+        session.pending_started_at = None
+        if session.title == 'Untitled' or session.title == 'New Chat' or not session.title:
+            session.title = title_from(session.messages, session.title)
+        session.save()
+    raw_session = session.compact() | {'messages': session.messages, 'tool_calls': getattr(session, 'tool_calls', []) or []}
+    put('token', {'text': str(assistant_text or '')})
+    put('done', {'session': redact_session_data(raw_session), 'usage': {'input_tokens': 0, 'output_tokens': 0}})
+    put('stream_end', {'session_id': session.session_id})
 
 
 def _first_exchange_snippets(messages):
@@ -1009,8 +1055,9 @@ def _sanitize_messages_for_api(messages):
     for msg in messages:
         if not isinstance(msg, dict):
             continue
-        # Skip persisted error markers — never send them to the LLM as prior context.
-        if msg.get('_error'):
+        # Skip persisted error markers and WebUI-local command feedback — never send
+        # those display-only rows to the LLM as prior context.
+        if msg.get('_error') or msg.get('_webui_command'):
             continue
         role = msg.get('role')
         if role == 'tool':
@@ -1040,6 +1087,8 @@ def _api_safe_message_positions(messages):
     out = []
     for idx, msg in enumerate(messages):
         if not isinstance(msg, dict):
+            continue
+        if msg.get('_error') or msg.get('_webui_command'):
             continue
         role = msg.get('role')
         if role == 'tool':
@@ -1620,6 +1669,39 @@ def _run_agent_streaming(
             _reasoning_text = ''  # accumulates reasoning/thinking trace for persistence
             _live_tool_calls = []  # tool progress fallback when final messages omit tool IDs
 
+            # Targeted /goal support for this fork. Keep this bridge removable once
+            # upstream Hermes WebUI grows native /goal support.
+            _goal_manager = None
+            _goal_cmd = parse_goal_command(msg_text)
+            if _goal_cmd is not None:
+                try:
+                    _goal_manager = goal_manager_for_session(session_id)
+                    if _goal_cmd.action == 'set':
+                        _goal_result = handle_goal_set(_goal_manager, _goal_cmd)
+                        msg_text = _goal_result.run_text or msg_text
+                    else:
+                        _goal_result = handle_goal_command_only(_goal_manager, _goal_cmd)
+                        _finish_webui_command_stream(
+                            s,
+                            msg_text,
+                            _goal_result.message,
+                            stream_id,
+                            put,
+                            _agent_lock,
+                        )
+                        return
+                except Exception as _goal_err:
+                    logger.warning('[webui] /goal command failed: %s', _goal_err)
+                    _finish_webui_command_stream(
+                        s,
+                        msg_text,
+                        f'Goals unavailable: {_goal_err}',
+                        stream_id,
+                        put,
+                        _agent_lock,
+                    )
+                    return
+
             # Throttle: emit metering events at most every 100 ms so the TPS label
             # feels live during fast token streams without flooding the SSE channel.
             _metering_last_emit = [time.monotonic() - 1]  # fire immediately on first token
@@ -2110,6 +2192,34 @@ def _run_agent_streaming(
                 task_id=session_id,
                 persist_user_message=msg_text,
             )
+            if _goal_manager is not None:
+                _goal_user_initiated = True
+                while not cancel_event.is_set() and _goal_manager.is_active():
+                    _decision = _goal_manager.evaluate_after_turn(
+                        _last_assistant_response_text(result.get('messages') or []),
+                        user_initiated=_goal_user_initiated,
+                    )
+                    if not _decision.get('should_continue'):
+                        break
+                    _continuation_prompt = str(_decision.get('continuation_prompt') or '').strip()
+                    if not _continuation_prompt:
+                        break
+                    _goal_message = str(_decision.get('message') or '').strip()
+                    if _goal_message:
+                        logger.info('[webui] /goal continuation: %s', _goal_message)
+                    result = agent.run_conversation(
+                        user_message=_build_native_multimodal_message(
+                            workspace_ctx,
+                            _continuation_prompt,
+                            [],
+                            workspace,
+                        ),
+                        system_message=workspace_system_msg,
+                        conversation_history=_sanitize_messages_for_api(result.get('messages') or []),
+                        task_id=session_id,
+                        persist_user_message=_continuation_prompt,
+                    )
+                    _goal_user_initiated = False
             # ── Ephemeral mode (/btw): deliver answer, skip persistence, cleanup ──
             if ephemeral:
                 _answer = ''

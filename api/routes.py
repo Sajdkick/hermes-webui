@@ -2053,6 +2053,12 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/sessions/search":
         return _handle_sessions_search(handler, parsed)
 
+    if parsed.path == "/api/sessions/activity" or parsed.path.startswith("/api/sessions/activity/"):
+        from api.routes_session_activity import handle_get as handle_session_activity_get
+
+        if handle_session_activity_get(handler, parsed):
+            return True
+
     if parsed.path == "/api/list":
         return _handle_list_dir(handler, parsed)
 
@@ -2427,6 +2433,12 @@ def handle_post(handler, parsed) -> bool:
         return handle_transcribe(handler)
 
     body = read_body(handler)
+
+    if parsed.path == "/api/sessions/activity/groups" or parsed.path.startswith("/api/sessions/activity/"):
+        from api.routes_session_activity import handle_post as handle_session_activity_post
+
+        if handle_session_activity_post(handler, parsed, body):
+            return True
 
     if parsed.path.startswith("/api/ops/") or parsed.path.startswith("/play-project/"):
         from api.routes_ops import handle_post as handle_ops_post

@@ -146,6 +146,32 @@ def test_phase6_ops_notifications_list_and_respond_round_trip(monkeypatch, tmp_p
     assert _response_json(after)["notifications"] == []
 
 
+def test_phase6_ops_notification_dismissals_persist(monkeypatch, tmp_path):
+    from api import ops_notifications
+    from api.routes_ops_notifications import handle_get, handle_post
+
+    monkeypatch.setattr(
+        ops_notifications,
+        "OPS_NOTIFICATION_DISMISSALS_FILE",
+        tmp_path / "ops" / "notification_dismissals.json",
+    )
+
+    initial = _FakeHandler()
+    assert handle_get(initial, urlparse("http://example.com/api/ops/notifications/dismissed")) is True
+    assert _response_json(initial)["dismissed"] == []
+
+    dismissed = _FakeHandler({"notificationId": "run:completed-1"})
+    assert handle_post(dismissed, urlparse("http://example.com/api/ops/notifications/dismiss"), {"notificationId": "run:completed-1"}) is True
+    assert _response_json(dismissed)["notificationId"] == "run:completed-1"
+
+    persisted = _FakeHandler()
+    assert handle_get(persisted, urlparse("http://example.com/api/ops/notifications/dismissed")) is True
+    payload = _response_json(persisted)
+    assert payload["dismissed"] == ["run:completed-1"]
+    assert (tmp_path / "ops" / "notification_dismissals.json").exists()
+
+
+
 def test_phase6_shell_includes_notifications_asset_and_payload():
     from api.routes import handle_get
 

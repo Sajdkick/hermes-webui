@@ -186,6 +186,27 @@
       return 'stale';
     }
 
+    function runStatusToneClass(status){
+      switch(normalizeRunStatus(status)){
+        case 'queued':
+        case 'starting':
+          return 'connecting';
+        case 'running':
+          return 'active';
+        case 'waiting-input':
+          return 'waiting';
+        case 'waiting-approval':
+          return 'approval';
+        case 'succeeded':
+          return 'done';
+        case 'failed':
+        case 'stale':
+          return 'degraded';
+        default:
+          return 'idle';
+      }
+    }
+
     function runActivityTime(run){
       return Number(run&&run.updated_at)||Number(run&&run.started_at)||Number(run&&run.created_at)||0;
     }
@@ -270,26 +291,31 @@
       const title=String((run&&run.title)||taskLabel||'Project run');
       const summary=String((run&&run.summary)||'');
       const meta=[
-        projectLabel,
-        taskLabel,
         String((run&&run.engine)||'hermes-session'),
         shortRunSessionId(run)?`Session ${shortRunSessionId(run)}`:'',
         formatRunTime(run),
       ].filter(Boolean);
+      const toneClass=runStatusToneClass(status);
       return `
-        <article class="ops-run ${esc(runStatusKind(status))}">
-          <div class="ops-run-main">
-            <div class="ops-run-title-row">
-              <span class="ops-run-status ${esc(runStatusKind(status))}">${esc(runStatusLabel(status))}</span>
-              <span class="ops-run-title">${esc(title)}</span>
+        <article class="menu-session-activity-item interactive ops-run-card ${esc(runStatusKind(status))}">
+          <div class="menu-session-activity-main">
+            <div class="menu-session-activity-heading">
+              <div class="menu-session-activity-copy">
+                <div class="menu-session-activity-title-line">
+                  <span class="menu-session-activity-title">${esc(title)}</span>
+                  <span class="menu-session-activity-state state-${esc(toneClass)}" title="${esc(runStatusLabel(status))}">${esc(runStatusLabel(status))}</span>
+                </div>
+                ${projectLabel?`<div class="menu-session-activity-repo">${esc(projectLabel)}</div>`:''}
+                ${taskLabel&&taskLabel!==title?`<div class="ops-run-card-summary">${esc(taskLabel)}</div>`:''}
+                ${summary?`<div class="ops-run-card-summary">${esc(summary)}</div>`:''}
+                <div class="ops-run-card-meta">${meta.map(item=>`<span>${esc(item)}</span>`).join('')}</div>
+              </div>
+              <div class="menu-session-activity-controls">
+                <button class="menu-action-btn small" type="button" data-ops-action="open-run-target" data-run-id="${esc(run&&run.id||'')}">Open</button>
+                ${projectId?`<button class="menu-action-btn secondary small" type="button" data-ops-action="open-project" data-project-id="${esc(projectId)}">Project</button>`:''}
+                <button class="menu-action-btn secondary small" type="button" data-ops-action="open-run-detail" data-run-id="${esc(run&&run.id||'')}">Details</button>
+              </div>
             </div>
-            ${summary?`<div class="ops-run-summary">${esc(summary)}</div>`:''}
-            <div class="ops-run-meta">${meta.map(item=>`<span>${esc(item)}</span>`).join('')}</div>
-          </div>
-          <div class="ops-run-actions">
-            <button class="ops-btn primary" type="button" data-ops-action="open-run-target" data-run-id="${esc(run&&run.id||'')}">${svg.chat}<span>Open</span></button>
-            ${projectId?`<button class="ops-btn" type="button" data-ops-action="open-project" data-project-id="${esc(projectId)}">${svg.grid}<span>Project</span></button>`:''}
-            <button class="ops-icon-btn" type="button" data-ops-action="open-run-detail" data-run-id="${esc(run&&run.id||'')}" title="Details">${svg.folder}</button>
           </div>
         </article>
       `;
@@ -299,7 +325,7 @@
       if(OPS.loading&&(!runs||!runs.length))return '<div class="ops-empty">Loading runs...</div>';
       const visible=(runs||[]).slice(0,(options&&options.limit)||8);
       if(!visible.length)return `<div class="ops-empty">${esc((options&&options.emptyLabel)||'No runs yet.')}</div>`;
-      return `<div class="ops-run-list">${visible.map(run=>renderRunRow(run,options)).join('')}</div>`;
+      return `<div class="menu-session-activity-list ops-run-list">${visible.map(run=>renderRunRow(run,options)).join('')}</div>`;
     }
 
     function renderHomeRunActivity(){
@@ -320,14 +346,16 @@
       const runs=runsForProject(project&&project.id);
       const summary=summarizeRuns(runs);
       return `
-        <section class="ops-run-panel">
-          <div class="ops-run-panel-header">
+        <section class="tasks-card ops-run-panel">
+          <div class="tasks-card-header ops-run-panel-header">
             <div>
-              <h3>Run activity</h3>
-              <span>${esc(String(summary.active))} active | ${esc(String(summary.attention))} need attention | ${esc(String(summary.succeeded))} succeeded</span>
+              <div class="tasks-card-title">Run activity</div>
+              <div class="tasks-card-subtitle">${esc(String(summary.active))} active | ${esc(String(summary.attention))} need attention | ${esc(String(summary.succeeded))} succeeded</div>
             </div>
           </div>
-          ${renderRunList(runs,{limit:6,hideProject:true,emptyLabel:'No runs recorded for this project yet.'})}
+          <div class="tasks-card-body">
+            ${renderRunList(runs,{limit:6,hideProject:true,emptyLabel:'No runs recorded for this project yet.'})}
+          </div>
         </section>
       `;
     }
@@ -378,7 +406,7 @@
           <label><span>Path</span><input name="path" autocomplete="off" placeholder="/absolute/path/to/file"></label>
           <label><span>URL</span><input name="url" autocomplete="off" inputmode="url" placeholder="https://example.com/artifact"></label>
           <label class="full"><span>Description</span><input name="description" autocomplete="off" placeholder="Short note"></label>
-          <div class="ops-form-actions"><button class="ops-btn primary" type="submit">${svg.plus}<span>Add</span></button></div>
+          <div class="ops-form-actions"><button class="menu-action-btn small" type="submit">Add</button></div>
         </form>
       `;
       if(!ordered.length)return `
@@ -418,7 +446,7 @@
                     ${artifact&&artifact.description?`<div class="ops-run-summary">${esc(artifact.description)}</div>`:''}
                     <div class="ops-run-meta">${meta.map(item=>`<span>${esc(item)}</span>`).join('')}</div>
                   </div>
-                  ${href?`<a class="ops-btn" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${svg.folder}<span>Open</span></a>`:''}
+                  ${href?`<a class="menu-action-btn secondary small" href="${esc(href)}" target="_blank" rel="noopener noreferrer">Open</a>`:''}
                 </article>
               `;
             }).join('')}
@@ -511,45 +539,56 @@
       const pending=status==='pending';
       const badge=kind==='approval'?'Approval':(kind==='clarification'?'Clarify':'Input');
       const title=kind==='approval'?'Approval needed':(kind==='clarification'?'Clarification needed':'Input needed');
-      const approvalActions=pending&&kind==='approval'?`
-        <div class="ops-notification-actions">
-          ${['once','session','always','deny'].map(choice=>`
-            <button class="ops-btn ${choice==='deny'?'danger':''}" type="button" data-ops-action="respond-run-request" data-run-request-id="${esc(request.id)}" data-choice="${esc(choice)}">${esc(choice==='once'?'Allow once':choice==='session'?'Allow session':choice==='always'?'Always allow':'Deny')}</button>
-          `).join('')}
-        </div>
-      `:'';
-      const inputActions=pending&&kind!=='approval'?`
-        ${choices.length?`<div class="ops-notification-choices">
-          ${choices.map(choice=>`<button class="ops-btn" type="button" data-ops-action="respond-run-request" data-run-request-id="${esc(request.id)}" data-response="${esc(choice)}">${esc(choice)}</button>`).join('')}
-        </div>`:''}
-        <form class="ops-notification-response" data-ops-submit="run-request-response" data-run-request-id="${esc(request.id)}">
-          <input name="response" autocomplete="off" placeholder="Type your answer..." required>
-          <button class="ops-btn primary" type="submit">Send</button>
-        </form>
-      `:'';
+      const showApprovalOptions=pending&&kind==='approval';
+      const showInputOptions=pending&&kind!=='approval';
       const completed=!pending?`
-        <div class="ops-notification-actions secondary">
+        <div class="menu-notification-actions secondary">
           ${response?`<span class="ops-run-request-response">${esc(response)}</span>`:''}
         </div>
       `:'';
       return `
-        <article class="ops-notification input">
-          <div class="ops-notification-main">
-            <div class="ops-notification-title-row">
-              <span class="ops-notification-badge input">${esc(badge)}</span>
-              <span class="ops-notification-title">${esc(title)}</span>
+        <article class="menu-notification-item menu-notification-item--input-request">
+          <div class="menu-notification-body">
+            <div class="menu-notification-open-btn menu-notification-open-btn--input-request">
+              <div class="menu-notification-heading">
+                <div class="menu-notification-title">${esc(title)}</div>
+                <div class="menu-notification-badges">
+                  <span class="menu-notification-type-badge menu-notification-type-badge--input-request">${esc(badge)}</span>
+                </div>
+              </div>
+              <div class="menu-notification-message">${esc(request&&request.message||'Run needs input.')}</div>
+              ${metadata.command?`<pre class="menu-notification-command">${esc(metadata.command)}</pre>`:''}
+              <div class="menu-notification-meta">${esc([
+                runRequestStatusLabel(status),
+                String(request&&request.source||'ops'),
+                formatRunTime({updated_at:(request&&request.updated_at)||request&&request.created_at}),
+              ].filter(Boolean).join(' • '))}</div>
             </div>
-            <div class="ops-notification-message">${esc(request&&request.message||'Run needs input.')}</div>
-            ${metadata.command?`<pre class="ops-notification-command">${esc(metadata.command)}</pre>`:''}
-            <div class="ops-notification-meta">
-              <span>${esc(runRequestStatusLabel(status))}</span>
-              <span>${esc(String(request&&request.source||'ops'))}</span>
-              <span>${esc(formatRunTime({updated_at:(request&&request.updated_at)||request&&request.created_at}))}</span>
-            </div>
-          </div>
-          <div class="ops-notification-control">
-            ${approvalActions}
-            ${inputActions}
+            ${showApprovalOptions?`
+              <div class="menu-notification-response-panel">
+                <div class="menu-notification-response-question">
+                  <div class="menu-notification-response-prompt">Choose how this approval should be handled.</div>
+                </div>
+                <div class="menu-notification-response-options">${['once','session','always','deny'].map(choice=>`
+                  <button class="menu-notification-response-option" type="button" data-ops-action="respond-run-request" data-run-request-id="${esc(request.id)}" data-choice="${esc(choice)}">
+                    <span class="menu-notification-response-option-label">${esc(choice==='once'?'Allow once':choice==='session'?'Allow session':choice==='always'?'Always allow':'Deny')}</span>
+                  </button>
+                `).join('')}</div>
+              </div>
+            `:''}
+            ${showInputOptions?`
+              <div class="menu-notification-response-panel">
+                ${choices.length?`<div class="menu-notification-response-options">${choices.map(choice=>`
+                  <button class="menu-notification-response-option" type="button" data-ops-action="respond-run-request" data-run-request-id="${esc(request.id)}" data-response="${esc(choice)}">
+                    <span class="menu-notification-response-option-label">${esc(choice)}</span>
+                  </button>
+                `).join('')}</div>`:''}
+                <form class="menu-notification-response-form" data-ops-submit="run-request-response" data-run-request-id="${esc(request.id)}">
+                  <input class="menu-notification-response-input" name="response" autocomplete="off" placeholder="Type your answer..." required>
+                  <button class="menu-action-btn small menu-notification-response-submit-btn" type="submit">Send</button>
+                </form>
+              </div>
+            `:''}
             ${completed}
           </div>
         </article>
@@ -575,7 +614,7 @@
             <span>Run requests</span>
             <span>${esc(String(pending.length))} pending / ${esc(String(ordered.length))} total</span>
           </div>
-          <div class="ops-notification-list">
+          <div class="menu-notification-list">
             ${ordered.map(renderRunRequest).join('')}
           </div>
         </div>
@@ -599,7 +638,7 @@
             <span>Pending input</span>
             <span>${esc(String(notifications.length))} item${notifications.length===1?'':'s'}</span>
           </div>
-          <div class="ops-notification-list">
+          <div class="menu-notification-list">
             ${notifications.map(note=>typeof renderNotification==='function'?renderNotification(note):'').join('')}
           </div>
         </div>
@@ -620,20 +659,20 @@
       const canFail=canComplete;
       const canReopen=run&&['failed','stopped','stale'].includes(status);
       return `
-        <section class="ops-run-detail">
-          <div class="ops-run-panel-header">
+        <section class="tasks-card ops-run-detail">
+          <div class="tasks-card-header ops-run-panel-header">
             <div>
-              <h3>${esc(title)}</h3>
-              <span>${loading?'Loading run detail...':esc([options&&options.hideProject?'':runProjectLabel(run),runStatusLabel(status),formatRunTime(run)].filter(Boolean).join(' | '))}</span>
+              <div class="tasks-card-title">${esc(title)}</div>
+              <div class="tasks-card-subtitle">${loading?'Loading run detail...':esc([options&&options.hideProject?'':runProjectLabel(run),runStatusLabel(status),formatRunTime(run)].filter(Boolean).join(' | '))}</div>
             </div>
-            <div class="ops-run-actions">
-              ${sessionRef?`<button class="ops-btn" type="button" data-ops-action="open-session" data-session-key="${esc(sessionRef)}">${svg.chat}<span>Open</span></button>`:''}
-              ${canStop?`<button class="ops-btn" type="button" data-ops-action="set-run-status" data-run-id="${esc(selectedId)}" data-run-status="stopped">${svg.close}<span>Stop</span></button>`:''}
-              ${canComplete?`<button class="ops-btn" type="button" data-ops-action="complete-run" data-run-id="${esc(selectedId)}" data-run-completion-status="succeeded">${svg.check}<span>Complete</span></button>`:''}
-              ${canFail?`<button class="ops-btn danger" type="button" data-ops-action="complete-run" data-run-id="${esc(selectedId)}" data-run-completion-status="failed">Failed</button>`:''}
-              ${canReopen?`<button class="ops-btn" type="button" data-ops-action="set-run-status" data-run-id="${esc(selectedId)}" data-run-status="running">${svg.refresh}<span>Reopen</span></button>`:''}
-              <button class="ops-btn" type="button" data-ops-action="refresh-run-detail" data-run-id="${esc(selectedId)}">${svg.refresh}<span>Refresh</span></button>
-              <button class="ops-icon-btn" type="button" data-ops-action="close-run-detail" title="Close">${svg.close}</button>
+            <div class="tasks-card-actions">
+              ${sessionRef?`<button class="menu-action-btn secondary small" type="button" data-ops-action="open-session" data-session-key="${esc(sessionRef)}">Open</button>`:''}
+              ${canStop?`<button class="menu-action-btn secondary small" type="button" data-ops-action="set-run-status" data-run-id="${esc(selectedId)}" data-run-status="stopped">Stop</button>`:''}
+              ${canComplete?`<button class="menu-action-btn small" type="button" data-ops-action="complete-run" data-run-id="${esc(selectedId)}" data-run-completion-status="succeeded">Complete</button>`:''}
+              ${canFail?`<button class="menu-action-btn danger small" type="button" data-ops-action="complete-run" data-run-id="${esc(selectedId)}" data-run-completion-status="failed">Failed</button>`:''}
+              ${canReopen?`<button class="menu-action-btn secondary small" type="button" data-ops-action="set-run-status" data-run-id="${esc(selectedId)}" data-run-status="running">Reopen</button>`:''}
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-run-detail" data-run-id="${esc(selectedId)}">Refresh</button>
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="close-run-detail">Close</button>
             </div>
           </div>
           ${loading?'<div class="ops-empty">Loading run detail...</div>':`

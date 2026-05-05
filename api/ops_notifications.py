@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import threading
+import time
+from typing import Any
 
+from api.config import STATE_DIR
 from api import ops_projects, ops_sessions, session_sidecars
 
 try:
@@ -22,6 +26,88 @@ class OpsNotificationError(Exception):
 _APPROVAL_FALLBACK_PENDING: dict[str, object] = {}
 _APPROVAL_FALLBACK_LOCK = threading.Lock()
 _APPROVAL_FALLBACK_PERMANENT_APPROVED: set[str] = set()
+OPS_NOTIFICATION_DISMISSALS_FILE = STATE_DIR / "ops" / "notification_dismissals.json"
+_DISMISSAL_LOCK = threading.RLock()
+_MAX_STORED_DISMISSALS = 1000
+
+
+def _text(value: Any, *, limit: int = 512) -> str:
+    if not isinstance(value, str):
+        value = "" if value is None else str(value)
+    return value.strip()[:limit]
+
+
+def _normalize_dismissal(entry: Any) -> dict | None:
+    if isinstance(entry, str):
+        notification_id = _text(entry, limit=256)
+        dismissed_at = 0.0
+    elif isinstance(entry, dict):
+        notification_id = _text(entry.get("id") or entry.get("notificationId"), limit=256)
+        try:
+            dismissed_at = float(entry.get("dismissedAt") or entry.get("dismissed_at") or 0)
+        except (TypeError, ValueError):
+            dismissed_at = 0.0
+    else:
+        return None
+    if not notification_id:
+        return None
+    return {"id": notification_id, "dismissedAt": dismissed_at}
+
+
+def _read_dismissals() -> list[dict]:
+    try:
+        parsed = json.loads(OPS_NOTIFICATION_DISMISSALS_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except json.JSONDecodeError:
+        return []
+    source = parsed.get("dismissals") if isinstance(parsed, dict) else parsed
+    if not isinstance(source, list):
+        return []
+    seen: set[str] = set()
+    items: list[dict] = []
+    for entry in source:
+        normalized = _normalize_dismissal(entry)
+        if not normalized or normalized["id"] in seen:
+            continue
+        seen.add(normalized["id"])
+        items.append(normalized)
+    items.sort(key=lambda item: float(item.get("dismissedAt") or 0), reverse=True)
+    return items[:_MAX_STORED_DISMISSALS]
+
+
+def _write_dismissals(items: list[dict]) -> None:
+    OPS_NOTIFICATION_DISMISSALS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = OPS_NOTIFICATION_DISMISSALS_FILE.with_suffix(".tmp")
+    tmp.write_text(
+        json.dumps({"dismissals": items[:_MAX_STORED_DISMISSALS]}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    tmp.replace(OPS_NOTIFICATION_DISMISSALS_FILE)
+
+
+def list_dismissed_notifications() -> dict:
+    with _DISMISSAL_LOCK:
+        dismissals = _read_dismissals()
+    return {
+        "dismissed": [item["id"] for item in dismissals],
+        "dismissals": dismissals,
+        "count": len(dismissals),
+    }
+
+
+def dismiss_notification(body: dict | None = None) -> dict:
+    payload = body if isinstance(body, dict) else {}
+    notification_id = _text(payload.get("notificationId") or payload.get("id"), limit=256)
+    if not notification_id:
+        raise OpsNotificationError("notificationId is required.")
+    with _DISMISSAL_LOCK:
+        dismissals = [item for item in _read_dismissals() if item.get("id") != notification_id]
+        dismissal = {"id": notification_id, "dismissedAt": time.time()}
+        dismissals.insert(0, dismissal)
+        dismissals = dismissals[:_MAX_STORED_DISMISSALS]
+        _write_dismissals(dismissals)
+    return {"ok": True, "notificationId": notification_id, "dismissed": True}
 
 
 def _approval_runtime() -> dict[str, object]:

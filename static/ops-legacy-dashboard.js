@@ -23,6 +23,7 @@
   ];
   const OPS_MODULES=window.HermesOpsModules||{};
   const OPS_SESSION_GROUP_COLLAPSE_STORAGE_KEY='hermes-webui-ops-session-group-collapse';
+  const OPS_SESSION_ACTIVITY_COLLAPSE_STORAGE_KEY='hermes-webui-ops-session-activity-collapse';
   const OPS_EPIC_COLLAPSE_STORAGE_KEY='hermes-webui-ops-epic-collapse';
   const TASK_DICTATION_PROMPT='Transcribe short project task entries and software terms. Preserve filenames, acronyms, and numbers.';
   const TASK_DICTATION_AUDIO_BITS_PER_SECOND=128000;
@@ -81,6 +82,15 @@
     profiles:[],
     sessions:[],
     sessionGroups:null,
+    sessionActivity:[],
+    sessionActivityGroups:[],
+    sessionActivityCollapsed:readDashboardStoredJson(OPS_SESSION_ACTIVITY_COLLAPSE_STORAGE_KEY,{}),
+    sessionActivityInitialized:{},
+    sessionActivityBusy:false,
+    sessionActivityExpanded:true,
+    sessionActivityLastRefreshedAt:0,
+    sessionActivityError:'',
+    sessionActivityFocusGroupId:'',
     sessionGroupCollapsed:readDashboardStoredJson(OPS_SESSION_GROUP_COLLAPSE_STORAGE_KEY,{}),
     epicCollapsed:readDashboardStoredJson(OPS_EPIC_COLLAPSE_STORAGE_KEY,{}),
     runs:[],
@@ -153,6 +163,7 @@
     loading:false,
     quickTaskProjectId:'',
     quickTaskText:'',
+    quickTaskGoalMode:false,
     quickTaskBusy:false,
     quickTaskStatus:'',
     quickTaskStatusKind:'info',
@@ -373,13 +384,15 @@
       isSessionForProject:typeof isSessionForProject==='function'?isSessionForProject:null,
       taskImageLabel:(ref)=>DASHBOARD_PROJECT_DETAIL.taskImageLabel(ref),
       writeStoredJson:typeof writeDashboardStoredJson==='function'?writeDashboardStoredJson:null,
-      sessionGroupStorageKey:OPS_SESSION_GROUP_COLLAPSE_STORAGE_KEY,
+      sessionActivityStorageKey:OPS_SESSION_ACTIVITY_COLLAPSE_STORAGE_KEY,
       navigatorRef:typeof navigator!=='undefined'?navigator:null,
       windowRef:typeof window!=='undefined'?window:null,
       documentRef:typeof document!=='undefined'?document:null,
       URLRef:typeof URL!=='undefined'?URL:null,
       MediaRecorderRef:typeof MediaRecorder!=='undefined'?MediaRecorder:null,
       FileRef:typeof File!=='undefined'?File:null,
+      showPromptDialog:typeof showPromptDialog==='function'?showPromptDialog:(async()=>null),
+      showConfirmDialog:typeof showConfirmDialog==='function'?showConfirmDialog:(async()=>false),
       requestAnimationFrameRef:typeof requestAnimationFrame==='function'?requestAnimationFrame:(cb=>setTimeout(cb,0)),
       taskDictationPrompt:TASK_DICTATION_PROMPT,
       taskDictationAudioBitsPerSecond:TASK_DICTATION_AUDIO_BITS_PER_SECOND,
@@ -660,7 +673,7 @@
   const newChatInProject=(projectOverride)=>DASHBOARD_TASK_ACTIONS.newChatInProject(projectOverride);
   const openOpsSession=(sessionId)=>DASHBOARD_TASK_ACTIONS.openOpsSession(sessionId);
   const setOpsSessionClosed=(sessionId,closed,projectId)=>DASHBOARD_TASK_ACTIONS.setOpsSessionClosed(sessionId,closed,projectId);
-  const executeTask=(taskId)=>DASHBOARD_TASK_ACTIONS.executeTask(taskId);
+  const executeTask=(taskId,options)=>DASHBOARD_TASK_ACTIONS.executeTask(taskId,options);
   const executeReadyTasksWithAi=(projectId)=>DASHBOARD_TASK_ACTIONS.executeReadyTasksWithAi(projectId);
   const createQuickTask=(projectId,text)=>DASHBOARD_TASK_ACTIONS.createQuickTask(projectId,text);
   const clearQuickTaskImages=DASHBOARD_HOME.clearQuickTaskImages||function(){OPS.quickTaskImages=[];};
@@ -687,6 +700,8 @@
   const renderProjectSessionRow=DASHBOARD_HOME.renderProjectSessionRow||function(){return '';};
   const renderGenericSessionRow=DASHBOARD_HOME.renderGenericSessionRow||function(){return '';};
   const handleHomeAction=DASHBOARD_HOME.handleHomeAction||(async function(){return false;});
+  const handleHomeClick=DASHBOARD_HOME.handleHomeClick||function(){return false;};
+  const handleHomeKeydown=DASHBOARD_HOME.handleHomeKeydown||function(){return false;};
   const handleQuickTaskField=DASHBOARD_HOME.handleQuickTaskField||function(){return false;};
   const loadProjectDeployment=DASHBOARD_DEPLOYMENTS.loadProjectDeployment||(async function(){return null;});
   const recordProjectDeployment=DASHBOARD_DEPLOYMENTS.recordProjectDeployment||(async function(){return null;});
@@ -958,9 +973,13 @@
   function findProject(projectId){
     return (OPS.projects||[]).find(project=>project.id===projectId)||null;
   }
+  function handleHomeClickEvent(event){return handleHomeClick(event);}
+  function handleHomeKeydownEvent(event){return handleHomeKeydown(event);}
   async function handleClick(event){return DASHBOARD_ACTIONS.handleClick(event);}
   async function handleSubmit(event){return DASHBOARD_ACTIONS.handleSubmit(event);}
 
+  document.addEventListener('click',handleHomeClickEvent);
+  document.addEventListener('keydown',handleHomeKeydownEvent);
   document.addEventListener('click',handleClick);
   document.addEventListener('submit',handleSubmit);
   document.addEventListener('input',handleQuickTaskField);
