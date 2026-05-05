@@ -19,13 +19,13 @@
           "id": "b95cbda9-dd30-4f22-b399-3153175057b4",
           "text": "Make the restored `/ops` Projects view render project cards immediately and hydrate session/count/play/git metadata in the background instead of blocking on the full enrichment pass, which currently keeps the screen on `Loading projects...` for several seconds on larger project sets.",
           "done": false,
-          "qaStatus": "ready-for-test",
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-05T04:51:00.000Z",
           "markers": [
             "AI suggestion"
-          ]
+          ],
+          "qaStatus": "ready-for-test"
         },
         {
           "id": "4fd0fd64-1fb4-4221-8dbd-cf3c4025fd1c",
@@ -82,9 +82,12 @@
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-05T10:27:06.385Z",
-          "lastSessionAt": "2026-05-05T10:27:06.932Z",
           "startedAt": "2026-05-05T10:27:06.932Z",
-          "inProgress": true
+          "qaStatus": "ready-for-test",
+          "updatedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          }
         },
         {
           "id": "096922cb-5426-426f-82c6-68c2022269ae",
@@ -93,9 +96,12 @@
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-05T16:37:00.968Z",
-          "lastSessionAt": "2026-05-05T16:37:01.289Z",
           "startedAt": "2026-05-05T16:37:01.289Z",
-          "inProgress": true
+          "qaStatus": "ready-for-test",
+          "updatedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          }
         }
       ]
     },
