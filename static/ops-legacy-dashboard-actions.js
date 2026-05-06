@@ -251,7 +251,6 @@
         }
         if(action==='archive-completed'){
           await api(projectUrl(OPS.currentProject.id,'/tasks/archive-completed'),{method:'POST',body:JSON.stringify({})});
-          setTaskFilterStatus('archived');
           return await refreshDetail();
         }
         if(action==='delete-task'){

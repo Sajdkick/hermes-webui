@@ -768,6 +768,14 @@
       OPS.quickTaskSelectionEnd=typeof field.selectionEnd==='number'?field.selectionEnd:null;
     }
 
+    function isQuickTaskProjectPickerActive(){
+      const active=documentRef&&documentRef.activeElement;
+      if(!active||typeof active.closest!=='function')return false;
+      const field=active.closest('[data-ops-quick-field]');
+      if(!field||!root()||!root().contains(field))return false;
+      return String(field.dataset&&field.dataset.opsQuickField||'').trim()==='projectId';
+    }
+
     function restoreQuickTaskFocus(){
       if(!OPS.quickTaskFocusedField)return;
       const field=root()&&root().querySelector(`[data-ops-quick-field="${OPS.quickTaskFocusedField}"]`);
@@ -1008,6 +1016,11 @@
       }finally{
         OPS.sessionActivityBusy=false;
         if(settings.render!==false&&windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home'){
+          if(isQuickTaskProjectPickerActive()){
+            OPS.sessionActivityRenderPending=true;
+            return;
+          }
+          OPS.sessionActivityRenderPending=false;
           renderHome();
         }
       }
@@ -1017,6 +1030,7 @@
       setDashboardTopbar('Menu','');
       const el=root();
       if(!el)return;
+      OPS.sessionActivityRenderPending=false;
       ensureSessionActivityAutoRefresh();
       rememberQuickTaskFocus();
       const selectedProjectId=normalizeQuickTaskProjectSelection();
@@ -1270,6 +1284,10 @@
       if(field.dataset.opsQuickField==='projectId'){
         if(OPS.quickTaskDictationActive)stopQuickTaskDictation({updateStatus:false,discard:true});
         OPS.quickTaskProjectId=field.value;
+        if(OPS.sessionActivityRenderPending&&windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home'){
+          OPS.sessionActivityRenderPending=false;
+          renderHome();
+        }
       }
       if(field.dataset.opsQuickField==='text')OPS.quickTaskText=field.value;
       if(field.dataset.opsQuickField==='goalMode')OPS.quickTaskGoalMode=!!field.checked;

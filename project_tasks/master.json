@@ -5,61 +5,57 @@
       "title": "Cloud Terminal Follow-ups",
       "tasks": [
         {
-          "id": "4c702e60-c350-4d29-bef6-ab4306d39c84",
-          "text": "Fix the pre-existing Cloud Terminal prod backend crash loop caused by a deleted Codex binary path (`ENOENT` under `@openai/.codex-*`) so the proxy no longer continuously restarts the prod target during Hermes validation.",
-          "done": false,
-          "dependencies": [],
-          "grade": "green",
-          "createdAt": "2026-05-04T07:52:00.000Z",
-          "markers": [
-            "AI suggestion"
-          ],
-          "qaStatus": "needs-more-work",
-          "moreWork": "I could not find the stale `@openai/.codex-*` launch path or the prod-target restart logic inside this Hermes repo. The evidence points to an external Cloud Terminal runtime/config issue outside `/home/ubuntu/cloud-terminal-data/projects/hermes-webui` that needs reproduction details or a coordinated fix in the sibling Cloud Terminal backend/runtime code."
-        },
-        {
           "id": "4fd0fd64-1fb4-4221-8dbd-cf3c4025fd1c",
           "text": "Port the remaining global Cloud Terminal menu destinations into Hermes `/ops` so the home action strip can expose true equivalents for deployments, files, todos, and terminal/back navigation instead of the current reduced menu shell.",
-          "done": false,
+          "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-05T05:56:00.000Z",
+          "completedAt": "2026-05-06T07:03:28.639Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T07:06:58.231Z",
           "markers": [
             "AI suggestion"
-          ],
-          "qaStatus": "ready-for-test"
+          ]
         },
         {
           "id": "de8548d7-fbc8-4e30-b70a-3e299133b27e",
           "text": "Continue porting the remaining Hermes-owned `/ops` side panels onto Cloud Terminal shell patterns so run artifacts/logs/events and the deeper deployment/database/health/play detail panels no longer mix Cloud Terminal cards with legacy Hermes panel styling.",
-          "done": false,
+          "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-05T07:10:00.000Z",
+          "completedAt": "2026-05-06T07:02:42.035Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T07:06:58.231Z",
           "markers": [
             "AI suggestion"
-          ],
-          "qaStatus": "ready-for-test"
+          ]
         },
         {
           "id": "7f9d2304-44fa-4650-b53c-9839f5fe8fdb",
           "text": "Stop live `/api/ops/sessions` from surfacing stale test-generated and orphaned task sessions in the real Hermes dashboard so the Ops activity/project views do not fill with unnamed or irrelevant historical entries from old pytest/runtime artifacts.",
-          "done": false,
+          "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-05T19:18:00.000Z",
+          "completedAt": "2026-05-06T07:03:13.935Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T07:06:58.231Z",
           "markers": [
             "AI suggestion"
-          ],
-          "qaStatus": "ready-for-test"
+          ]
         },
         {
           "id": "b090c666-c482-4883-9354-bd13a5835ebf",
           "text": "When I am in the epics page and try to write a task text for a new task, it is wiped clean every 5 seconds so its almost impossible to add a new task. Fix this.",
-          "done": false,
+          "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-06T05:33:46.298Z",
+          "completedAt": "2026-05-06T07:03:17.403Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T07:06:58.231Z",
           "createdBy": {
             "id": "pontus",
             "label": "Pontus"
@@ -67,8 +63,7 @@
           "updatedBy": {
             "id": "pontus",
             "label": "Pontus"
-          },
-          "qaStatus": "ready-for-test"
+          }
         },
         {
           "id": "6b066c28-7946-488a-870d-3c629df8ab0e",
@@ -90,10 +85,13 @@
         {
           "id": "b29732a6-e9ce-45c0-8571-48b7b1057cae",
           "text": "When I click complete on a task in the epics page it says \"Internal server error\"",
-          "done": false,
+          "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-06T05:34:13.931Z",
+          "completedAt": "2026-05-06T07:04:27.803Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T07:06:58.231Z",
           "createdBy": {
             "id": "pontus",
             "label": "Pontus"
@@ -101,16 +99,18 @@
           "updatedBy": {
             "id": "pontus",
             "label": "Pontus"
-          },
-          "qaStatus": "ready-for-test"
+          }
         },
         {
           "id": "e510dc0f-c6e8-4a6d-ae4f-25172daa4505",
           "text": "When on mobile and pressing the back button it doesn't go back properly, if I am in the ops dashboard or in a session or in the project page it always throws me back to the landing page for Hermes web ui",
-          "done": false,
+          "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-06T05:34:22.678Z",
+          "completedAt": "2026-05-06T07:16:57.602Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T07:18:26.096Z",
           "createdBy": {
             "id": "pontus",
             "label": "Pontus"
@@ -118,8 +118,7 @@
           "updatedBy": {
             "id": "pontus",
             "label": "Pontus"
-          },
-          "qaStatus": "ready-for-test"
+          }
         },
         {
           "id": "54f6c2fc-790c-4880-94ee-34f187660d2c",
@@ -141,10 +140,13 @@
         {
           "id": "3e2ab248-2a62-426b-97bb-3ecb5f600848",
           "text": "The quick task runner UI lacks the toggle for setting the task as a goal, look at how it is done in cloud terminal",
-          "done": false,
+          "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-06T05:34:37.958Z",
+          "completedAt": "2026-05-06T07:05:28.806Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T07:06:58.231Z",
           "createdBy": {
             "id": "pontus",
             "label": "Pontus"
@@ -152,7 +154,51 @@
           "updatedBy": {
             "id": "pontus",
             "label": "Pontus"
-          },
+          }
+        },
+        {
+          "id": "39b6f4be-8856-420a-a13a-44823a3504a0",
+          "text": "We need a button to go back to the ops dashboard from the project / epics page",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T07:08:07.791Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "7d15e668-ebc7-4322-b187-6938e1c20a3b",
+          "text": "When i have the dorpdown in the quick task UI to select a project, it deselects and closes every 5 seconds",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T07:18:13.806Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "0fa534cd-7465-4c7c-932b-3e2ea289c0cb",
+          "text": "We dont need to automatically navigate to the archived tav when we archive tasks.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T07:19:07.592Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "dd8e0298-2ed9-493d-ba49-8c88eb913b2a",
+          "text": "We dont need the run activity section in the project/epics page",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T07:20:07.472Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "6651fc7f-3cd4-49cc-90e6-4c5a5c450391",
+          "text": "I want you to add the Execute ready tasks button to the project epics page, look at cloud terminal how its implemented",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T07:20:41.712Z",
           "qaStatus": "ready-for-test"
         }
       ],
@@ -175,40 +221,48 @@
         {
           "id": "a8e7f630-0941-4431-a776-14d4bc8147e8",
           "text": "I want to add a toggle to the quick task runner that when toggled, sets the task as a goal by using the /goal command in hermes agent. I want you to look online to see exactly how it works so your implementation is correct.",
-          "done": false,
+          "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-04T16:17:17.931Z",
-          "qaStatus": "ready-for-test"
+          "completedAt": "2026-05-06T07:05:39.159Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T07:06:58.231Z",
+          "lastSessionAt": "2026-05-06T07:05:39.058Z"
         },
         {
           "id": "27f67178-57b1-4671-83a8-c63ae13e4b1c",
           "text": "There is a bug in the ops dashboard, where if I remove all notifications, I dismiss them, then I go back and in again, they're still there, so they're not truly dismissed.",
-          "done": false,
+          "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-05T10:27:06.385Z",
           "startedAt": "2026-05-05T10:27:06.932Z",
+          "completedAt": "2026-05-06T07:05:54.623Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T07:06:58.231Z",
           "updatedBy": {
             "id": "pontus",
             "label": "Pontus"
           },
-          "lastSessionAt": "2026-05-05T17:51:54.406Z",
-          "qaStatus": "ready-for-test"
+          "lastSessionAt": "2026-05-06T07:05:54.569Z"
         },
         {
           "id": "096922cb-5426-426f-82c6-68c2022269ae",
           "text": "I created a task and executed it, bit it didnt show up in the actove sessions list in the ops dashboard. Instead insee 15 unnamed tasks?",
-          "done": false,
+          "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-05T16:37:00.968Z",
           "startedAt": "2026-05-05T16:37:01.289Z",
+          "completedAt": "2026-05-06T07:06:05.115Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T07:06:58.231Z",
           "updatedBy": {
             "id": "pontus",
             "label": "Pontus"
           },
-          "qaStatus": "ready-for-test"
+          "lastSessionAt": "2026-05-06T07:06:05.058Z"
         }
       ]
     },
@@ -217,40 +271,13 @@
       "title": "AI automation",
       "tasks": [
         {
-          "id": "989817c2-5278-40b4-81f5-f51735e56b25",
-          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
-          "done": false,
-          "dependencies": [],
-          "grade": "green",
-          "createdAt": "2026-05-04T16:20:05.989Z",
-          "qaStatus": "ready-for-test"
-        },
-        {
-          "id": "961c5dbb-04a4-4d0d-b751-8cad1814f4a8",
-          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
-          "done": false,
-          "dependencies": [],
-          "grade": "green",
-          "createdAt": "2026-05-04T16:23:44.141Z",
-          "qaStatus": "ready-for-test"
-        },
-        {
-          "id": "f50c1131-379e-4216-b04a-3dde1ee3ff67",
-          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
-          "done": false,
-          "dependencies": [],
-          "grade": "green",
-          "createdAt": "2026-05-04T16:26:39.505Z",
-          "qaStatus": "ready-for-test"
-        },
-        {
-          "id": "1035d0de-c0b0-46cf-bba1-4746fb7a4630",
+          "id": "ec08e920-b996-4470-ae2c-2aee713d3eb3",
           "text": "Analyze the current branch tasks JSON file and implement tasks one-by-one without waiting for user input. Focus only on tasks that are actionable now: status \"ready\" and status \"needs-more-work\". Keep working sequentially until there are no actionable tasks left.\nBefore starting execution, read AGENTS.md for shared project instructions.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
           "done": false,
           "dependencies": [],
           "grade": "green",
-          "createdAt": "2026-05-06T05:34:40.736Z",
-          "startedAt": "2026-05-06T05:34:41.300Z",
+          "createdAt": "2026-05-06T07:21:21.106Z",
+          "startedAt": "2026-05-06T07:21:21.812Z",
           "createdBy": {
             "id": "pontus",
             "label": "Pontus"
@@ -263,7 +290,9 @@
             "id": "pontus",
             "label": "Pontus"
           },
-          "qaStatus": "ready-for-test"
+          "sessionId": "a4084ce4-7f0b-46c8-a793-4f9940fdfc50",
+          "lastSessionAt": "2026-05-06T07:21:21.812Z",
+          "inProgress": true
         }
       ]
     }

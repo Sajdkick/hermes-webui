@@ -160,6 +160,12 @@
   gap: 12px;
 }
 
+.ops-project-column-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
 .ops-project-column-header h2,
 .ops-epic-header h3 {
   margin: 0;

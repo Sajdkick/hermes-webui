@@ -92,6 +92,7 @@
       notifications:[],
       notificationsError:'',
       respondingNotificationKey:'',
+      taskAutomationBusyAction:'',
     };
 
     root.addEventListener('click',function(event){
@@ -105,6 +106,11 @@
           if(!state.projects.length)loadProjects(root,state);
           if(!state.availableProfiles.length && !state.loadingProfiles)loadProfiles(root,state);
         }
+        return;
+      }
+      if(kind==='close-projects'){
+        state.projectsOpen=false;
+        render(root,state);
         return;
       }
       if(kind==='select-project'){
@@ -136,6 +142,10 @@
       }
       if(kind==='refresh-projects'){
         loadProjects(root,state,true);
+        return;
+      }
+      if(kind==='execute-ready-tasks'){
+        executeReadyTasks(root,state);
         return;
       }
       if(kind==='refresh-runs'){
@@ -1131,17 +1141,22 @@
   }
 
   async function ensureQuickTaskEpic(root,state){
+    return ensureProjectEpic(state,'Quick tasks');
+  }
+
+  async function ensureProjectEpic(state,title){
     const tasksData=state.tasksData && Array.isArray(state.tasksData.epics) ? state.tasksData : null;
+    const normalizedTitle=String(title||'').trim().toLowerCase();
     const existing=tasksData && tasksData.epics.find(function(epic){
-      return String(epic.title||'').trim().toLowerCase()==='quick tasks';
+      return String(epic.title||'').trim().toLowerCase()===normalizedTitle;
     });
     if(existing && existing.id)return existing.id;
     const created=await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/epics',{
       method:'POST',
-      body:{title:'Quick tasks'}
+      body:{title:title}
     });
     const epicId=created && created.epic ? created.epic.id : '';
-    if(!epicId)throw new Error('Could not create the Quick tasks epic.');
+    if(!epicId)throw new Error('Could not create the '+String(title||'task').trim()+' epic.');
     return epicId;
   }
 
@@ -1166,6 +1181,124 @@
       state.error=error && error.message ? error.message : 'Could not update task.';
       render(root,state);
     }
+  }
+
+  function normalizeTaskQaStatus(value){
+    return String(value||'').trim().toLowerCase().replace(/[\s_]+/g,'-');
+  }
+
+  function buildTaskLookup(tasksData){
+    const lookup={};
+    const epics=tasksData && Array.isArray(tasksData.epics) ? tasksData.epics : [];
+    epics.forEach(function(epic){
+      const tasks=Array.isArray(epic && epic.tasks) ? epic.tasks : [];
+      tasks.forEach(function(task){
+        const id=String(task && task.id || '').trim();
+        if(id)lookup[id]=task;
+      });
+    });
+    return lookup;
+  }
+
+  function taskIsBlocked(task,taskById){
+    if(!task || task.done || task.archived)return false;
+    const dependencies=Array.isArray(task.dependencies) ? task.dependencies : [];
+    return dependencies.some(function(dependencyId){
+      const dependency=taskById[String(dependencyId||'').trim()];
+      return !!(dependency && !dependency.done);
+    });
+  }
+
+  function isActionableTask(task,taskById){
+    if(!task || task.done || task.archived || task.inProgress)return false;
+    if(taskIsBlocked(task,taskById))return false;
+    const qaStatus=normalizeTaskQaStatus(task.qaStatus);
+    return qaStatus==='needs-more-work' || !qaStatus;
+  }
+
+  function actionableTaskCount(tasksData){
+    const taskById=buildTaskLookup(tasksData);
+    return Object.keys(taskById).reduce(function(count,taskId){
+      return count + (isActionableTask(taskById[taskId],taskById) ? 1 : 0);
+    },0);
+  }
+
+  function buildTaskBatchExecutionPrompt(tasksData){
+    const lines=['Analyze the current project task file and execute the ready tasks with AI.'];
+    lines.push('Follow the project task file as the source of truth for execution order and status updates.');
+    if(tasksData && tasksData.branch){
+      lines.push('Branch: '+String(tasksData.branch));
+    }
+    if(tasksData && (tasksData.tasksFilePath || tasksData.tasksFile)){
+      lines.push('Tasks JSON file for this branch: '+String(tasksData.tasksFilePath || tasksData.tasksFile));
+    }
+    lines.push('Read and update that JSON file directly for this branch.');
+    lines.push('Process tasks sequentially with no user prompts.');
+    lines.push('Actionable tasks are only:');
+    lines.push('- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.');
+    lines.push('- needs-more-work: qaStatus is "needs-more-work".');
+    lines.push('Execution loop for each actionable task:');
+    lines.push('1) Reload task JSON and choose the next actionable task.');
+    lines.push('2) Implement the task in the codebase.');
+    lines.push('3) Immediately update the task JSON before moving on.');
+    lines.push('If you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.');
+    lines.push('Never set qaStatus="ready-for-test" on newly created follow-up tasks; that status is only for actionable tasks you just executed.');
+    lines.push('4) If task is completed, keep done=false, set qaStatus="ready-for-test", and clear moreWork/inProgress/sessionId/lastSessionAt when present.');
+    lines.push('5) If task cannot be completed now, keep done=false, set qaStatus="needs-more-work", and write a clear moreWork note.');
+    lines.push('6) Save the JSON and continue to the next actionable task until none remain.');
+    return lines.join('\n');
+  }
+
+  async function executeReadyTasks(root,state){
+    if(!state.selectedProjectId)return;
+    const tasksData=state.tasksData && state.tasksData.project && state.tasksData.project.id===state.selectedProjectId
+      ? state.tasksData
+      : await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/tasks');
+    const actionableCountValue=actionableTaskCount(tasksData);
+    if(!actionableCountValue){
+      state.error='No ready tasks are available to execute.';
+      render(root,state);
+      return;
+    }
+    state.taskAutomationBusyAction='execute-ready';
+    state.error='';
+    render(root,state);
+    try{
+      const epicId=await ensureProjectEpic(state,'AI automation');
+      const created=await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/tasks',{
+        method:'POST',
+        body:{
+          epicId:epicId,
+          text:buildTaskBatchExecutionPrompt(tasksData),
+          grade:'green',
+        },
+      });
+      const createdTaskId=created && created.task ? String(created.task.id||'').trim() : '';
+      if(!createdTaskId)throw new Error('Could not create the AI automation task.');
+      state.tasksData=tasksData;
+      const payload=await api(
+        apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/tasks/'+encodeURIComponent(createdTaskId)+'/sessions/launch',
+        {method:'POST',body:{}}
+      );
+      const target=payload && payload.sessionUrl ? String(payload.sessionUrl) : '';
+      if(target && typeof window!=='undefined' && window.location){
+        const normalized=appUrl(target);
+        if(typeof window.location.assign==='function'){
+          window.location.assign(normalized);
+          return;
+        }
+        window.location.href=normalized;
+        return;
+      }
+      await loadTasks(root,state);
+    }catch(error){
+      state.error=error && error.message ? error.message : 'Could not start the AI automation task.';
+      state.taskAutomationBusyAction='';
+      render(root,state);
+      return;
+    }
+    state.taskAutomationBusyAction='';
+    render(root,state);
   }
 
   async function loadNotifications(root,state){
@@ -1238,7 +1371,7 @@
     const tasksData=state.tasksData && state.tasksData.project && state.tasksData.project.id===state.selectedProjectId ? state.tasksData : null;
     const projectSection=state.projectsOpen ? renderProjectsSection(state,selectedProject,tasksData) : '';
     const notificationsSection=renderNotificationsSection(state);
-    const runsSection=renderRunsSection(state);
+    const runsSection=state.projectsOpen ? '' : renderRunsSection(state);
     const githubSection=renderGitHubSection(state);
     const databaseSection=renderDatabaseSection(state);
     root.innerHTML=[
@@ -1339,13 +1472,18 @@
       return '<div class="ops-project-column-header"><h2>Project detail</h2><span>Select a project</span></div><p class="ops-shell-loading">Choose a project to inspect branch-scoped tasks.</p>';
     }
     const epics=tasksData && Array.isArray(tasksData.epics) ? tasksData.epics : [];
+    const executeReadyCount=actionableTaskCount(tasksData);
+    const executeReadyBusy=state.taskAutomationBusyAction==='execute-ready';
     const epicRows=state.loadingTasks
       ? '<p class="ops-shell-loading">Loading tasks…</p>'
       : epics.length
         ? epics.map(function(epic){return renderEpicCard(epic,state);}).join('')
         : '<p class="ops-shell-loading">No epics yet for this branch.</p>';
     return [
-      '<div class="ops-project-column-header"><h2>'+escapeHtml(selectedProject.name||'Project')+'</h2><span>'+escapeHtml(selectedProject.tasksBranch||selectedProject.coreBranch||'')+'</span></div>',
+      '<div class="ops-project-column-header">',
+      '<div class="ops-project-column-copy"><h2>'+escapeHtml(selectedProject.name||'Project')+'</h2><span>'+escapeHtml(selectedProject.tasksBranch||selectedProject.coreBranch||'')+'</span></div>',
+      '<button class="ops-shell-link" type="button" data-ops-action="close-projects">Back to ops dashboard</button>',
+      '</div>',
       '<div class="ops-project-meta">',
       '<span><strong>Path</strong>'+escapeHtml(selectedProject.path||'')+'</span>',
       '<span><strong>Tasks file</strong>'+escapeHtml(selectedProject.tasksFilePath||'')+'</span>',
@@ -1357,6 +1495,9 @@
       renderUpstreamSyncSection(state,selectedProject),
       renderProjectDatabaseSection(state,selectedProject),
       renderRuntimeSection(state,selectedProject),
+      '<div class="ops-runtime-actions">',
+      '<button class="ops-shell-link" type="button" data-ops-action="execute-ready-tasks"'+(!executeReadyCount && !executeReadyBusy ? ' disabled' : '')+' title="Ask Codex to execute ready and needs-more-work tasks in sequence.">'+(executeReadyBusy ? 'Starting…' : 'Execute ready tasks with AI')+(!executeReadyBusy && executeReadyCount ? ' ('+String(executeReadyCount)+')' : '')+'</button>',
+      '</div>',
       renderQuickTaskForm(),
       renderFilterForm(state),
       '<form class="ops-inline-form compact" data-ops-form="create-epic">',

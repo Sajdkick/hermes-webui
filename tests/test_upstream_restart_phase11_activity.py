@@ -670,6 +670,294 @@ def test_phase11_notifications_match_cloud_terminal_card_shape():
     assert completed.stdout.strip() == "ok"
 
 
+def test_phase11_quick_task_project_picker_defers_home_rerender_during_activity_refresh():
+    script = textwrap.dedent(
+        """
+        (async () => {
+          const fs = require('fs');
+          const vm = require('vm');
+
+          const source = fs.readFileSync('static/ops-legacy-home.js', 'utf8');
+          let intervalCallback = null;
+
+          class Root {
+            constructor(){
+              this._html = '';
+              this.renderCount = 0;
+              this.projectField = null;
+            }
+            set innerHTML(value){
+              this._html = value;
+              this.renderCount += 1;
+            }
+            get innerHTML(){
+              return this._html;
+            }
+            addEventListener(){}
+            querySelector(selector){
+              if (selector === '[data-ops-quick-field="projectId"]') return this.projectField;
+              return null;
+            }
+            contains(node){
+              return node === this.projectField;
+            }
+          }
+
+          const rootEl = new Root();
+          const quickProjectField = {
+            dataset: { opsQuickField: 'projectId' },
+            disabled: false,
+            value: 'hermes',
+            focus: () => {},
+            closest: (selector) => selector === '[data-ops-quick-field]' ? quickProjectField : null,
+          };
+          rootEl.projectField = quickProjectField;
+
+          const documentRef = {
+            activeElement: quickProjectField,
+          };
+          const windowRef = {
+            HermesOpsModules: {},
+            _opsDashboardOpen: true,
+            setInterval: (callback) => {
+              intervalCallback = callback;
+              return 1;
+            },
+          };
+
+          const context = {
+            console,
+            window: windowRef,
+            document: documentRef,
+            navigator: {},
+            URL,
+            setTimeout,
+            clearTimeout,
+          };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          let activityCalls = 0;
+          const OPS = {
+            loading: false,
+            view: 'home',
+            projects: [{ id: 'hermes', name: 'Hermes', coreBranch: 'master' }],
+            sessions: [],
+            notifications: [],
+            notificationBusy: false,
+            notificationAutoApprovalPolicy: { enabled: true, rules: [] },
+            sessionActivity: [],
+            sessionActivityGroups: [],
+            sessionActivityCollapsed: {},
+            sessionActivityInitialized: {},
+            sessionActivityExpanded: true,
+            sessionActivityLastRefreshedAt: 0,
+            sessionActivityError: '',
+            sessionActivityBusy: false,
+            sessionActivityFocusGroupId: '',
+            quickTaskImages: [],
+            quickTaskProjectId: 'hermes',
+            quickTaskText: '',
+            quickTaskBusy: false,
+            quickTaskDictationActive: false,
+            quickTaskDictationBusy: false,
+            quickTaskStatus: '',
+            quickTaskStatusKind: 'info',
+          };
+
+          const dashboard = context.window.HermesOpsModules.home.bindDashboard({
+            OPS,
+            AgentBridge: {
+              sessions: {
+                activity: async () => {
+                  activityCalls += 1;
+                  return { sessions: [{ session_id: 'sess-1', title: 'Test session' }], groups: [] };
+                },
+              },
+            },
+            renderCurrentOpsView: () => {},
+            root: () => rootEl,
+            esc: (value) => String(value ?? ''),
+            svg: { folder: '', close: '', chat: '', play: '', refresh: '', check: '', arrow: '' },
+            showError: () => {},
+            setBusy: () => {},
+            setDashboardTopbar: () => {},
+            renderNotifications: () => '<div class="ops-notification-empty">No notifications.</div>',
+            normalizedAutoApprovalPolicy: () => ({ enabled: true }),
+            loadProjects: async () => [],
+            openProjectDetail: async () => null,
+            loadNotifications: async () => [],
+            loadOpsRuns: async () => [],
+            loadNotificationDiagnostics: async () => null,
+            openOpsSession: async () => null,
+            findProject: () => null,
+            projectUsesBranchTitle: () => false,
+            projectBranchLabel: () => '',
+            projectCardTitle: () => '',
+            projectRepositoryLabel: () => '',
+            normalizeRunStatus: () => 'running',
+            runStatusLabel: () => 'Running',
+            runStatusKind: () => 'running',
+            formatOpsDateTime: () => 'now',
+            renderProjectGitQuickAction: () => '',
+            renderProjectPlayQuickAction: () => '',
+            renderProjectActivityQuickAction: () => '',
+            sessionAccentStyle: () => '',
+            sessionGroupAccentStyle: () => '',
+            sessionRefValue: (session) => session.session_id || session.id,
+            canonicalTaskSessions: (sessions) => sessions,
+            projectSessionsFor: () => [],
+            isSessionForProject: () => false,
+            taskImageLabel: () => '',
+            writeStoredJson: () => {},
+            sessionActivityStorageKey: 'activity-collapse',
+            navigatorRef: {},
+            windowRef,
+            documentRef,
+            URLRef: URL,
+            MediaRecorderRef: function(){},
+            FileRef: function(){},
+            showPromptDialog: async () => null,
+            showConfirmDialog: async () => false,
+            requestAnimationFrameRef: (cb) => cb(),
+            taskDictationPrompt: '',
+            taskDictationAudioBitsPerSecond: 0,
+            runActiveStatusValues: ['running'],
+          });
+
+          dashboard.renderHome();
+          const initialRenderCount = rootEl.renderCount;
+          if (typeof intervalCallback !== 'function'){
+            throw new Error('Home auto-refresh timer was not registered');
+          }
+
+          intervalCallback();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          await new Promise((resolve) => setTimeout(resolve, 0));
+
+          if (activityCalls !== 1){
+            throw new Error('Session activity refresh did not run');
+          }
+          if (rootEl.renderCount !== initialRenderCount){
+            throw new Error('Home should not rerender while the quick-task project picker is focused');
+          }
+          if (OPS.sessionActivityRenderPending !== true){
+            throw new Error('Deferred session activity render flag was not set');
+          }
+
+          dashboard.handleQuickTaskField({
+            type: 'change',
+            target: {
+              value: 'hermes',
+              checked: false,
+              files: null,
+              dataset: { opsQuickField: 'projectId' },
+              closest: (selector) => selector === '[data-ops-quick-field]' ? quickProjectField : null,
+            },
+          });
+
+          if (rootEl.renderCount <= initialRenderCount){
+            throw new Error('Changing the quick-task project should flush the deferred home render');
+          }
+          if (OPS.sessionActivityRenderPending){
+            throw new Error('Deferred session activity render flag should clear after the picker change');
+          }
+
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_phase11_archive_completed_keeps_current_task_view():
+    script = textwrap.dedent(
+        """
+        (async () => {
+          const fs = require('fs');
+          const vm = require('vm');
+
+          const source = fs.readFileSync('static/ops-legacy-dashboard-actions.js', 'utf8');
+          const windowRef = { HermesOpsModules: {} };
+          const rootEl = {
+            contains: () => true,
+          };
+          const context = {
+            console,
+            window: windowRef,
+            document: {},
+            FormData,
+          };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const apiCalls = [];
+          let setTaskFilterStatusCalls = 0;
+          let refreshDetailCalls = 0;
+          const dashboard = context.window.HermesOpsModules.dashboardActions.bindDashboard({
+            OPS: {
+              currentProject: { id: 'project-1' },
+            },
+            root: () => rootEl,
+            showError: (error) => { throw error; },
+            setBusy: () => {},
+            handleHomeAction: async () => false,
+            AgentBridge: { sessions: {}, runs: {} },
+            api: async (path, options) => {
+              apiCalls.push({ path, options: options || null });
+              return { ok: true };
+            },
+            projectUrl: (projectId, suffix='') => '/api/ops/projects/' + projectId + suffix,
+            showConfirmDialog: async () => true,
+            splitList: () => [],
+            splitImageRefs: () => [],
+            refreshDetail: async () => { refreshDetailCalls += 1; },
+            setTaskFilterStatus: () => { setTaskFilterStatusCalls += 1; },
+          });
+
+          await dashboard.handleClick({
+            target: {
+              closest: () => ({
+                dataset: { opsAction: 'archive-completed' },
+              }),
+            },
+          });
+
+          if (!apiCalls.length || apiCalls[0].path !== '/api/ops/projects/project-1/tasks/archive-completed'){
+            throw new Error('Archive-completed endpoint was not called');
+          }
+          if (setTaskFilterStatusCalls !== 0){
+            throw new Error('Archiving completed tasks should not force the archived task filter');
+          }
+          if (refreshDetailCalls !== 1){
+            throw new Error('Project detail should refresh after archiving completed tasks');
+          }
+
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
 def test_phase11_project_runs_match_cloud_terminal_card_shape():
     script = textwrap.dedent(
         """
