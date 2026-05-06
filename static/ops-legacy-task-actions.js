@@ -231,11 +231,27 @@
 
     async function updateTaskGrade(taskId,grade){
       if(!OPS.currentProject||!taskId)return;
-      await api(projectUrl(OPS.currentProject.id,`/tasks/${encodeURIComponent(taskId)}`),{
-        method:'POST',
-        body:JSON.stringify({grade:normalizeTaskGrade(grade)}),
-      });
-      await refreshDetail();
+      const match=findTask(taskId);
+      const normalizedGrade=normalizeTaskGrade(grade);
+      const previousGrade=match&&match.task?match.task.grade:undefined;
+      if(match&&match.task){
+        match.task.grade=normalizedGrade;
+        renderProjectDetail();
+      }
+      try{
+        await api(projectUrl(OPS.currentProject.id,`/tasks/${encodeURIComponent(taskId)}`),{
+          method:'POST',
+          body:JSON.stringify({grade:normalizedGrade}),
+        });
+        await refreshDetail();
+      }catch(error){
+        if(match&&match.task){
+          if(previousGrade===undefined)delete match.task.grade;
+          else match.task.grade=previousGrade;
+        }
+        await refreshDetail().catch(()=>renderProjectDetail());
+        throw error;
+      }
     }
 
     async function markTaskNeedsMoreWork(taskId){
@@ -255,12 +271,26 @@
         showToast('Needs-more-work feedback is required.',2600);
         return;
       }
-      await api(projectUrl(OPS.currentProject.id,`/tasks/${encodeURIComponent(taskId)}`),{
-        method:'POST',
-        body:JSON.stringify({qaStatus:'needs-more-work',moreWork}),
-      });
-      showToast('Task marked as needing more work',2400);
-      await refreshDetail();
+      const previous={
+        done:match.task.done,
+        qaStatus:match.task.qaStatus,
+        moreWork:match.task.moreWork,
+        inProgress:match.task.inProgress,
+      };
+      Object.assign(match.task,{done:false,qaStatus:'needs-more-work',moreWork,inProgress:false});
+      renderProjectDetail();
+      try{
+        await api(projectUrl(OPS.currentProject.id,`/tasks/${encodeURIComponent(taskId)}`),{
+          method:'POST',
+          body:JSON.stringify({qaStatus:'needs-more-work',moreWork}),
+        });
+        showToast('Task marked as needing more work',2400);
+        await refreshDetail();
+      }catch(error){
+        Object.assign(match.task,previous);
+        await refreshDetail().catch(()=>renderProjectDetail());
+        throw error;
+      }
     }
 
     function buildTaskExecutionPrompt(prompt){

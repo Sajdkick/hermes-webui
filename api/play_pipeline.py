@@ -57,6 +57,9 @@ class PlayPipelineError(Exception):
 class PlayPipelineState:
     project_id: str
     pipeline_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    run_id: str | None = None
+    task_id: str | None = None
+    session_id: str | None = None
     status: str = "idle"
     running: bool = False
     ready: bool = False
@@ -755,9 +758,17 @@ def _pipeline_worker(play_config: dict, state: PlayPipelineState) -> None:
 
 def start_project_play_pipeline(project_id: str, body: dict | None = None) -> dict:
     _body = body if isinstance(body, dict) else {}
+    terminal_target = _body.get("terminalTarget") if isinstance(_body.get("terminalTarget"), dict) else {}
     play_config = get_project_play_config(project_id)
     stop_project_play_pipeline(project_id, purge=True)
-    state = PlayPipelineState(project_id=project_id, config_path=play_config["path"], config_branch=play_config["branch"])
+    state = PlayPipelineState(
+        project_id=project_id,
+        config_path=play_config["path"],
+        config_branch=play_config["branch"],
+        run_id=str(_body.get("runId") or _body.get("run_id") or terminal_target.get("runId") or terminal_target.get("run_id") or "").strip() or None,
+        task_id=str(_body.get("taskId") or _body.get("task_id") or terminal_target.get("taskId") or terminal_target.get("task_id") or "").strip() or None,
+        session_id=str(_body.get("sessionId") or _body.get("session_id") or terminal_target.get("sessionId") or terminal_target.get("session_id") or "").strip() or None,
+    )
     queued = _BUILD_LOCK.locked()
     _mark_state(
         state,
@@ -838,6 +849,15 @@ def build_project_play_status(project_id: str) -> dict:
     return {
         "projectId": project_id,
         "pipelineId": snapshot.get("pipeline_id"),
+        "runId": snapshot.get("run_id"),
+        "taskId": snapshot.get("task_id"),
+        "sessionId": snapshot.get("session_id"),
+        "terminalTarget": {
+            "projectId": project_id,
+            "runId": snapshot.get("run_id") or "",
+            "taskId": snapshot.get("task_id") or "",
+            "sessionId": snapshot.get("session_id") or "",
+        },
         "configured": config_info.get("configured") is True,
         "valid": config_info.get("valid") is True,
         "configExists": config_info.get("exists") is True,

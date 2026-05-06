@@ -346,12 +346,36 @@ async function loadSession(sid){
     const _msgInner = $('msgInner');
     if (_msgInner) _msgInner.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:14px;padding:40px;text-align:center;">Loading conversation...</div>';
   }
+  const _isTransientLoadError=(e)=>{
+    return (typeof document!=='undefined'&&document.visibilityState==='hidden') ||
+      (typeof navigator!=='undefined'&&navigator.onLine===false) ||
+      (e&&(e.name==='TypeError'||e instanceof TypeError));
+  };
+  const _retryLoadAfterWake=(message)=>{
+    const _msgInner=$('msgInner');
+    if(_msgInner){
+      _msgInner.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:14px;padding:40px;text-align:center;">'+message+'</div>';
+    }
+    if(typeof setComposerStatus==='function') setComposerStatus('Reconnecting…');
+    const retry=()=>{
+      if(_loadingSessionId!==sid) return;
+      if(typeof document!=='undefined'&&document.visibilityState==='hidden') return;
+      loadSession(sid);
+    };
+    setTimeout(retry, (typeof navigator!=='undefined'&&navigator.onLine===false)?2500:1200);
+    if(typeof window!=='undefined') window.addEventListener('online', retry, {once:true});
+    if(typeof document!=='undefined') document.addEventListener('visibilitychange', retry, {once:true});
+  };
   // Phase 1: Load metadata only (~1KB) for fast session switching.
   // Guard against network/server failures to prevent a permanently stuck loading state.
   let data;
   try {
     data = await api(`/api/session?session_id=${encodeURIComponent(sid)}&messages=0&resolve_model=0`);
   } catch(e) {
+    if(_isTransientLoadError(e)){
+      _retryLoadAfterWake('Reconnecting to session…');
+      return;
+    }
     const _msgInner = $('msgInner');
     if(_msgInner){
       if(e.status===404){
@@ -443,6 +467,10 @@ async function loadSession(sid){
     try {
       await _ensureMessagesLoaded(sid);
     } catch (e) {
+      if(_isTransientLoadError(e)){
+        _retryLoadAfterWake('Reconnecting to messages…');
+        return;
+      }
       // Network errors, server failures, or SSE drops (Chrome error codes 4/5)
       // can cause _ensureMessagesLoaded to throw. Without a try/catch here the
       // "Loading conversation..." div injected at the top of loadSession would

@@ -356,6 +356,9 @@
         ['controls',container.querySelector('.tasks-controls')],
         ['content',container.querySelector('.tasks-content')],
         ['page',container.querySelector('.project-page-content')],
+        ['create-card',container.querySelector('.tasks-card-create')],
+        ['form-area',container.querySelector('.tasks-form-area')],
+        ['secondary-panels-body',container.querySelector('.ops-project-secondary-panels-body')],
       ].forEach(([key,node])=>{
         if(!node)return;
         entries.push({key,node,top:Number(node.scrollTop)||0,left:Number(node.scrollLeft)||0});

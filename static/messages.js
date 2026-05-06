@@ -437,7 +437,11 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
   }
 
   // ── Shared SSE handler wiring (used for initial connection and reconnect) ──
-  let _reconnectAttempted=false;
+  let _reconnectAttempts=0;
+  let _reconnectTimer=null;
+  let _visibleReconnectStartedAt=0;
+  let _reconnectInProgress=false;
+  let _reconnectWakeBound=false;
   let _terminalStateReached=false;
 
   // Bug A fix (#631): track whether the stream has been finalized so any rAF
@@ -447,6 +451,80 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
   // the final answer or the response to render twice.
   let _streamFinalized=false;
   let _pendingRafHandle=null;
+
+  function _clearReconnectTimer(){
+    if(_reconnectTimer){clearTimeout(_reconnectTimer);_reconnectTimer=null;}
+  }
+  function _isPageSuspendedOrOffline(){
+    return (typeof document!=='undefined'&&document.visibilityState==='hidden') ||
+      (typeof navigator!=='undefined'&&navigator.onLine===false);
+  }
+  function _isTransientReconnectError(err){
+    return _isPageSuspendedOrOffline() || !err || err.name==='TypeError' || err instanceof TypeError;
+  }
+  function _reconnectDelay(){
+    if(_isPageSuspendedOrOffline()) return 3000;
+    return Math.min(8000, 750 * Math.pow(1.6, Math.max(0, _reconnectAttempts-1)));
+  }
+  function _bindReconnectWakeEvents(){
+    if(_reconnectWakeBound) return;
+    _reconnectWakeBound=true;
+    const wake=()=>{
+      if(_terminalStateReached||_streamFinalized) return;
+      if(typeof document!=='undefined'&&document.visibilityState==='hidden') return;
+      _clearReconnectTimer();
+      _reconnectTimer=setTimeout(_attemptReconnect, 0);
+    };
+    if(typeof window!=='undefined') window.addEventListener('online', wake);
+    if(typeof document!=='undefined') document.addEventListener('visibilitychange', wake);
+  }
+  function _scheduleReconnect(err){
+    if(_terminalStateReached||_streamFinalized) return;
+    // While the page is hidden/offline (common when a phone is locked), never
+    // convert the stream into a visible "Connection lost" message. Keep the
+    // cached partial turn and reconnect as soon as the browser/network wakes.
+    const suspended=_isPageSuspendedOrOffline();
+    if(suspended) _visibleReconnectStartedAt=0;
+    else if(!_visibleReconnectStartedAt) _visibleReconnectStartedAt=Date.now();
+    const visibleElapsed=_visibleReconnectStartedAt?Date.now()-_visibleReconnectStartedAt:0;
+    const transient=_isTransientReconnectError(err);
+    if(!suspended && !transient && _reconnectAttempts>=5){
+      _handleStreamError();
+      return;
+    }
+    if(!suspended && visibleElapsed>120000){
+      _handleStreamError();
+      return;
+    }
+    const delay=_reconnectDelay();
+    _bindReconnectWakeEvents();
+    setComposerStatus('Reconnecting…');
+    _clearReconnectTimer();
+    _reconnectTimer=setTimeout(_attemptReconnect, delay);
+  }
+  async function _attemptReconnect(){
+    if(_terminalStateReached||_streamFinalized||_reconnectInProgress) return;
+    _clearReconnectTimer();
+    _reconnectInProgress=true;
+    _reconnectAttempts+=1;
+    let statusError=null;
+    try{
+      if(streamId){
+        const st=await api(`/api/chat/stream/status?stream_id=${encodeURIComponent(streamId)}`);
+        if(st&&st.active){
+          setComposerStatus('Reconnected');
+          _wireSSE(new EventSource(new URL(`api/chat/stream?stream_id=${encodeURIComponent(streamId)}`,document.baseURI||location.href).href,{withCredentials:true}));
+          return;
+        }
+      }
+    }catch(err){
+      statusError=err;
+    }finally{
+      _reconnectInProgress=false;
+    }
+    if(await _restoreSettledSession()) return;
+    _scheduleReconnect(statusError);
+  }
 
   // rAF-throttled rendering: buffer tokens, render at most once per frame
   let _renderPending=false;
@@ -655,6 +733,9 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
   }
 
   function _wireSSE(source){
+    _clearReconnectTimer();
+    LIVE_STREAMS[activeSid]={streamId,source};
+    source.addEventListener('open',()=>{_reconnectAttempts=0;_visibleReconnectStartedAt=0;});
     // Note on #631 Bug B: the original PR description stated the server
     // "replays buffered token events" on reconnect, and proposed resetting
     // the accumulators here so the re-sent tokens wouldn't double the prefix.
@@ -1053,26 +1134,11 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
         _closeSource();
         return;
       }
-      // Attempt one reconnect if the stream is still active server-side
-      if(!_reconnectAttempted && streamId){
-        _reconnectAttempted=true;
-        setComposerStatus('Reconnecting…');
-        setTimeout(async()=>{
-          try{
-            const st=await api(`/api/chat/stream/status?stream_id=${encodeURIComponent(streamId)}`);
-            if(st.active){
-              setComposerStatus('Reconnected');
-              _wireSSE(new EventSource(new URL(`api/chat/stream?stream_id=${encodeURIComponent(streamId)}`,document.baseURI||location.href).href,{withCredentials:true}));
-              return;
-            }
-          }catch(_){}
-          if(await _restoreSettledSession()) return;
-          _handleStreamError();
-        },1500);
-        return;
-      }
-      if(await _restoreSettledSession()) return;
-      _handleStreamError();
+      // Mobile browsers often freeze the page/network when the phone locks.
+      // Treat transport errors as a recoverable reconnect window instead of
+      // appending a permanent "Connection lost" message while the session may
+      // still be running server-side.
+      _scheduleReconnect(e&&e.error);
     });
 
     source.addEventListener('cancel',e=>{

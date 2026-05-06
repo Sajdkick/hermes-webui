@@ -176,6 +176,8 @@
     if(!runId) return null;
     const status=String(source.status||'').trim().toLowerCase();
     if(!['succeeded','failed','stopped'].includes(status)) return null;
+    const metadata=(source.metadata&&typeof source.metadata==='object')?source.metadata:{};
+    if(status==='succeeded'&&metadata.playPipelineTriggeredAt) return null;
     const createdAt=compatNotificationTimestamp(source.completedAt||source.updatedAt||source.createdAt||0);
     const payload={
       runId,

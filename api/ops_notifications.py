@@ -268,25 +268,43 @@ def _play_notification(project: dict, status: dict) -> dict | None:
     else:
         return None
     project_name = _text(project.get("name") or project.get("fullName") or project_id, limit=256) or project_id
+    terminal_target = status.get("terminalTarget") if isinstance(status.get("terminalTarget"), dict) else {}
+    run_id = _text(status.get("runId") or terminal_target.get("runId") or terminal_target.get("run_id"), limit=256)
+    task_id = _text(status.get("taskId") or terminal_target.get("taskId") or terminal_target.get("task_id"), limit=256)
+    session_id = _text(status.get("sessionId") or terminal_target.get("sessionId") or terminal_target.get("session_id"), limit=256)
+    task = {"id": "", "text": "", "grade": "green", "done": False}
+    if task_id:
+        try:
+            resolved = ops_projects.get_ops_project_task(project_id, task_id)
+            resolved_task = resolved.get("task") if isinstance(resolved, dict) else None
+            if isinstance(resolved_task, dict):
+                task = {
+                    "id": _text(resolved_task.get("id"), limit=256),
+                    "text": _text(resolved_task.get("text"), limit=512),
+                    "grade": _text(resolved_task.get("grade"), limit=64) or "green",
+                    "done": resolved_task.get("done") is True,
+                }
+        except Exception:
+            task = {"id": task_id, "text": "", "grade": "green", "done": False}
+    key_target = run_id or session_id or task_id
+    key_parts = ["play", project_id]
+    if key_target:
+        key_parts.append(key_target)
+    key_parts.extend([play_status, status_at])
     return {
-        "notificationKey": f"play:{project_id}:{play_status}:{status_at}",
+        "notificationKey": ":".join(key_parts),
         "kind": "play",
         "message": message,
         "project": {
             "id": project_id,
             "name": project_name,
         },
-        "task": {
-            "id": "",
-            "text": "",
-            "grade": "green",
-            "done": False,
-        },
+        "task": task,
         "terminalTarget": {
             "projectId": project_id,
-            "taskId": "",
-            "sessionId": "",
-            "runId": "",
+            "taskId": task_id,
+            "sessionId": session_id,
+            "runId": run_id,
         },
         "inspectUrl": inspect_url,
         "playStatus": play_status,

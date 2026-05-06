@@ -28,13 +28,20 @@
       return String(ref.sessionKey||ref.session_id||ref.sessionId||'').trim();
     }
 
+    function isHomeQuickTaskFieldActive(){
+      if(OPS.view!=='home')return false;
+      const active=documentRef&&documentRef.activeElement;
+      if(!active||typeof active.closest!=='function')return false;
+      return !!active.closest('[data-ops-quick-field]');
+    }
+
     function startNotificationPolling(){
       if(notificationPollTimer)return;
       notificationPollTimer=setInterval(async()=>{
         if(!windowRef._opsDashboardOpen)return;
         try{
           await loadNotifications();
-          renderCurrentOpsView();
+          if(OPS.view==='home'&&!isHomeQuickTaskFieldActive())renderCurrentOpsView();
         }catch(e){
           // Keep polling quiet; explicit refresh surfaces errors.
         }

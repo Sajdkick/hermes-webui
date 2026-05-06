@@ -287,6 +287,7 @@ def _enrich_run(run: dict) -> dict:
     resolved_session_id = _text((session or {}).get("session_id"), limit=128) or stored_session_id
     requests = _run_requests_for_session(resolved_session_id)
     readable_output = _readable_output_state(resolved_session_id)
+    stored_status = _status(run.get("status"), default="running")
     status = _derive_status(run, session, requests, readable_output)
     updated_at = run.get("updatedAt")
     if isinstance(session, dict):
@@ -295,7 +296,7 @@ def _enrich_run(run: dict) -> dict:
         updated_at = _to_iso(readable_output.get("updatedAt")) or updated_at
     lineage_root_id = _text((session or {}).get("_lineage_root_id"), limit=128)
     lineage_tip_id = _text((session or {}).get("_lineage_tip_id"), limit=128) or resolved_session_id
-    return {
+    enriched = {
         **run,
         "sessionId": resolved_session_id,
         "linkedSessionId": stored_session_id,
@@ -319,6 +320,12 @@ def _enrich_run(run: dict) -> dict:
         },
         "runUrl": run_url(str(run.get("id") or "")),
     }
+    play_metadata = _maybe_start_play_pipeline_for_terminal_run(enriched, previous_status=stored_status)
+    if play_metadata:
+        metadata = enriched.get("metadata") if isinstance(enriched.get("metadata"), dict) else {}
+        enriched["metadata"] = _json_safe({**metadata, **play_metadata})
+        enriched["updatedAt"] = play_metadata.get("playPipelineTriggeredAt") or play_metadata.get("playPipelineAttemptedAt") or enriched["updatedAt"]
+    return enriched
 
 
 def create_task_run(project_id: str, task_id: str, session_id: str, *, title: str = "", summary: str = "") -> dict:
@@ -433,6 +440,7 @@ def update_ops_run(run_id: str, updates: dict | None = None) -> dict:
     payload = updates if isinstance(updates, dict) else {}
     index, runs, current = _load_run(run_id)
     updated = dict(current)
+    current_status = _status(current.get("status"), default="running")
     if "title" in payload:
         title = _text(payload.get("title"), limit=256)
         if not title:
@@ -463,7 +471,58 @@ def update_ops_run(run_id: str, updates: dict | None = None) -> dict:
     runs[index] = _normalize_run(updated)
     with _LOCK:
         _write_runs(runs)
-    return _enrich_run(runs[index])
+    _maybe_start_play_pipeline_for_terminal_run(runs[index], previous_status=current_status)
+    return get_ops_run(str(runs[index].get("id") or ""))
+
+
+def _maybe_start_play_pipeline_for_terminal_run(run: dict, *, previous_status: str = "") -> dict | None:
+    """Start Play automatically when a successful task run has valid Play config."""
+    status = _status(run.get("status"), default="running")
+    if status != "succeeded" or previous_status in RUN_TERMINAL_STATUSES:
+        return
+    project_id = _text(run.get("projectId"), limit=128)
+    if not project_id:
+        return
+    metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    if metadata.get("playPipelineTriggeredAt"):
+        return
+    try:
+        from api import play_pipeline
+
+        config_info = play_pipeline.get_project_play_config_file_info(project_id)
+        if config_info.get("valid") is not True:
+            return
+        status_payload = play_pipeline.start_project_play_pipeline(
+            project_id,
+            {
+                "runId": _text(run.get("id"), limit=128),
+                "taskId": _text(run.get("taskId"), limit=128),
+                "sessionId": _text(run.get("sessionId"), limit=128),
+            },
+        )
+        play_metadata = {
+            "playPipelineTriggeredAt": _now_iso(),
+            "playPipelineId": _text(status_payload.get("pipelineId"), limit=128),
+            "playPipelineStatus": _text(status_payload.get("status"), limit=64),
+        }
+    except Exception as exc:
+        play_metadata = {
+            "playPipelineAttemptedAt": _now_iso(),
+            "playPipelineError": _text(str(exc), limit=1000),
+        }
+    with _LOCK:
+        runs = _read_runs()
+        for index, item in enumerate(runs):
+            if item.get("id") != run.get("id"):
+                continue
+            next_item = dict(item)
+            next_metadata = next_item.get("metadata") if isinstance(next_item.get("metadata"), dict) else {}
+            next_item["metadata"] = _json_safe({**next_metadata, **play_metadata})
+            next_item["updatedAt"] = _now_iso()
+            runs[index] = _normalize_run(next_item)
+            _write_runs(runs)
+            return play_metadata
+    return play_metadata
 
 
 def complete_ops_run(run_id: str, body: dict | None = None) -> dict:

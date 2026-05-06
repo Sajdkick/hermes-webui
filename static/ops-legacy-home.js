@@ -1013,11 +1013,18 @@
 
     function renderProjectSessionRows(project,sessionsOverride){
       const sessions=Array.isArray(sessionsOverride)?sessionsOverride:projectSessionsFor(project,OPS.sessions);
-      const rows=sessions.length?sessions.map(session=>renderSessionWorkspaceRow(session,project)).join(''):`<div class="ops-project-session-empty">No active sessions for this project.</div>`;
+      const count=sessions.length;
+      const rows=count?sessions.map(session=>renderSessionWorkspaceRow(session,project)).join(''):`<div class="ops-project-session-empty">No active sessions for this project.</div>`;
+      const summary=count
+        ? `${count} active session${count===1?'':'s'}`
+        : 'No active sessions';
       return `
-        <div class="ops-project-sessions">
-          ${rows}
-        </div>
+        <details class="ops-project-sessions" data-ops-project-sessions="${esc(project&&project.id||'')}">
+          <summary class="ops-project-sessions-summary">${esc(summary)}</summary>
+          <div class="ops-project-sessions-body">
+            ${rows}
+          </div>
+        </details>
       `;
     }
 

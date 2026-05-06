@@ -268,14 +268,50 @@
           }
         }
         if(action==='archive-completed'){
-          await api(projectUrl(OPS.currentProject.id,'/tasks/archive-completed'),{method:'POST',body:JSON.stringify({})});
-          return await refreshDetail();
+          const projectKey=OPS.currentProject&&OPS.currentProject.id;
+          const archivedAt=new Date().toISOString();
+          const optimistic=[];
+          const epics=Array.isArray(OPS.taskData&&OPS.taskData.epics)?OPS.taskData.epics:[];
+          epics.forEach(epic=>(epic.tasks||[]).forEach(task=>{
+            if(task&&task.done&&!task.archived){
+              optimistic.push({task,archived:task.archived,archivedAt:task.archivedAt});
+              task.archived=true;
+              task.archivedAt=archivedAt;
+            }
+          }));
+          if(optimistic.length)renderProjectDetail();
+          try{
+            await api(projectUrl(projectKey,'/tasks/archive-completed'),{method:'POST',body:JSON.stringify({})});
+            return await refreshDetail();
+          }catch(error){
+            optimistic.forEach(entry=>{
+              entry.task.archived=entry.archived;
+              if(entry.archivedAt===undefined)delete entry.task.archivedAt;
+              else entry.task.archivedAt=entry.archivedAt;
+            });
+            await refreshDetail().catch(()=>renderProjectDetail());
+            throw error;
+          }
         }
         if(action==='delete-task'){
           const ok=await showConfirmDialog({title:'Delete task',message:'This removes the task from the shared project task file.',confirmLabel:'Delete',danger:true,focusCancel:true});
           if(!ok)return;
-          await api(projectUrl(OPS.currentProject.id,`/tasks/${encodeURIComponent(taskId)}/delete`),{method:'POST',body:JSON.stringify({})});
-          return await refreshDetail();
+          const match=findTask(taskId);
+          const taskList=match&&match.epic&&Array.isArray(match.epic.tasks)?match.epic.tasks:null;
+          const taskIndex=taskList?taskList.findIndex(task=>String(task&&task.id||'')===String(taskId||'')):-1;
+          const removedTask=taskIndex>=0?taskList[taskIndex]:null;
+          if(taskIndex>=0){
+            taskList.splice(taskIndex,1);
+            renderProjectDetail();
+          }
+          try{
+            await api(projectUrl(OPS.currentProject.id,`/tasks/${encodeURIComponent(taskId)}/delete`),{method:'POST',body:JSON.stringify({})});
+            return await refreshDetail();
+          }catch(error){
+            if(taskList&&taskIndex>=0&&removedTask)taskList.splice(taskIndex,0,removedTask);
+            await refreshDetail().catch(()=>renderProjectDetail());
+            throw error;
+          }
         }
         if(action==='delete-epic'){
           const ok=await showConfirmDialog({title:'Delete epic',message:'This removes the epic and its tasks from the shared project task file.',confirmLabel:'Delete',danger:true,focusCancel:true});
@@ -294,7 +330,7 @@
       event.preventDefault();
       const kind=form.dataset.opsSubmit;
       const data=Object.fromEntries(new FormData(form).entries());
-      const useGlobalBusy=kind!=='quick-task'&&kind!=='notification-response'&&kind!=='run-request-response'&&kind!=='github-search'&&kind!=='auto-approval-rule';
+      const useGlobalBusy=kind!=='quick-task'&&kind!=='save-task'&&kind!=='notification-response'&&kind!=='run-request-response'&&kind!=='github-search'&&kind!=='auto-approval-rule';
       if(useGlobalBusy)setBusy(true);
       try{
         if(kind==='notification-response'){
@@ -362,12 +398,45 @@
             await api(projectUrl(OPS.currentProject.id,`/tasks/${encodeURIComponent(data.taskId)}`),{method:'POST',body:JSON.stringify(body)});
             OPS.editingTask=null;
           }else{
-            const created=await api(projectUrl(OPS.currentProject.id,'/tasks'),{method:'POST',body:JSON.stringify(body)});
-            if(data.goalMode==='on'&&created&&created.task&&created.task.id){
+            const epics=Array.isArray(OPS.taskData&&OPS.taskData.epics)?OPS.taskData.epics:[];
+            const targetEpic=epics.find(epic=>String(epic&&epic.id||'')===String(data.epicId||''))||epics[0]||null;
+            const taskList=targetEpic&&Array.isArray(targetEpic.tasks)?targetEpic.tasks:null;
+            const optimisticTask={
+              id:`optimistic-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+              text:String(data.text||''),
+              done:false,
+              dependencies:[],
+              grade:body.grade||'green',
+              flags:body.flags,
+              markers:body.markers,
+              images:body.images,
+              createdAt:new Date().toISOString(),
+              pendingCreate:true,
+            };
+            if(taskList){
+              taskList.push(optimisticTask);
               OPS.taskFormDraft=null;
-              await refreshDetail();
-              await executeTask(created.task.id,{goalMode:true});
-              return;
+              renderProjectDetail();
+            }
+            try{
+              const created=await api(projectUrl(OPS.currentProject.id,'/tasks'),{method:'POST',body:JSON.stringify(body)});
+              if(taskList&&created&&created.task){
+                const index=taskList.findIndex(task=>task&&task.id===optimisticTask.id);
+                if(index>=0)taskList[index]=created.task;
+              }
+              if(data.goalMode==='on'&&created&&created.task&&created.task.id){
+                OPS.taskFormDraft=null;
+                await refreshDetail();
+                await executeTask(created.task.id,{goalMode:true});
+                return;
+              }
+            }catch(error){
+              if(taskList){
+                const index=taskList.findIndex(task=>task&&task.id===optimisticTask.id);
+                if(index>=0)taskList.splice(index,1);
+              }
+              await refreshDetail().catch(()=>renderProjectDetail());
+              throw error;
             }
           }
           OPS.taskFormDraft=null;
