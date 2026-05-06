@@ -466,11 +466,14 @@
       return renderProjects();
     }
 
-    async function loadProjectDetail(projectId){
-      const [data,sessionsData]=await Promise.all([
-        api(projectUrl(projectId,'/tasks')),
-        AgentBridgeRef.sessions.list().catch(()=>({sessions:[]})),
-        loadOpsRuns({projectId}).catch(()=>[]),
+    function refreshProjectDetailAfterSecondaryLoad(projectId){
+      if(!windowRef||!windowRef._opsDashboardOpen||OPS.view!=='project-detail')return;
+      if(!OPS.currentProject||OPS.currentProject.id!==projectId)return;
+      renderProjectDetail();
+    }
+
+    function loadProjectDetailSecondary(projectId){
+      return Promise.allSettled([
         refreshProjectPlayStatus(projectId,{render:false}).catch(()=>null),
         refreshProjectGitStatus(projectId,{render:false}).catch(()=>null),
         loadProjectDependencyStatus(projectId,{render:false}).catch(()=>null),
@@ -478,11 +481,19 @@
         loadProjectReviewRequests(projectId,{render:false}).catch(()=>null),
         loadProjectDeployment(projectId,{render:false}).catch(()=>null),
         loadProjectDatabase(projectId,{render:false}).catch(()=>null),
+      ]).then(()=>refreshProjectDetailAfterSecondaryLoad(projectId));
+    }
+
+    async function loadProjectDetail(projectId){
+      const [data,sessionsData]=await Promise.all([
+        api(projectUrl(projectId,'/tasks')),
+        AgentBridgeRef.sessions.list().catch(()=>({sessions:[]})),
       ]);
       OPS.taskData=data;
       OPS.sessions=Array.isArray(sessionsData.sessions)?sessionsData.sessions:[];
       OPS.taskDataByProject[projectId]=data;
       OPS.currentProject=data.project||OPS.currentProject||findProject(projectId);
+      void loadProjectDetailSecondary(projectId);
       return OPS.taskData;
     }
 

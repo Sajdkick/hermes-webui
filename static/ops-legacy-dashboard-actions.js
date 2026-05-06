@@ -245,9 +245,27 @@
         }
         if(action==='execute-task')return await executeTask(taskId);
         if(action==='complete-task'){
-          await AgentBridgeRef.sessions.completeTask(OPS.currentProject.id,taskId,{});
-          await refreshOpsSessions().catch(()=>OPS.sessions||[]);
-          return await refreshDetail();
+          const projectKey=OPS.currentProject&&OPS.currentProject.id;
+          const match=findTask(taskId);
+          if(match&&match.task){
+            Object.assign(match.task,{
+              done:true,
+              qaStatus:'',
+              moreWork:'',
+              inProgress:false,
+              completedAt:new Date().toISOString(),
+            });
+            renderProjectDetail();
+          }
+          try{
+            const result=await AgentBridgeRef.sessions.completeTask(projectKey,taskId,{});
+            if(result&&result.task&&match&&match.task)Object.assign(match.task,result.task);
+            await refreshOpsSessions().catch(()=>OPS.sessions||[]);
+            return await refreshDetail();
+          }catch(error){
+            await refreshDetail().catch(()=>null);
+            throw error;
+          }
         }
         if(action==='archive-completed'){
           await api(projectUrl(OPS.currentProject.id,'/tasks/archive-completed'),{method:'POST',body:JSON.stringify({})});

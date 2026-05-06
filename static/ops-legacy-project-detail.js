@@ -626,8 +626,6 @@
         renderProjectReviewRequests(project),
         renderProjectDeployment(project),
         renderProjectDatabase(project),
-        renderProjectRunActivity(project),
-        renderRunDetailPanel({hideProject:true}),
       ].filter(Boolean).join('');
       const archived=filters.status==='archived';
       const doneCount=Number(filterSummary&&filterSummary.done||0);
@@ -656,6 +654,8 @@
                     Archived
                   </button>
                 </div>
+                <button class="menu-action-btn secondary small" type="button" data-ops-action="back-home">Ops dashboard</button>
+                <button class="menu-action-btn secondary small" type="button" data-ops-action="back-projects">Projects</button>
                 <button class="tasks-archive-btn" type="button" data-ops-action="archive-completed" ${archived||!doneCount?'disabled':''}>Archive completed</button>
                 <button class="tasks-form-toggle" type="button" data-ops-action="toggle-task-create" aria-expanded="${showCreateBand?'true':'false'}">
                   ${showCreateBand?'Hide create fields':'Show create fields'}
@@ -700,12 +700,18 @@
                   </div>
                   <div class="tasks-card-body">
                     <div class="tasks-card-actions">
-                      <button class="menu-action-btn secondary small" type="button" data-ops-action="back-projects">Back to projects</button>
                       ${renderProjectPlayControls(project,{detail:true})}
                       <button class="menu-action-btn danger small" type="button" data-ops-action="delete-project" data-project-id="${esc(project.id)}">Delete project</button>
                     </div>
                     ${!archived?`<button class="menu-action-btn secondary small" type="button" data-ops-action="execute-ready-tasks" ${!projectId||(!actionableCount&&!executeReadyBusy)?'disabled':''} title="Ask Codex to execute ready and needs-more-work tasks in sequence.">${executeReadyBusy?'Starting...':'Execute ready tasks with AI'}${!executeReadyBusy&&actionableCount?` (${actionableCount})`:''}</button>`:''}
-                    ${secondaryPanels||'<div class="repo-empty">No secondary tools for this project.</div>'}
+                    ${secondaryPanels?`
+                      <details class="ops-project-secondary-panels">
+                        <summary>Advanced project tools</summary>
+                        <div class="ops-project-secondary-panels-body">
+                          ${secondaryPanels}
+                        </div>
+                      </details>
+                    `:'<div class="repo-empty">No secondary tools for this project.</div>'}
                   </div>
                 </div>
               </section>

@@ -768,12 +768,21 @@
       OPS.quickTaskSelectionEnd=typeof field.selectionEnd==='number'?field.selectionEnd:null;
     }
 
-    function isQuickTaskProjectPickerActive(){
+    function activeQuickTaskField(){
       const active=documentRef&&documentRef.activeElement;
-      if(!active||typeof active.closest!=='function')return false;
+      if(!active||typeof active.closest!=='function')return null;
       const field=active.closest('[data-ops-quick-field]');
-      if(!field||!root()||!root().contains(field))return false;
-      return String(field.dataset&&field.dataset.opsQuickField||'').trim()==='projectId';
+      if(!field||!root()||!root().contains(field))return null;
+      return field;
+    }
+
+    function isQuickTaskProjectPickerActive(){
+      const field=activeQuickTaskField();
+      return String(field&&field.dataset&&field.dataset.opsQuickField||'').trim()==='projectId';
+    }
+
+    function isQuickTaskFieldActive(){
+      return !!activeQuickTaskField();
     }
 
     function restoreQuickTaskFocus(){
@@ -1016,7 +1025,7 @@
       }finally{
         OPS.sessionActivityBusy=false;
         if(settings.render!==false&&windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home'){
-          if(isQuickTaskProjectPickerActive()){
+          if(isQuickTaskFieldActive()){
             OPS.sessionActivityRenderPending=true;
             return;
           }
