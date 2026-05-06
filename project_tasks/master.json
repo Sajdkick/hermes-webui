@@ -13,19 +13,9 @@
           "createdAt": "2026-05-04T07:52:00.000Z",
           "markers": [
             "AI suggestion"
-          ]
-        },
-        {
-          "id": "b95cbda9-dd30-4f22-b399-3153175057b4",
-          "text": "Make the restored `/ops` Projects view render project cards immediately and hydrate session/count/play/git metadata in the background instead of blocking on the full enrichment pass, which currently keeps the screen on `Loading projects...` for several seconds on larger project sets.",
-          "done": false,
-          "dependencies": [],
-          "grade": "green",
-          "createdAt": "2026-05-05T04:51:00.000Z",
-          "markers": [
-            "AI suggestion"
           ],
-          "qaStatus": "ready-for-test"
+          "qaStatus": "needs-more-work",
+          "moreWork": "I could not find the stale `@openai/.codex-*` launch path or the prod-target restart logic inside this Hermes repo. The evidence points to an external Cloud Terminal runtime/config issue outside `/home/ubuntu/cloud-terminal-data/projects/hermes-webui` that needs reproduction details or a coordinated fix in the sibling Cloud Terminal backend/runtime code."
         },
         {
           "id": "4fd0fd64-1fb4-4221-8dbd-cf3c4025fd1c",
@@ -36,7 +26,8 @@
           "createdAt": "2026-05-05T05:56:00.000Z",
           "markers": [
             "AI suggestion"
-          ]
+          ],
+          "qaStatus": "ready-for-test"
         },
         {
           "id": "de8548d7-fbc8-4e30-b70a-3e299133b27e",
@@ -47,7 +38,8 @@
           "createdAt": "2026-05-05T07:10:00.000Z",
           "markers": [
             "AI suggestion"
-          ]
+          ],
+          "qaStatus": "ready-for-test"
         },
         {
           "id": "7f9d2304-44fa-4650-b53c-9839f5fe8fdb",
@@ -58,7 +50,110 @@
           "createdAt": "2026-05-05T19:18:00.000Z",
           "markers": [
             "AI suggestion"
-          ]
+          ],
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "b090c666-c482-4883-9354-bd13a5835ebf",
+          "text": "When I am in the epics page and try to write a task text for a new task, it is wiped clean every 5 seconds so its almost impossible to add a new task. Fix this.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T05:33:46.298Z",
+          "createdBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "updatedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "6b066c28-7946-488a-870d-3c629df8ab0e",
+          "text": "When I click the session under the active sessions in the ops dashboard I should be taken to the session, right now nothing happens.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T05:34:08.622Z",
+          "createdBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "updatedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "b29732a6-e9ce-45c0-8571-48b7b1057cae",
+          "text": "When I click complete on a task in the epics page it says \"Internal server error\"",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T05:34:13.931Z",
+          "createdBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "updatedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "e510dc0f-c6e8-4a6d-ae4f-25172daa4505",
+          "text": "When on mobile and pressing the back button it doesn't go back properly, if I am in the ops dashboard or in a session or in the project page it always throws me back to the landing page for Hermes web ui",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T05:34:22.678Z",
+          "createdBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "updatedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "54f6c2fc-790c-4880-94ee-34f187660d2c",
+          "text": "I seem to only be getting done notifications and not any play notifications. I want you to analyse the project in depth and make sure that we have play notifications correctly set up.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T05:34:30.642Z",
+          "createdBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "updatedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "3e2ab248-2a62-426b-97bb-3ecb5f600848",
+          "text": "The quick task runner UI lacks the toggle for setting the task as a goal, look at how it is done in cloud terminal",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T05:34:37.958Z",
+          "createdBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "updatedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "qaStatus": "ready-for-test"
         }
       ],
       "createdBy": {
@@ -84,7 +179,7 @@
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-04T16:17:17.931Z",
-          "lastSessionAt": "2026-05-05T16:34:42.060Z"
+          "qaStatus": "ready-for-test"
         },
         {
           "id": "27f67178-57b1-4671-83a8-c63ae13e4b1c",
@@ -94,12 +189,12 @@
           "grade": "green",
           "createdAt": "2026-05-05T10:27:06.385Z",
           "startedAt": "2026-05-05T10:27:06.932Z",
-          "qaStatus": "ready-for-test",
           "updatedBy": {
             "id": "pontus",
             "label": "Pontus"
           },
-          "lastSessionAt": "2026-05-05T17:51:54.406Z"
+          "lastSessionAt": "2026-05-05T17:51:54.406Z",
+          "qaStatus": "ready-for-test"
         },
         {
           "id": "096922cb-5426-426f-82c6-68c2022269ae",
@@ -109,11 +204,11 @@
           "grade": "green",
           "createdAt": "2026-05-05T16:37:00.968Z",
           "startedAt": "2026-05-05T16:37:01.289Z",
-          "qaStatus": "ready-for-test",
           "updatedBy": {
             "id": "pontus",
             "label": "Pontus"
-          }
+          },
+          "qaStatus": "ready-for-test"
         }
       ]
     },
@@ -127,7 +222,8 @@
           "done": false,
           "dependencies": [],
           "grade": "green",
-          "createdAt": "2026-05-04T16:20:05.989Z"
+          "createdAt": "2026-05-04T16:20:05.989Z",
+          "qaStatus": "ready-for-test"
         },
         {
           "id": "961c5dbb-04a4-4d0d-b751-8cad1814f4a8",
@@ -136,7 +232,7 @@
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-04T16:23:44.141Z",
-          "lastSessionAt": "2026-05-05T10:20:14.683Z"
+          "qaStatus": "ready-for-test"
         },
         {
           "id": "f50c1131-379e-4216-b04a-3dde1ee3ff67",
@@ -145,7 +241,29 @@
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-04T16:26:39.505Z",
-          "lastSessionAt": "2026-05-05T10:20:08.011Z"
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "1035d0de-c0b0-46cf-bba1-4746fb7a4630",
+          "text": "Analyze the current branch tasks JSON file and implement tasks one-by-one without waiting for user input. Focus only on tasks that are actionable now: status \"ready\" and status \"needs-more-work\". Keep working sequentially until there are no actionable tasks left.\nBefore starting execution, read AGENTS.md for shared project instructions.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T05:34:40.736Z",
+          "startedAt": "2026-05-06T05:34:41.300Z",
+          "createdBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "startedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "updatedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "qaStatus": "ready-for-test"
         }
       ]
     }

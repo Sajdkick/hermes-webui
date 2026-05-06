@@ -14,9 +14,11 @@
     const renderNotifications=ctx&&ctx.renderNotifications;
     const normalizedAutoApprovalPolicy=ctx&&ctx.normalizedAutoApprovalPolicy;
     const loadProjects=ctx&&ctx.loadProjects;
+    const openProjectDetail=ctx&&ctx.openProjectDetail;
     const loadNotifications=ctx&&ctx.loadNotifications;
     const loadOpsRuns=ctx&&ctx.loadOpsRuns;
     const loadNotificationDiagnostics=ctx&&ctx.loadNotificationDiagnostics;
+    const openOpsSession=ctx&&ctx.openOpsSession;
     const findProject=ctx&&ctx.findProject;
     const projectUsesBranchTitle=ctx&&ctx.projectUsesBranchTitle;
     const projectBranchLabel=ctx&&ctx.projectBranchLabel;
@@ -670,6 +672,82 @@
       },0);
     }
 
+    function menuTargetProject(){
+      const quickProjectId=normalizeQuickTaskProjectSelection();
+      if(quickProjectId){
+        const quickProject=findProject(quickProjectId);
+        if(quickProject&&quickProject.id)return quickProject;
+      }
+      if(OPS.currentProject&&OPS.currentProject.id)return OPS.currentProject;
+      const sessionProjectId=String((sessionActivityEntries().find(session=>String(session&&session.projectId||'').trim())||{}).projectId||'').trim();
+      if(sessionProjectId){
+        const sessionProject=findProject(sessionProjectId);
+        if(sessionProject&&sessionProject.id)return sessionProject;
+      }
+      return Array.isArray(OPS.projects)&&OPS.projects.length?OPS.projects[0]:null;
+    }
+
+    function menuLatestSession(project){
+      const targetProjectId=String(project&&project.id||'').trim();
+      const entries=sessionActivityEntries().slice().sort((left,right)=>sessionActivitySortKey(right)-sessionActivitySortKey(left));
+      if(targetProjectId){
+        const matching=entries.find(session=>String(session&&session.projectId||'').trim()===targetProjectId);
+        if(matching)return matching;
+      }
+      return entries[0]||null;
+    }
+
+    async function switchMainPanel(panel){
+      if(windowRef&&typeof windowRef.switchPanel==='function'){
+        await windowRef.switchPanel(panel);
+        if(typeof windowRef.closeOpsDashboard==='function')windowRef.closeOpsDashboard();
+        return true;
+      }
+      if(windowRef&&windowRef.location&&typeof windowRef.location.assign==='function'){
+        windowRef.location.assign(panel==='chat'?'/':`/?panel=${encodeURIComponent(panel)}`);
+        return true;
+      }
+      return false;
+    }
+
+    async function openMainSession(session,options){
+      const sessionKey=sessionRefValue(session);
+      if(!sessionKey||typeof openOpsSession!=='function')return false;
+      await openOpsSession(sessionKey);
+      if(options&&options.openWorkspace&&windowRef&&typeof windowRef.toggleWorkspacePanel==='function'){
+        windowRef.toggleWorkspacePanel(true);
+      }
+      return true;
+    }
+
+    async function openDeploymentDestination(){
+      const project=menuTargetProject();
+      if(project&&project.id&&typeof openProjectDetail==='function'){
+        return openProjectDetail(project.id);
+      }
+      OPS.view='projects';
+      OPS.currentProject=null;
+      OPS.taskData=null;
+      OPS.showCreate=false;
+      setDashboardTopbar('Projects','');
+      await loadProjects();
+      return renderCurrentOpsView();
+    }
+
+    async function openFilesDestination(){
+      const project=menuTargetProject();
+      const session=menuLatestSession(project);
+      if(await openMainSession(session,{openWorkspace:true}))return true;
+      return switchMainPanel('workspaces');
+    }
+
+    async function openTerminalDestination(){
+      const project=menuTargetProject();
+      const session=menuLatestSession(project);
+      if(await openMainSession(session))return true;
+      return switchMainPanel('chat');
+    }
+
     function rememberQuickTaskFocus(){
       const active=documentRef&&documentRef.activeElement;
       if(!active||typeof active.closest!=='function'){
@@ -748,8 +826,13 @@
       const subtitle=sessionWorkspaceSubtitle(session);
       const repo=sessionWorkspaceRepoLabel(session);
       const style=sessionAccentStyle(session,0,'ops-session-row');
+      const sessionKey=sessionRefValue(session);
+      const rowClass=['ops-session',status.kind,sessionKey?'interactive':''].filter(Boolean).join(' ');
+      const rowAttrs=sessionKey
+        ? ` tabindex="0" role="button" data-ops-action="open-session" data-session-key="${esc(sessionKey)}" data-ops-session-row="true"${linkedProject&&linkedProject.id?` data-project-id="${esc(linkedProject.id)}"`:''}`
+        : '';
       return `
-        <div class="ops-session ${esc(status.kind)}" ${style?`style="${esc(style)}"`:''}>
+        <div class="${esc(rowClass)}"${rowAttrs} ${style?`style="${esc(style)}"`:''}>
           <div class="ops-session-main">
             <div class="ops-session-title-row">
               <span class="ops-session-status ${esc(status.kind)}">${esc(status.label)}</span>
@@ -763,8 +846,8 @@
             </div>
           </div>
           <div class="ops-session-actions">
-            <button class="ops-btn" type="button" data-ops-action="open-session" data-session-key="${esc(sessionRefValue(session))}" ${linkedProject&&linkedProject.id?`data-project-id="${esc(linkedProject.id)}"`:''}>${svg.chat}<span>Open session</span></button>
-            <button class="ops-btn danger" type="button" data-ops-action="close-session" data-session-key="${esc(sessionRefValue(session))}" ${linkedProject&&linkedProject.id?`data-project-id="${esc(linkedProject.id)}"`:''}>${svg.close}<span>Close session</span></button>
+            <button class="ops-btn" type="button" data-ops-action="open-session" data-session-key="${esc(sessionKey)}" ${linkedProject&&linkedProject.id?`data-project-id="${esc(linkedProject.id)}"`:''}>${svg.chat}<span>Open session</span></button>
+            <button class="ops-btn danger" type="button" data-ops-action="close-session" data-session-key="${esc(sessionKey)}" ${linkedProject&&linkedProject.id?`data-project-id="${esc(linkedProject.id)}"`:''}>${svg.close}<span>Close session</span></button>
           </div>
         </div>
       `;
@@ -995,6 +1078,10 @@
                 <span class="tasks-field-label">Task</span>
                 <textarea class="task-input menu-quick-task-input" name="text" data-ops-quick-field="text" rows="3" required ${quickTaskDisabled?'disabled':''} placeholder="${OPS.projects.length?'Describe the task you want Codex to execute...':'Create a project first to use quick tasks.'}">${esc(OPS.quickTaskText)}</textarea>
               </label>
+              <label class="menu-inline-toggle" for="opsQuickTaskGoalMode">
+                <input id="opsQuickTaskGoalMode" type="checkbox" name="goalMode" value="on" data-ops-quick-field="goalMode" ${OPS.quickTaskGoalMode?'checked':''} ${quickTaskDisabled?'disabled':''}>
+                <span>Run as standing /goal</span>
+              </label>
               <div class="todo-form-row menu-quick-task-actions">
                 <div class="menu-quick-task-secondary-actions">
                   <button class="menu-action-btn secondary small" type="button" data-ops-action="attach-quick-task-images" ${quickTaskAttachDisabled?'disabled':''}>Attach screenshots</button>
@@ -1024,9 +1111,13 @@
           </section>
           <div class="menu-actions">
             <button class="menu-action-btn" type="button" data-ops-action="open-projects">Projects</button>
+            <button class="menu-action-btn" type="button" data-ops-action="view-deployments">View deployments</button>
             <button class="menu-action-btn" type="button" data-ops-action="show-create-project">Create project</button>
+            <button class="menu-action-btn" type="button" data-ops-action="view-todos">View todos</button>
+            <button class="menu-action-btn" type="button" data-ops-action="view-files">View files</button>
+            <button class="menu-action-btn" type="button" data-ops-action="view-settings">Settings</button>
             <button class="menu-action-btn" type="button" data-ops-action="go-recovery">Recovery</button>
-            <button class="menu-action-btn secondary" type="button" data-ops-action="back-to-hermes">Back to Hermes</button>
+            <button class="menu-action-btn secondary" type="button" data-ops-action="back-to-terminal">Back to terminal</button>
           </div>
         </div>
       `;
@@ -1066,12 +1157,17 @@
         await loadProjects();
         return renderCurrentOpsView();
       }
+      if(action==='view-deployments')return await openDeploymentDestination();
+      if(action==='view-todos')return await switchMainPanel('todos');
+      if(action==='view-files')return await openFilesDestination();
+      if(action==='view-settings')return await switchMainPanel('settings');
       if(action==='go-recovery'){
         if(windowRef&&windowRef.location&&typeof windowRef.location.assign==='function'){
           windowRef.location.assign('/recovery');
         }
         return null;
       }
+      if(action==='back-to-terminal')return await openTerminalDestination();
       if(action==='back-to-hermes'){
         if(windowRef&&windowRef.location&&typeof windowRef.location.assign==='function'){
           windowRef.location.assign('/');
@@ -1201,6 +1297,14 @@
         if(event.key==='Enter'||event.key===' '){
           event.preventDefault();
           item.click();
+          return true;
+        }
+      }
+      const sessionRow=event.target.closest('[data-ops-session-row="true"]');
+      if(sessionRow&&!event.target.closest('.ops-session-actions')){
+        if(event.key==='Enter'||event.key===' '){
+          event.preventDefault();
+          sessionRow.click();
           return true;
         }
       }

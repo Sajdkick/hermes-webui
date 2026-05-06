@@ -95,18 +95,18 @@
         : configured?'No tables loaded.':'Configure database settings through the API to enable read-only inspection.';
       const error=OPS.databaseError?`<div class="ops-status error">${esc(OPS.databaseError)}</div>`:'';
       return `
-        <section class="ops-panel ops-database-panel">
-          <div class="ops-panel-header">
+        <section class="tasks-card ops-database-panel">
+          <div class="tasks-card-header ops-panel-header">
             <div>
-              <h2>Database</h2>
-              <span>${esc(configured?`${settings.kind||'sqlite'} | ${settings.label||settings.path||''}`:'Read-only inspection not configured.')}</span>
+              <div class="tasks-card-title">Database</div>
+              <div class="tasks-card-subtitle">${esc(configured?`${settings.kind||'sqlite'} | ${settings.label||settings.path||''}`:'Read-only inspection not configured.')}</div>
             </div>
-            <div class="ops-database-actions">
-              <button class="ops-btn" type="button" data-ops-action="refresh-database" ${OPS.databaseBusy?'disabled':''}>${svg.refresh}<span>Refresh</span></button>
-              <button class="ops-btn primary" type="button" data-ops-action="inspect-database" ${OPS.databaseBusy||!configured?'disabled':''}>${svg.grid}<span>Tables</span></button>
+            <div class="tasks-card-actions ops-database-actions">
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-database" ${OPS.databaseBusy?'disabled':''}>${svg.refresh}<span>Refresh</span></button>
+              <button class="menu-action-btn small" type="button" data-ops-action="inspect-database" ${OPS.databaseBusy||!configured?'disabled':''}>${svg.grid}<span>Tables</span></button>
             </div>
           </div>
-          <div class="ops-database-body">
+          <div class="tasks-card-body ops-database-body">
             <div class="ops-database-summary">${esc(tableText)}</div>
           </div>
           ${error}
@@ -126,19 +126,19 @@
         ? tables.slice(0,8).map(table=>`${table.name} (${(table.columns||[]).length})`).join(' | ')
         : configured?'No project tables loaded.':'No project database configured; global settings may be inherited.';
       return `
-        <section class="ops-panel ops-project-database-panel">
-          <div class="ops-panel-header">
+        <section class="tasks-card ops-project-database-panel">
+          <div class="tasks-card-header ops-panel-header">
             <div>
-              <h2>Project database</h2>
-              <span>${esc(configured?`${settings.kind||'sqlite'} | ${settings.label||settings.path||''}${settingsData.inherited?' | inherited':''}`:'Read-only project database not configured.')}</span>
+              <div class="tasks-card-title">Project database</div>
+              <div class="tasks-card-subtitle">${esc(configured?`${settings.kind||'sqlite'} | ${settings.label||settings.path||''}${settingsData.inherited?' | inherited':''}`:'Read-only project database not configured.')}</div>
             </div>
-            <div class="ops-database-actions">
-              <button class="ops-btn" type="button" data-ops-action="refresh-project-database" data-project-id="${esc(project.id)}" ${busy?'disabled':''}>${svg.refresh}<span>Refresh</span></button>
-              <button class="ops-btn" type="button" data-ops-action="test-project-database" data-project-id="${esc(project.id)}" ${busy||!configured?'disabled':''}>${svg.check}<span>Test</span></button>
-              <button class="ops-btn primary" type="button" data-ops-action="inspect-project-database" data-project-id="${esc(project.id)}" ${busy||!configured?'disabled':''}>${svg.grid}<span>Tables</span></button>
+            <div class="tasks-card-actions ops-database-actions">
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-project-database" data-project-id="${esc(project.id)}" ${busy?'disabled':''}>${svg.refresh}<span>Refresh</span></button>
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="test-project-database" data-project-id="${esc(project.id)}" ${busy||!configured?'disabled':''}>${svg.check}<span>Test</span></button>
+              <button class="menu-action-btn small" type="button" data-ops-action="inspect-project-database" data-project-id="${esc(project.id)}" ${busy||!configured?'disabled':''}>${svg.grid}<span>Tables</span></button>
             </div>
           </div>
-          <div class="ops-database-body">
+          <div class="tasks-card-body ops-database-body">
             <div class="ops-database-summary">${esc(tableText)}</div>
           </div>
         </section>

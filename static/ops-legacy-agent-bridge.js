@@ -94,6 +94,43 @@
     const taskId=String(source.task&&source.task.id||'').trim();
     const taskText=String(source.task&&source.task.text||taskId||'').trim();
     const sessionId=String(source.sessionId||source.session_id||'').trim();
+    if(kind==='play'){
+      const createdAt=compatNotificationTimestamp(source.updatedAt||source.createdAt||source.readyAt||0);
+      const playStatus=String(source.playStatus||source.status||'ready').trim()||'ready';
+      const playNeedsRepair=source.playNeedsRepair===true;
+      const playFallbackError=String(source.playFallbackError||'').trim();
+      const terminalTarget=source.terminalTarget&&typeof source.terminalTarget==='object'
+        ? cloneCompat(source.terminalTarget)
+        : {
+            runId:'',
+            sessionId:'',
+            projectId,
+            taskId:'',
+          };
+      return {
+        id:notificationId,
+        kind:'play',
+        message:String(source.message||source.statusSummary||'Play update available.').trim()||'Play update available.',
+        session_id:sessionId,
+        project_id:projectId,
+        task_id:taskId,
+        project_name:projectName,
+        session_title:projectName||taskText||'Play',
+        created_at:createdAt,
+        updated_at:createdAt,
+        inspectUrl:String(source.inspectUrl||'').trim(),
+        playStatus:playStatus,
+        playNeedsRepair:playNeedsRepair,
+        playFallbackError:playFallbackError,
+        terminalTarget:terminalTarget,
+        payload:{
+          projectId,
+          projectName,
+          taskId,
+          sessionId,
+        },
+      };
+    }
     const createdAt=compatNotificationTimestamp(source.requestedAt||source.expiresAt||0);
     const isApproval=kind==='approval';
     const payload=isApproval

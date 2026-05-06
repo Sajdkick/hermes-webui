@@ -19,8 +19,82 @@
     const stopPlayStatusPollingRef=ctx&&ctx.stopPlayStatusPollingRef;
     const stopQuickTaskDictationRef=ctx&&ctx.stopQuickTaskDictationRef;
     const setBusy=ctx&&ctx.setBusy;
+    const OPS_HISTORY_MARKER='hermesOpsLegacyDashboard';
     if(!OPS||typeof root!=='function'||typeof layout!=='function'||typeof navBtn!=='function'||typeof esc!=='function'){
       return {};
+    }
+
+    function standaloneHistoryEnabled(){
+      return !!(
+        windowRef
+        && windowRef.__OPS_LEGACY_STANDALONE__
+        && windowRef.history
+        && typeof windowRef.history.replaceState==='function'
+      );
+    }
+
+    function normalizeHistoryState(state){
+      if(!state||state[OPS_HISTORY_MARKER]!==true)return null;
+      const view=String(state.view||'').trim();
+      if(view==='project-detail'){
+        const projectId=String(state.projectId||'').trim();
+        if(!projectId)return {view:'projects',projectId:''};
+        return {view,projectId};
+      }
+      if(view==='projects')return {view,projectId:''};
+      return {view:'home',projectId:''};
+    }
+
+    function currentHistoryUrl(){
+      if(!windowRef||!windowRef.location)return '';
+      return String(windowRef.location.pathname||'')
+        + String(windowRef.location.search||'')
+        + String(windowRef.location.hash||'');
+    }
+
+    function syncHistoryState(view,projectId,options){
+      if(!standaloneHistoryEnabled())return null;
+      const opts=options&&typeof options==='object'?options:{};
+      const normalizedView=String(view||'').trim()==='project-detail'
+        ? 'project-detail'
+        : (String(view||'').trim()==='projects'?'projects':'home');
+      const normalizedProjectId=normalizedView==='project-detail'?String(projectId||'').trim():'';
+      const nextState={
+        [OPS_HISTORY_MARKER]:true,
+        view:normalizedView,
+        projectId:normalizedProjectId,
+      };
+      const current=normalizeHistoryState(windowRef.history.state);
+      const mode=opts.mode==='push'?'push':'replace';
+      if(current&&current.view===nextState.view&&current.projectId===nextState.projectId){
+        if(mode==='replace'){
+          windowRef.history.replaceState(nextState,'',currentHistoryUrl());
+        }
+        return nextState;
+      }
+      if(mode==='push'&&typeof windowRef.history.pushState==='function'){
+        windowRef.history.pushState(nextState,'',currentHistoryUrl());
+      }else{
+        windowRef.history.replaceState(nextState,'',currentHistoryUrl());
+      }
+      return nextState;
+    }
+
+    if(windowRef){
+      windowRef.__opsLegacyReadHistoryState=normalizeHistoryState;
+      windowRef.__opsLegacySyncHistoryState=syncHistoryState;
+      if(!windowRef.__opsLegacyHistoryListenerBound&&typeof windowRef.addEventListener==='function'){
+        windowRef.addEventListener('popstate',event=>{
+          if(typeof windowRef.__opsLegacyHandleHistoryState!=='function')return;
+          const state=normalizeHistoryState(event&&event.state);
+          if(!state)return;
+          try{
+            const result=windowRef.__opsLegacyHandleHistoryState(state);
+            if(result&&typeof result.catch==='function')result.catch(()=>{});
+          }catch(_error){}
+        });
+        windowRef.__opsLegacyHistoryListenerBound=true;
+      }
     }
 
     function setDashboardTopbar(title,meta){
@@ -37,7 +111,14 @@
       documentRef.querySelectorAll('.nav-tab').forEach((tab)=>tab.classList.toggle('active',tab===active));
     }
 
-    function openOpsDashboard(){
+    function openOpsDashboard(options){
+      const opts=options&&typeof options==='object'?options:{};
+      if(standaloneHistoryEnabled()&&opts.historyMode!=='skip'){
+        const mode=opts.historyMode==='push'
+          ? 'push'
+          : (windowRef&&windowRef._opsDashboardOpen?'push':'replace');
+        syncHistoryState('home','',{mode});
+      }
       OPS.view='home';
       OPS.showCreate=false;
       OPS.currentProject=null;

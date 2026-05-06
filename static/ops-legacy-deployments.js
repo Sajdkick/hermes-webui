@@ -165,20 +165,20 @@
       const latestLog=logs.length?logs[logs.length-1].message:'No deployment logs yet.';
       const recordHref=deployment&&deployment.recordPath?`/api/media?path=${encodeURIComponent(deployment.recordPath)}`:'';
       return `
-        <section class="ops-deployment-panel">
-          <div class="ops-deployment-header">
+        <section class="tasks-card ops-deployment-panel">
+          <div class="tasks-card-header ops-deployment-header">
             <div>
-              <h3>Deployment</h3>
-              <span>${esc(status)}</span>
+              <div class="tasks-card-title">Deployment</div>
+              <div class="tasks-card-subtitle">${esc(status)}</div>
             </div>
-            <div class="ops-deployment-actions">
-              <button class="ops-btn" type="button" data-ops-action="refresh-deployment" data-project-id="${esc(project.id)}" ${busy||!capabilities.deployment?'disabled':''}>${svg.refresh}<span>${busy?'Refreshing...':'Refresh'}</span></button>
-              <button class="ops-btn" type="button" data-ops-action="scaffold-deployment" data-project-id="${esc(project.id)}" ${busy||!capabilities.deployment?'disabled':''}>${svg.plus}<span>Scaffold</span></button>
-              <button class="ops-btn primary" type="button" data-ops-action="record-deployment" data-deployment-action="deploy" data-project-id="${esc(project.id)}" ${busy||!capabilities.deployment?'disabled':''}>${svg.check}<span>Record</span></button>
-              <button class="ops-btn primary" type="button" data-ops-action="execute-deployment" data-deployment-action="deploy" data-project-id="${esc(project.id)}" ${busy||!capabilities.deployment?'disabled':''}>${svg.play}<span>Execute</span></button>
+            <div class="tasks-card-actions ops-deployment-actions">
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-deployment" data-project-id="${esc(project.id)}" ${busy||!capabilities.deployment?'disabled':''}>${svg.refresh}<span>${busy?'Refreshing...':'Refresh'}</span></button>
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="scaffold-deployment" data-project-id="${esc(project.id)}" ${busy||!capabilities.deployment?'disabled':''}>${svg.plus}<span>Scaffold</span></button>
+              <button class="menu-action-btn small" type="button" data-ops-action="record-deployment" data-deployment-action="deploy" data-project-id="${esc(project.id)}" ${busy||!capabilities.deployment?'disabled':''}>${svg.check}<span>Record</span></button>
+              <button class="menu-action-btn small" type="button" data-ops-action="execute-deployment" data-deployment-action="deploy" data-project-id="${esc(project.id)}" ${busy||!capabilities.deployment?'disabled':''}>${svg.play}<span>Execute</span></button>
             </div>
           </div>
-          <div class="ops-deployment-body">
+          <div class="tasks-card-body ops-deployment-body">
             <div class="ops-deployment-summary">${esc(summary)}</div>
             <div class="ops-deployment-meta">
               <span>${esc(deployment&&deployment.provider?deployment.provider:'manual')}</span>

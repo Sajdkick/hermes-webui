@@ -94,11 +94,11 @@
       const busy=OPS.migrationHealthBusy;
       if(!health&&busy){
         return `
-          <section class="ops-panel ops-migration-health-panel">
-            <div class="ops-panel-header">
+          <section class="tasks-card ops-migration-health-panel">
+            <div class="tasks-card-header ops-panel-header">
               <div>
-                <h2>Migration health</h2>
-                <span>Checking Cloud Terminal retirement readiness.</span>
+                <div class="tasks-card-title">Migration health</div>
+                <div class="tasks-card-subtitle">Checking Cloud Terminal retirement readiness.</div>
               </div>
             </div>
             <div class="ops-empty">Loading migration health...</div>
@@ -107,13 +107,15 @@
       }
       if(!health){
         return `
-          <section class="ops-panel ops-migration-health-panel">
-            <div class="ops-panel-header">
+          <section class="tasks-card ops-migration-health-panel">
+            <div class="tasks-card-header ops-panel-header">
               <div>
-                <h2>Migration health</h2>
-                <span>Cloud Terminal retirement readiness.</span>
+                <div class="tasks-card-title">Migration health</div>
+                <div class="tasks-card-subtitle">Cloud Terminal retirement readiness.</div>
               </div>
-              <button class="ops-btn" type="button" data-ops-action="refresh-migration-health">${svg.refresh}<span>Refresh</span></button>
+              <div class="tasks-card-actions">
+                <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-migration-health">${svg.refresh}<span>Refresh</span></button>
+              </div>
             </div>
             <div class="ops-empty">Migration health has not been loaded yet.</div>
           </section>
@@ -154,13 +156,15 @@
           }).join('')
         : '<div class="ops-migration-health-check empty"><span>No migration checks were returned.</span></div>';
       return `
-        <section class="ops-panel ops-migration-health-panel ${esc(migrationHealthKind(health.status))}">
-          <div class="ops-panel-header">
+        <section class="tasks-card ops-migration-health-panel ${esc(migrationHealthKind(health.status))}">
+          <div class="tasks-card-header ops-panel-header">
             <div>
-              <h2>Migration health</h2>
-              <span>${esc(health.summary||'Cloud Terminal retirement readiness.')}</span>
+              <div class="tasks-card-title">Migration health</div>
+              <div class="tasks-card-subtitle">${esc(health.summary||'Cloud Terminal retirement readiness.')}</div>
             </div>
-            <button class="ops-btn" type="button" data-ops-action="refresh-migration-health" ${busy?'disabled':''}>${svg.refresh}<span>${busy?'Refreshing...':'Refresh'}</span></button>
+            <div class="tasks-card-actions">
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-migration-health" ${busy?'disabled':''}>${svg.refresh}<span>${busy?'Refreshing...':'Refresh'}</span></button>
+            </div>
           </div>
           <div class="ops-migration-health-counts">${countRows}</div>
           <div class="ops-migration-health-checks">${checkRows}</div>
@@ -173,11 +177,11 @@
       const busy=OPS.artifactHealthBusy;
       if(!health&&busy){
         return `
-          <section class="ops-panel ops-artifact-health-panel">
-            <div class="ops-panel-header">
+          <section class="tasks-card ops-artifact-health-panel">
+            <div class="tasks-card-header ops-panel-header">
               <div>
-                <h2>Artifact health</h2>
-                <span>Checking native run artifact recoverability.</span>
+                <div class="tasks-card-title">Artifact health</div>
+                <div class="tasks-card-subtitle">Checking native run artifact recoverability.</div>
               </div>
             </div>
             <div class="ops-empty">Loading artifact health...</div>
@@ -186,13 +190,15 @@
       }
       if(!health){
         return `
-          <section class="ops-panel ops-artifact-health-panel">
-            <div class="ops-panel-header">
+          <section class="tasks-card ops-artifact-health-panel">
+            <div class="tasks-card-header ops-panel-header">
               <div>
-                <h2>Artifact health</h2>
-                <span>Native run artifact recoverability.</span>
+                <div class="tasks-card-title">Artifact health</div>
+                <div class="tasks-card-subtitle">Native run artifact recoverability.</div>
               </div>
-              <button class="ops-btn" type="button" data-ops-action="refresh-artifact-health">${svg.refresh}<span>Refresh</span></button>
+              <div class="tasks-card-actions">
+                <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-artifact-health">${svg.refresh}<span>Refresh</span></button>
+              </div>
             </div>
             <div class="ops-empty">Artifact health has not been loaded yet.</div>
           </section>
@@ -228,13 +234,15 @@
       const truncated=Number(health.truncatedIssues||0);
       const truncatedRow=truncated?`<div class="ops-artifact-health-more">${esc(String(truncated))} more issue(s)</div>`:'';
       return `
-        <section class="ops-panel ops-artifact-health-panel ${esc(artifactHealthKind(health))}">
-          <div class="ops-panel-header">
+        <section class="tasks-card ops-artifact-health-panel ${esc(artifactHealthKind(health))}">
+          <div class="tasks-card-header ops-panel-header">
             <div>
-              <h2>Artifact health</h2>
-              <span>${esc(issueCount?`${issueCount} artifact issue(s) need attention.`:'Native run artifacts are recoverable.')}</span>
+              <div class="tasks-card-title">Artifact health</div>
+              <div class="tasks-card-subtitle">${esc(issueCount?`${issueCount} artifact issue(s) need attention.`:'Native run artifacts are recoverable.')}</div>
             </div>
-            <button class="ops-btn" type="button" data-ops-action="refresh-artifact-health" ${busy?'disabled':''}>${svg.refresh}<span>${busy?'Refreshing...':'Refresh'}</span></button>
+            <div class="tasks-card-actions">
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-artifact-health" ${busy?'disabled':''}>${svg.refresh}<span>${busy?'Refreshing...':'Refresh'}</span></button>
+            </div>
           </div>
           <div class="ops-artifact-health-counts">${countRows}</div>
           <div class="ops-artifact-health-issues">${issueRows}${truncatedRow}</div>
@@ -526,18 +534,20 @@
               <div class="ops-gather-meta">${esc(meta)}</div>
               <div class="ops-gather-summary">${esc(latest)}</div>
             </div>
-            ${href?`<a class="ops-btn" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${svg.folder}<span>Open</span></a>`:''}
+            ${href?`<a class="menu-action-btn secondary small" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${svg.folder}<span>Open</span></a>`:''}
           </div>
         `;
       }).join(''):`<div class="ops-project-session-empty">No runtime gather reports for this project.</div>`;
       return `
-        <section class="ops-gather-panel">
-          <div class="ops-gather-header">
+        <section class="tasks-card ops-gather-panel">
+          <div class="tasks-card-header ops-gather-header">
             <div>
-              <h3>Runtime reports</h3>
-              <span>${esc(reports.length?`${reports.length} latest report${reports.length===1?'':'s'}`:'No reports yet')}</span>
+              <div class="tasks-card-title">Runtime reports</div>
+              <div class="tasks-card-subtitle">${esc(reports.length?`${reports.length} latest report${reports.length===1?'':'s'}`:'No reports yet')}</div>
             </div>
-            <button class="ops-btn" type="button" data-ops-action="refresh-gather-reports" data-project-id="${esc(project.id)}" ${busy?'disabled':''}>${svg.refresh}<span>${busy?'Refreshing...':'Refresh'}</span></button>
+            <div class="tasks-card-actions">
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-gather-reports" data-project-id="${esc(project.id)}" ${busy?'disabled':''}>${svg.refresh}<span>${busy?'Refreshing...':'Refresh'}</span></button>
+            </div>
           </div>
           <div class="ops-gather-list">${rows}</div>
         </section>
@@ -568,18 +578,20 @@
               <div class="ops-gather-meta">${esc(meta)}</div>
               <div class="ops-gather-summary">${esc(latest)}</div>
             </div>
-            ${href?`<a class="ops-btn" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${svg.folder}<span>Open</span></a>`:''}
+            ${href?`<a class="menu-action-btn secondary small" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${svg.folder}<span>Open</span></a>`:''}
           </div>
         `;
       }).join(''):`<div class="ops-project-session-empty">No runtime reviews for this project.</div>`;
       return `
-        <section class="ops-gather-panel">
-          <div class="ops-gather-header">
+        <section class="tasks-card ops-gather-panel">
+          <div class="tasks-card-header ops-gather-header">
             <div>
-              <h3>Runtime reviews</h3>
-              <span>${esc(reviews.length?`${reviews.length} latest review${reviews.length===1?'':'s'}`:'No reviews yet')}</span>
+              <div class="tasks-card-title">Runtime reviews</div>
+              <div class="tasks-card-subtitle">${esc(reviews.length?`${reviews.length} latest review${reviews.length===1?'':'s'}`:'No reviews yet')}</div>
             </div>
-            <button class="ops-btn" type="button" data-ops-action="refresh-review-requests" data-project-id="${esc(project.id)}" ${busy?'disabled':''}>${svg.refresh}<span>${busy?'Refreshing...':'Refresh'}</span></button>
+            <div class="tasks-card-actions">
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-review-requests" data-project-id="${esc(project.id)}" ${busy?'disabled':''}>${svg.refresh}<span>${busy?'Refreshing...':'Refresh'}</span></button>
+            </div>
           </div>
           <div class="ops-gather-list">${rows}</div>
         </section>
@@ -630,16 +642,16 @@
           ? `${cleanup.status||'unknown'} | removed ${Array.isArray(cleanup.removed)?cleanup.removed.length:0}`
           : (project.lastNodeModulesCleanup?`${project.lastNodeModulesCleanup.status||'cleanup'} | removed ${project.lastNodeModulesCleanup.removedCount||0}`:'No cleanup recorded');
       return `
-        <section class="ops-project-health-panel ${active?'active':'inactive'}">
-          <div class="ops-project-health-header">
+        <section class="tasks-card ops-project-health-panel ${active?'active':'inactive'}">
+          <div class="tasks-card-header ops-project-health-header">
             <div>
-              <span class="ops-panel-title">Project health</span>
-              <small>${esc(active?'Active project':'Inactive project')}</small>
+              <div class="tasks-card-title">Project health</div>
+              <div class="tasks-card-subtitle">${esc(active?'Active project':'Inactive project')}</div>
             </div>
-            <div class="ops-project-health-actions">
-              <button class="ops-btn" type="button" data-ops-action="toggle-project-activity" data-project-id="${esc(project.id)}" data-project-active="${active?'false':'true'}" ${busy==='activity'||!capabilities.projectActivity?'disabled':''}>${active?svg.close:svg.check}<span>${active?'Deactivate':'Activate'}</span></button>
-              <button class="ops-btn" type="button" data-ops-action="refresh-project-health" data-project-id="${esc(project.id)}" ${busy||!capabilities.dependencyHealth?'disabled':''}>${svg.refresh}<span>Refresh</span></button>
-              <button class="ops-btn" type="button" data-ops-action="scan-project-inodes" data-project-id="${esc(project.id)}" ${busy||!capabilities.inodeScan?'disabled':''}>${svg.grid}<span>Scan</span></button>
+            <div class="tasks-card-actions">
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="toggle-project-activity" data-project-id="${esc(project.id)}" data-project-active="${active?'false':'true'}" ${busy==='activity'||!capabilities.projectActivity?'disabled':''}>${active?svg.close:svg.check}<span>${active?'Deactivate':'Activate'}</span></button>
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-project-health" data-project-id="${esc(project.id)}" ${busy||!capabilities.dependencyHealth?'disabled':''}>${svg.refresh}<span>Refresh</span></button>
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="scan-project-inodes" data-project-id="${esc(project.id)}" ${busy||!capabilities.inodeScan?'disabled':''}>${svg.grid}<span>Scan</span></button>
             </div>
           </div>
           <div class="ops-project-health-grid">
@@ -648,14 +660,14 @@
               <strong>${esc(manager)} ${esc(dependencyStatus)}</strong>
               <small>${esc(command)}</small>
               <small>${esc(installSummary)}</small>
-              <button class="ops-btn" type="button" data-ops-action="install-project-dependencies" data-project-id="${esc(project.id)}" ${busy||!capabilities.dependencyInstall||!dependencies.supported?'disabled':''}>${svg.play}<span>${busy==='install'?'Installing...':'Install'}</span></button>
+              <button class="menu-action-btn small" type="button" data-ops-action="install-project-dependencies" data-project-id="${esc(project.id)}" ${busy||!capabilities.dependencyInstall||!dependencies.supported?'disabled':''}>${svg.play}<span>${busy==='install'?'Installing...':'Install'}</span></button>
             </div>
             <div>
               <span>node_modules</span>
               <strong>${esc(totalInodes!=null?`${totalInodes} inodes`:'Not scanned')}</strong>
               <small>${esc(totalBytes!=null?compactBytes(totalBytes):directorySummary)}</small>
               <small>${esc(cleanupSummary)}</small>
-              <button class="ops-btn danger" type="button" data-ops-action="cleanup-project-inodes" data-project-id="${esc(project.id)}" ${busy||!capabilities.inodeCleanup||!directories.length?'disabled':''}>${svg.trash}<span>${busy==='cleanup'?'Cleaning...':'Clean'}</span></button>
+              <button class="menu-action-btn danger small" type="button" data-ops-action="cleanup-project-inodes" data-project-id="${esc(project.id)}" ${busy||!capabilities.inodeCleanup||!directories.length?'disabled':''}>${svg.trash}<span>${busy==='cleanup'?'Cleaning...':'Clean'}</span></button>
             </div>
           </div>
         </section>
@@ -665,11 +677,11 @@
     function renderProjectSettings(project){
       if(!project||!project.id)return '';
       return `
-        <section class="ops-panel">
-          <div class="ops-panel-header">
+        <section class="tasks-card ops-project-settings-panel">
+          <div class="tasks-card-header ops-panel-header">
             <div>
-              <h2>Project profile</h2>
-              <span>New chats and task sessions activate this profile and use its memories, skills, and default model.</span>
+              <div class="tasks-card-title">Project profile</div>
+              <div class="tasks-card-subtitle">New chats and task sessions activate this profile and use its memories, skills, and default model.</div>
             </div>
           </div>
           <form class="ops-inline-form" data-ops-submit="project-settings" data-project-id="${esc(project.id)}">
@@ -678,7 +690,7 @@
               <select name="profile">${typeof renderProjectProfileOptions==='function'?renderProjectProfileOptions(project.profile,{allowBlank:true,blankLabel:'No assigned profile'}):''}</select>
             </label>
             <div class="ops-form-actions">
-              <button class="ops-btn primary" type="submit">${svg.check}<span>Save</span></button>
+              <button class="menu-action-btn small" type="submit">${svg.check}<span>Save</span></button>
             </div>
           </form>
         </section>

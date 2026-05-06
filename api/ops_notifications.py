@@ -238,6 +238,65 @@ def _clarify_notification(linkage: dict, task_context: dict, pending: dict, pend
     }
 
 
+def _play_notification(project: dict, status: dict) -> dict | None:
+    if not isinstance(status, dict):
+        return None
+    project_id = _text(project.get("id"), limit=256)
+    if not project_id:
+        return None
+    state = _text(status.get("status"), limit=64).lower()
+    ready = status.get("ready") is True
+    inspect_url = _text(status.get("inspectUrl"), limit=2048)
+    status_summary = _text(status.get("statusSummary"), limit=512)
+    failure_summary = _text(status.get("failureSummary") or status.get("error"), limit=512)
+    if ready:
+        status_at = _text(status.get("readyAt") or status.get("updatedAt") or status.get("startedAt"), limit=128)
+        if not status_at:
+            return None
+        play_status = "ready"
+        play_needs_repair = not inspect_url
+        play_fallback_error = ""
+        message = status_summary or "Play app is ready for inspection."
+    elif state == "failed":
+        status_at = _text(status.get("finishedAt") or status.get("updatedAt") or status.get("startedAt"), limit=128)
+        if not status_at:
+            return None
+        play_status = "failed"
+        play_needs_repair = True
+        play_fallback_error = failure_summary
+        message = failure_summary or status_summary or "Play pipeline failed."
+    else:
+        return None
+    project_name = _text(project.get("name") or project.get("fullName") or project_id, limit=256) or project_id
+    return {
+        "notificationKey": f"play:{project_id}:{play_status}:{status_at}",
+        "kind": "play",
+        "message": message,
+        "project": {
+            "id": project_id,
+            "name": project_name,
+        },
+        "task": {
+            "id": "",
+            "text": "",
+            "grade": "green",
+            "done": False,
+        },
+        "terminalTarget": {
+            "projectId": project_id,
+            "taskId": "",
+            "sessionId": "",
+            "runId": "",
+        },
+        "inspectUrl": inspect_url,
+        "playStatus": play_status,
+        "playNeedsRepair": play_needs_repair,
+        "playFallbackError": play_fallback_error,
+        "createdAt": status_at,
+        "updatedAt": status_at,
+    }
+
+
 def list_pending_notifications(project_id: str | None = None) -> dict:
     if project_id:
         projects = [ops_projects.get_ops_project(project_id)]
@@ -262,11 +321,19 @@ def list_pending_notifications(project_id: str | None = None) -> dict:
                 notifications.append(
                     _clarify_notification(linkage, task_context, clarify["pending"], int(clarify.get("pending_count") or 0))
                 )
+        try:
+            from api import play_pipeline
+
+            play_notification = _play_notification(project, play_pipeline.build_project_play_status(project["id"]))
+        except Exception:
+            play_notification = None
+        if play_notification:
+            notifications.append(play_notification)
 
     notifications.sort(
         key=lambda item: (
             str(item.get("kind") or ""),
-            float(item.get("expiresAt") or item.get("requestedAt") or 0),
+            str(item.get("updatedAt") or item.get("createdAt") or item.get("expiresAt") or item.get("requestedAt") or ""),
             str(item.get("sessionId") or ""),
         ),
         reverse=True,

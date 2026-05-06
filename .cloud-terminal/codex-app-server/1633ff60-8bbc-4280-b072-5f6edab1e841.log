@@ -1,0 +1,15 @@
+[2m2026-05-06T05:34:41.726668Z[0m [31mERROR[0m [2mcodex_app_server[0m[2m:[0m Codex could not find bubblewrap on PATH. Install bubblewrap with your OS package manager. See the sandbox prerequisites: https://developers.openai.com/codex/concepts/sandboxing#prerequisites. Codex will use the vendored bubblewrap in the meantime.
+codex app-server (WebSockets)
+  listening on: ws://127.0.0.1:49128
+  readyz: http://127.0.0.1:49128/readyz
+  healthz: http://127.0.0.1:49128/healthz
+  note: binds localhost only (use SSH port-forwarding for remote access)
+[2m2026-05-06T05:58:18.911619Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to find expected lines in /home/ubuntu/cloud-terminal-data/projects/hermes-webui/static/ops-legacy-health.js:
+      const rows=reports.length?reports.map(report=>{
+[2m2026-05-06T06:33:35.540230Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to find expected lines in /home/ubuntu/cloud-terminal-data/projects/hermes-webui/api/ops_notifications.py:
+            clarify = _pending_clarify(session_id)
+            if clarify.get("pending"):
+                notifications.append(
+                    _clarify_notification(linkage, task_context, clarify["pending"], int(clarify.get("pending_count") or 0))
+                )
+    return {"notifications": notifications, "count": len(notifications)}

@@ -159,6 +159,12 @@
     taskFilterFocusedField:'',
     taskFilterSelectionStart:null,
     taskFilterSelectionEnd:null,
+    taskFormDraft:null,
+    createEpicDraftTitle:'',
+    taskFormFocusedForm:'',
+    taskFormFocusedField:'',
+    taskFormSelectionStart:null,
+    taskFormSelectionEnd:null,
     editingTask:null,
     loading:false,
     quickTaskProjectId:'',
@@ -311,13 +317,60 @@
   const setActiveNav=DASHBOARD_SHELL.setActiveNav||function(){
     document.querySelectorAll('.nav-tab').forEach(tab=>tab.classList.toggle('active',tab===(typeof $==='function'?$('opsDashboardNavBtn'):null)));
   };
-  const openOpsDashboard=DASHBOARD_SHELL.openOpsDashboard||function(){};
+  const openOpsDashboardView=DASHBOARD_SHELL.openOpsDashboard||function(){};
   const closeOpsDashboard=DASHBOARD_SHELL.closeOpsDashboard||function(){};
   const renderCurrentOpsView=DASHBOARD_SHELL.renderCurrentOpsView||function(){};
   const renderLoading=DASHBOARD_SHELL.renderLoading||function(label){
     const el=typeof $==='function'?$('opsDashboardRoot'):null;
     if(el)el.innerHTML=`<div class="ops-dashboard"><div class="ops-empty">${esc(label||'Loading...')}</div></div>`;
   };
+
+  function readStandaloneOpsHistoryState(state){
+    if(
+      typeof window==='undefined'
+      || !window.__OPS_LEGACY_STANDALONE__
+      || typeof window.__opsLegacyReadHistoryState!=='function'
+    ){
+      return null;
+    }
+    return window.__opsLegacyReadHistoryState(state===undefined&&window.history?window.history.state:state);
+  }
+
+  function normalizeStandaloneOpsHistoryState(state){
+    if(state&&typeof state==='object'&&typeof state.view==='string'&&!('hermesOpsLegacyDashboard' in state)){
+      return {
+        view:String(state.view||'').trim()||'home',
+        projectId:String(state.projectId||'').trim(),
+      };
+    }
+    return readStandaloneOpsHistoryState(state);
+  }
+
+  async function restoreStandaloneOpsHistoryState(state){
+    const normalized=normalizeStandaloneOpsHistoryState(state);
+    if(!normalized)return null;
+    if(typeof window!=='undefined'&&window.__OPS_LEGACY_STANDALONE__&&!window._opsDashboardOpen){
+      openOpsDashboardView({historyMode:'skip'});
+    }
+    if(normalized.view==='project-detail'&&normalized.projectId){
+      return DASHBOARD_PROJECTS.openProjectDetail(normalized.projectId,{historyMode:'skip'});
+    }
+    if(normalized.view==='projects'){
+      return DASHBOARD_PROJECTS.openProjects({historyMode:'skip'});
+    }
+    return openOpsDashboardView({historyMode:'skip'});
+  }
+
+  function openOpsDashboard(options){
+    const opts=options&&typeof options==='object'?options:{};
+    if(!opts.skipStoredState){
+      const restored=readStandaloneOpsHistoryState();
+      if(restored&&restored.view!=='home'){
+        return restoreStandaloneOpsHistoryState(restored);
+      }
+    }
+    return openOpsDashboardView(opts);
+  }
   const DASHBOARD_DATABASE=OPS_MODULES.database&&typeof OPS_MODULES.database.bindDashboard==='function'
     ? OPS_MODULES.database.bindDashboard({
       OPS,
@@ -361,6 +414,7 @@
       renderNotifications:()=>renderNotifications(),
       normalizedAutoApprovalPolicy:()=>normalizedAutoApprovalPolicy(),
       loadProjects:()=>loadProjects(),
+      openProjectDetail:(projectId)=>openProjectDetail(projectId),
       loadNotifications:()=>loadNotifications(),
       loadOpsRuns:(filters)=>loadOpsRuns(filters),
       loadNotificationDiagnostics:(options)=>loadNotificationDiagnostics(options),
@@ -393,6 +447,7 @@
       FileRef:typeof File!=='undefined'?File:null,
       showPromptDialog:typeof showPromptDialog==='function'?showPromptDialog:(async()=>null),
       showConfirmDialog:typeof showConfirmDialog==='function'?showConfirmDialog:(async()=>false),
+      openOpsSession:(sessionId)=>openOpsSession(sessionId),
       requestAnimationFrameRef:typeof requestAnimationFrame==='function'?requestAnimationFrame:(cb=>setTimeout(cb,0)),
       taskDictationPrompt:TASK_DICTATION_PROMPT,
       taskDictationAudioBitsPerSecond:TASK_DICTATION_AUDIO_BITS_PER_SECOND,
@@ -478,8 +533,10 @@
   const pendingNotificationsForRun=DASHBOARD_NOTIFICATIONS.pendingNotificationsForRun||function(){return [];};
   const renderNotification=DASHBOARD_NOTIFICATIONS.renderNotification||function(){return '';};
   const playInspectOverlayUrl=DASHBOARD_NOTIFICATIONS.playInspectOverlayUrl||function(){return '';};
+  const playNotificationFallbackError=DASHBOARD_NOTIFICATIONS.playNotificationFallbackError||function(){return '';};
   const respondNotification=DASHBOARD_NOTIFICATIONS.respondNotification||(async function(){return null;});
   const dismissNotification=DASHBOARD_NOTIFICATIONS.dismissNotification||(async function(){return null;});
+  const notificationById=DASHBOARD_NOTIFICATIONS.notificationById||function(){return null;};
   const openSessionTargetOrProject=DASHBOARD_NOTIFICATIONS.openSessionTargetOrProject||(async function(){return false;});
   const openNotificationTarget=DASHBOARD_NOTIFICATIONS.openNotificationTarget||(async function(){return null;});
   const formatQuickTaskProjectOptionLabel=DASHBOARD_HOME.formatQuickTaskProjectOptionLabel||function(project){
@@ -529,6 +586,9 @@
       loadNotifications:(typeof loadNotifications==='function'?loadNotifications:null),
       playInspectOverlayUrl:(typeof playInspectOverlayUrl==='function'?playInspectOverlayUrl:null),
       openProjectDetail:typeof openProjectDetail==='function'?openProjectDetail:null,
+      notificationById:typeof notificationById==='function'?notificationById:null,
+      notificationTarget:typeof notificationTarget==='function'?notificationTarget:null,
+      playNotificationFallbackError:typeof playNotificationFallbackError==='function'?playNotificationFallbackError:null,
       windowRef:typeof window!=='undefined'?window:null,
     })
     : {};
@@ -564,6 +624,7 @@
       svg,
       setDashboardTopbar:typeof setDashboardTopbar==='function'?setDashboardTopbar:()=>{},
       showError:typeof showError==='function'?showError:()=>{},
+      documentRef:typeof document!=='undefined'?document:null,
       windowRef:typeof window!=='undefined'?window:null,
       URLRef:typeof URL!=='undefined'?URL:null,
       taskQaStatusValues:TASK_QA_STATUS_VALUES,
@@ -612,6 +673,7 @@
   const renderProjectDetail=()=>DASHBOARD_PROJECT_DETAIL.renderProjectDetail();
   const handleTaskFilterField=(event)=>DASHBOARD_PROJECT_DETAIL.handleTaskFilterField(event);
   const handleTaskRowField=(event)=>DASHBOARD_PROJECT_DETAIL.handleTaskRowField(event);
+  const handleTaskFormField=(event)=>DASHBOARD_PROJECT_DETAIL.handleTaskFormField(event);
   const DASHBOARD_TASK_ACTIONS=OPS_MODULES.taskActions&&typeof OPS_MODULES.taskActions.bindDashboard==='function'
     ? OPS_MODULES.taskActions.bindDashboard({
       OPS,
@@ -920,7 +982,7 @@
 
   function renderProjectActivityQuickAction(project){return DASHBOARD_QUICK_ACTIONS.renderProjectActivityQuickAction(project);}
 
-  function openProjects(){return DASHBOARD_PROJECTS.openProjects();}
+  function openProjects(options){return DASHBOARD_PROJECTS.openProjects(options);}
   async function loadProjects(){return DASHBOARD_PROJECTS.loadProjects();}
   function mergeProjectUpdate(project){return DASHBOARD_PROJECTS.mergeProjectUpdate(project);}
   function summarizeEpics(epics){return DASHBOARD_PROJECTS.summarizeEpics(epics);}
@@ -935,7 +997,7 @@
   function projectWorkspaceMeta(project,counts){return DASHBOARD_PROJECTS.projectWorkspaceMeta(project,counts);}
   function renderProjectWorkspaceCard(project,index){return DASHBOARD_PROJECTS.renderProjectWorkspaceCard(project,index);}
   function renderProjects(){return DASHBOARD_PROJECTS.renderProjects();}
-  async function openProjectDetail(projectId){return DASHBOARD_PROJECTS.openProjectDetail(projectId);}
+  async function openProjectDetail(projectId,options){return DASHBOARD_PROJECTS.openProjectDetail(projectId,options);}
   async function loadProjectDetail(projectId){return DASHBOARD_PROJECTS.loadProjectDetail(projectId);}
   function allTasks(projectId){return DASHBOARD_PROJECTS.allTasks(projectId);}
   function findTask(taskId){return DASHBOARD_PROJECTS.findTask(taskId);}
@@ -984,10 +1046,15 @@
   document.addEventListener('submit',handleSubmit);
   document.addEventListener('input',handleQuickTaskField);
   document.addEventListener('input',handleTaskFilterField);
+  document.addEventListener('input',handleTaskFormField);
   document.addEventListener('change',handleTaskFilterField);
+  document.addEventListener('change',handleTaskFormField);
   document.addEventListener('change',handleTaskRowField);
   document.addEventListener('change',handleQuickTaskField);
 
+  if(typeof window!=='undefined'){
+    window.__opsLegacyHandleHistoryState=(state)=>restoreStandaloneOpsHistoryState(state);
+  }
   window.openOpsDashboard=openOpsDashboard;
   window.closeOpsDashboard=closeOpsDashboard;
 })();

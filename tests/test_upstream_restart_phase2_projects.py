@@ -485,3 +485,575 @@ def test_phase2_project_detail_uses_cloud_terminal_task_shell():
         text=True,
     )
     assert completed.stdout.strip() == "ok"
+
+
+def test_phase2_project_detail_preserves_task_and_epic_drafts_across_rerender():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (() => {
+          const source = fs.readFileSync('static/ops-legacy-project-detail.js', 'utf8');
+          const rootEl = {
+            innerHTML: '',
+            contains: () => true,
+            querySelector: () => null,
+          };
+          const windowRef = { HermesOpsModules: {} };
+          const context = {
+            console,
+            window: windowRef,
+            document: { activeElement: null },
+            setTimeout,
+            clearTimeout,
+            URL,
+            FormData: function FormData(form){
+              return {
+                entries: function* entries(){
+                  for (const [key, value] of Object.entries(form._data || {})) yield [key, value];
+                },
+              };
+            },
+          };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const project = {
+            id: 'project-1',
+            name: 'hermes-webui',
+            fullName: 'Sajdkick/hermes-webui',
+            path: '/tmp/hermes-webui',
+            coreBranch: 'master',
+            profile: 'hermes',
+            active: true,
+          };
+          const epics = [{
+            id: 'epic-1',
+            title: 'Quick tasks',
+            tasks: [],
+          }];
+
+          const OPS = {
+            currentProject: project,
+            taskData: { branch: 'master', epics },
+            taskFilters: { status: 'active', grade: '', token: '' },
+            taskCreateCollapsed: false,
+            taskFiltersCollapsed: false,
+            taskAutomationBusyByProject: {},
+            editingTask: null,
+            view: 'project-detail',
+          };
+
+          const dashboard = context.window.HermesOpsModules.projectDetail.bindDashboard({
+            OPS,
+            root: () => rootEl,
+            esc: (value) => String(value ?? ''),
+            svg: { plus: '', refresh: '', close: '', play: '', folder: '', grid: '', arrow: '', trash: '', check: '' },
+            setDashboardTopbar: () => {},
+            showError: () => {},
+            summarizeEpics: (items) => ({ epics: (items || []).length, active: 0, done: 0 }),
+            nameOf: (entry) => entry.fullName || entry.name || entry.id,
+            projectPath: (entry) => entry.path,
+            projectProfileLabel: (entry) => entry.profile || 'No assigned profile',
+            rememberTaskFilterFocus: () => {},
+            restoreTaskFilterFocus: () => {},
+            syncEpicCollapseState: () => {},
+            isEpicCollapsed: () => false,
+            renderProjectPlayControls: () => '',
+            renderProjectSettings: () => '',
+            renderProjectHealth: () => '',
+            renderProjectGitStatus: () => '',
+            renderProjectPlayConfigEditor: () => '',
+            renderProjectRuntimeSnapshot: () => '',
+            renderProjectRuntimeScreenshot: () => '',
+            renderProjectPlayLogs: () => '',
+            renderProjectGatherReports: () => '',
+            renderProjectReviewRequests: () => '',
+            renderProjectDeployment: () => '',
+            renderProjectDatabase: () => '',
+            renderProjectRunActivity: () => '',
+            renderRunDetailPanel: () => '',
+            resolvedTaskSession: () => null,
+            sessionRefValue: (value) => value || '',
+            updateTaskGrade: async () => null,
+            documentRef: context.document,
+            windowRef,
+            URLRef: URL,
+          });
+
+          dashboard.renderProjectDetail();
+
+          const taskForm = {
+            dataset: { opsSubmit: 'save-task' },
+            _data: {
+              taskId: '',
+              text: 'Draft task text',
+              epicId: 'epic-1',
+              grade: 'orange',
+              flags: 'ui',
+              markers: 'AI suggestion',
+              images: '/tmp/example.png',
+            },
+          };
+          const epicForm = {
+            dataset: { opsSubmit: 'create-epic' },
+            _data: { title: 'Draft epic title' },
+          };
+          const taskTarget = {
+            closest: (selector) => selector.includes('form[data-ops-submit') ? taskForm : null,
+          };
+          const epicTarget = {
+            closest: (selector) => selector.includes('form[data-ops-submit') ? epicForm : null,
+          };
+
+          dashboard.handleTaskFormField({ target: taskTarget });
+          dashboard.handleTaskFormField({ target: epicTarget });
+          dashboard.renderProjectDetail();
+
+          const html = rootEl.innerHTML;
+          if (!html.includes('value="Draft task text"')) throw new Error('Task draft text should survive a rerender.');
+          if (!html.includes('value="Draft epic title"')) throw new Error('Epic draft title should survive a rerender.');
+          if (!html.includes('value="ui"')) throw new Error('Task draft flags should survive a rerender.');
+          if (!html.includes('value="/tmp/example.png"')) throw new Error('Task draft images should survive a rerender.');
+
+          console.log('ok');
+        })();
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_phase2_ops_dashboard_shell_tracks_home_history_and_replays_popstate():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (() => {
+          const source = fs.readFileSync('static/ops-legacy-dashboard-shell.js', 'utf8');
+          const listeners = {};
+          const rootEl = { hidden: true };
+          const layoutEl = { classList: { add() {}, remove() {} } };
+          const navEl = { classList: { remove() {} } };
+          const historyCalls = [];
+          const documentRef = {
+            title: 'Hermes Ops',
+            getElementById: () => null,
+            querySelectorAll: () => [],
+          };
+          const windowRef = {
+            HermesOpsModules: {},
+            __OPS_LEGACY_STANDALONE__: true,
+            _opsDashboardOpen: false,
+            history: {
+              state: null,
+              replaceState(state, _title, url){
+                this.state = state;
+                historyCalls.push({ mode: 'replace', state, url });
+              },
+              pushState(state, _title, url){
+                this.state = state;
+                historyCalls.push({ mode: 'push', state, url });
+              },
+            },
+            location: { pathname: '/ops', search: '', hash: '' },
+            addEventListener: (type, handler) => {
+              listeners[type] = handler;
+            },
+          };
+          const context = {
+            console,
+            window: windowRef,
+            document: documentRef,
+            setTimeout,
+            clearTimeout,
+          };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const dashboard = context.window.HermesOpsModules.dashboardShell.bindDashboard({
+            OPS: {},
+            root: () => rootEl,
+            layout: () => layoutEl,
+            navBtn: () => navEl,
+            esc: (value) => String(value ?? ''),
+            documentRef,
+            windowRef,
+            syncTopbarRef: () => () => {},
+            renderHomeRef: () => () => {},
+            loadDashboardHomeRef: () => () => Promise.resolve(),
+            renderProjectsRef: () => () => {},
+            renderProjectDetailRef: () => () => {},
+            startNotificationPollingRef: () => () => {},
+            stopNotificationPollingRef: () => () => {},
+            stopPlayStatusPollingRef: () => () => {},
+            stopQuickTaskDictationRef: () => () => {},
+            setBusy: () => {},
+          });
+
+          dashboard.openOpsDashboard();
+          if (historyCalls.length !== 1 || historyCalls[0].mode !== 'replace') {
+            throw new Error('Opening /ops should replace the current history entry.');
+          }
+          if (!historyCalls[0].state || historyCalls[0].state.view !== 'home') {
+            throw new Error('Opening /ops should record the home dashboard view.');
+          }
+
+          let restored = null;
+          windowRef.__opsLegacyHandleHistoryState = (state) => {
+            restored = state;
+          };
+          listeners.popstate({
+            state: {
+              hermesOpsLegacyDashboard: true,
+              view: 'project-detail',
+              projectId: 'project-1',
+            },
+          });
+          if (!restored || restored.view !== 'project-detail' || restored.projectId !== 'project-1') {
+            throw new Error('The /ops popstate handler did not restore the saved project-detail view.');
+          }
+
+          console.log('ok');
+        })();
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_phase2_project_detail_pushes_ops_history_state():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (async () => {
+          const source = fs.readFileSync('static/ops-legacy-projects.js', 'utf8');
+          const syncCalls = [];
+          const project = {
+            id: 'project-1',
+            name: 'hermes-webui',
+            fullName: 'Sajdkick/hermes-webui',
+            path: '/tmp/hermes-webui',
+            coreBranch: 'master',
+            profile: 'hermes',
+            active: true,
+          };
+          const rootEl = { innerHTML: '' };
+          const windowRef = {
+            HermesOpsModules: {},
+            history: {
+              state: {
+                hermesOpsLegacyDashboard: true,
+                view: 'home',
+                projectId: '',
+              },
+            },
+            __opsLegacyReadHistoryState: (state) => {
+              if (!state || state.hermesOpsLegacyDashboard !== true) return null;
+              return {
+                view: String(state.view || ''),
+                projectId: String(state.projectId || ''),
+              };
+            },
+            __opsLegacySyncHistoryState: (view, projectId, options) => {
+              syncCalls.push({
+                view,
+                projectId: String(projectId || ''),
+                mode: options && options.mode,
+              });
+            },
+          };
+          const context = {
+            console,
+            window: windowRef,
+            document: {},
+            setTimeout,
+            clearTimeout,
+          };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const dashboard = context.window.HermesOpsModules.projects.bindDashboard({
+            OPS: {
+              view: 'home',
+              projects: [project],
+              profiles: [],
+              sessions: [],
+              taskDataByProject: {},
+              playStatusByProject: {},
+              gitStatusByProject: {},
+              projectHealthByProject: {},
+              gatherReportsByProject: {},
+              reviewRequestsByProject: {},
+              deploymentsByProject: {},
+              projectDatabaseByProject: {},
+              counts: {},
+            },
+            api: async (path) => {
+              if (String(path).endsWith('/ensure-workspace')) return { ok: true };
+              if (String(path).endsWith('/tasks')) return { project, epics: [] };
+              if (String(path) === '/api/ops/projects') return { projects: [project] };
+              throw new Error('Unexpected API path: ' + path);
+            },
+            AgentBridge: {
+              sessions: {
+                list: async () => ({ sessions: [] }),
+                grouped: async () => ({ sessions: [], groups: [], ungrouped: [] }),
+              },
+              profiles: {
+                list: async () => ({ profiles: [] }),
+              },
+            },
+            root: () => rootEl,
+            esc: (value) => String(value ?? ''),
+            svg: { plus: '', refresh: '', arrow: '', chat: '', folder: '' },
+            nameOf: (entry) => entry.fullName || entry.name || entry.id,
+            projectPath: (entry) => entry.path,
+            projectUrl: (projectId, suffix = '') => '/api/ops/projects/' + projectId + suffix,
+            projectProfileLabel: (entry) => entry.profile || 'No assigned profile',
+            renderProjectProfileOptions: () => '',
+            projectUsesBranchTitle: () => false,
+            projectCardTitle: (entry) => entry.fullName || entry.name || entry.id,
+            projectContextLabel: () => '',
+            projectAccentStyle: () => '',
+            setDashboardTopbar: () => {},
+            renderLoading: () => {},
+            renderGitHubDiscovery: () => '',
+            renderSessionWorkspaceActions: () => '',
+            renderProjectSessionRows: () => '',
+            showToast: () => {},
+            resetTaskFilters: () => {},
+            renderProjectDetail: () => '',
+            refreshProjectPlayStatus: async () => null,
+            refreshProjectGitStatus: async () => null,
+            playStatusFor: () => null,
+            playStatusKind: () => '',
+            playStatusLabel: () => '',
+            loadOpsRuns: async () => [],
+            loadProjectDependencyStatus: async () => null,
+            loadProjectGatherReports: async () => null,
+            loadProjectReviewRequests: async () => null,
+            loadProjectDeployment: async () => null,
+            loadProjectDatabase: async () => null,
+            windowRef,
+          });
+
+          await dashboard.openProjectDetail(project.id);
+          if (!syncCalls.length) {
+            throw new Error('Opening a project detail view should push an /ops history state.');
+          }
+          if (syncCalls[0].view !== 'project-detail' || syncCalls[0].projectId !== project.id) {
+            throw new Error('Project detail history entry did not capture the selected project id.');
+          }
+          if (syncCalls[0].mode !== 'push') {
+            throw new Error('Project detail history entry should push on top of the home /ops state.');
+          }
+
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_phase2_dashboard_restores_saved_ops_project_detail_state_on_open():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (async () => {
+          const source = fs.readFileSync('static/ops-legacy-dashboard.js', 'utf8');
+          const calls = [];
+          const listeners = {};
+          const rootEl = {
+            hidden: true,
+            classList: { toggle() {} },
+          };
+          const layoutEl = { classList: { add() {}, remove() {} } };
+          const navEl = { classList: { remove() {}, toggle() {} } };
+          const titleEl = { textContent: '' };
+          const metaEl = { textContent: '' };
+          const documentRef = {
+            title: 'Hermes Ops',
+            querySelector: () => layoutEl,
+            querySelectorAll: () => [],
+            getElementById: (id) => ({
+              opsDashboardRoot: rootEl,
+              opsDashboardNavBtn: navEl,
+              topbarTitle: titleEl,
+              topbarMeta: metaEl,
+            }[id] || null),
+            addEventListener: () => {},
+          };
+          const windowRef = {
+            HermesOpsModules: {
+              dashboardShell: {
+                bindDashboard: () => ({
+                  setDashboardTopbar: () => {},
+                  setActiveNav: () => {},
+                  openOpsDashboard: () => {
+                    calls.push('home');
+                    windowRef._opsDashboardOpen = true;
+                  },
+                  closeOpsDashboard: () => {},
+                  renderCurrentOpsView: () => {},
+                  renderLoading: () => {},
+                }),
+              },
+              projects: {
+                bindDashboard: () => ({
+                  summarizeEpics: () => ({}),
+                  mergeProjectUpdate: (project) => project,
+                  sessionProjectId: () => '',
+                  sessionTaskId: () => '',
+                  sessionRecencyValue: () => 0,
+                  isSessionForProject: () => false,
+                  canonicalTaskSessions: () => [],
+                  projectSessionsFor: () => [],
+                  latestSessionForTask: () => null,
+                  resolvedTaskSession: () => null,
+                  projectWorkspaceMeta: () => '',
+                  renderProjectWorkspaceCard: () => '',
+                  renderProjects: () => '',
+                  openProjects: async () => {
+                    calls.push('projects');
+                  },
+                  openProjectDetail: async (projectId) => {
+                    calls.push('detail:' + projectId);
+                  },
+                  loadProjectDetail: async () => ({}),
+                  allTasks: () => [],
+                  findTask: () => null,
+                  findTaskInData: () => null,
+                  reloadProjectTasks: async () => ({}),
+                  refreshOpsSessions: async () => [],
+                }),
+              },
+              dashboardActions: {
+                bindDashboard: () => ({
+                  handleClick: async () => null,
+                  handleSubmit: async () => null,
+                }),
+              },
+              projectDetail: {
+                bindDashboard: () => ({
+                  renderProjectDetail: () => '',
+                  handleTaskFilterField: () => {},
+                  handleTaskFormField: () => {},
+                  handleTaskRowField: () => {},
+                  taskImageLabel: () => '',
+                  renderProjectPlayControls: () => '',
+                  renderProjectSettings: () => '',
+                  renderProjectHealth: () => '',
+                  renderProjectGitStatus: () => '',
+                  renderProjectPlayConfigEditor: () => '',
+                  renderProjectRuntimeSnapshot: () => '',
+                  renderProjectRuntimeScreenshot: () => '',
+                  renderProjectPlayLogs: () => '',
+                  renderProjectGatherReports: () => '',
+                  renderProjectReviewRequests: () => '',
+                  renderProjectDeployment: () => '',
+                  renderProjectDatabase: () => '',
+                  updateTaskGrade: async () => null,
+                }),
+              },
+            },
+            __OPS_LEGACY_STANDALONE__: true,
+            _opsDashboardOpen: false,
+            history: {
+              state: {
+                hermesOpsLegacyDashboard: true,
+                view: 'project-detail',
+                projectId: 'project-1',
+              },
+            },
+            __opsLegacyReadHistoryState: (state) => {
+              if (!state || state.hermesOpsLegacyDashboard !== true) return null;
+              return {
+                view: String(state.view || ''),
+                projectId: String(state.projectId || ''),
+              };
+            },
+            addEventListener: (type, handler) => {
+              listeners[type] = handler;
+            },
+            location: { pathname: '/ops', search: '', hash: '', href: 'http://example.com/ops', origin: 'http://example.com' },
+            localStorage: { getItem: () => null, setItem: () => {} },
+            navigator: {},
+          };
+          const context = {
+            console,
+            window: windowRef,
+            document: documentRef,
+            navigator: windowRef.navigator,
+            setTimeout,
+            clearTimeout,
+            URL,
+            $: (id) => documentRef.getElementById(id),
+            esc: (value) => String(value ?? ''),
+            api: async () => ({}),
+            showToast: () => {},
+            showConfirmDialog: async () => false,
+            showPromptDialog: async () => null,
+            syncTopbar: () => {},
+            clearSessionReadableOutput: () => {},
+            renderSessionList: async () => {},
+            loadSession: async () => {},
+            addFiles: () => {},
+            renderTray: () => {},
+            autoResize: () => {},
+            send: () => {},
+            AgentBridge: {
+              sessions: { list: async () => ({ sessions: [] }) },
+              profiles: { list: async () => ({ profiles: [] }) },
+            },
+          };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          await context.window.openOpsDashboard();
+          if (!calls.includes('detail:project-1')) {
+            throw new Error('Opening /ops should restore the saved project-detail history state.');
+          }
+          if (!calls.includes('home')) {
+            throw new Error('Restoring /ops history should still reveal the ops shell before rendering the saved view.');
+          }
+
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"

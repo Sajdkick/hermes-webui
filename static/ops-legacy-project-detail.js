@@ -8,6 +8,7 @@
     const svg=ctx&&ctx.svg;
     const setDashboardTopbar=ctx&&ctx.setDashboardTopbar;
     const showError=ctx&&ctx.showError;
+    const documentRef=(ctx&&ctx.documentRef)||(typeof document!=='undefined'?document:null);
     const windowRef=(ctx&&ctx.windowRef)||(typeof window!=='undefined'?window:null);
     const URLRef=(ctx&&ctx.URLRef)||(typeof URL!=='undefined'?URL:null);
     const summarizeEpics=ctx&&ctx.summarizeEpics;
@@ -299,6 +300,90 @@
       return 'No active tasks yet.';
     }
 
+    function clearTaskFormFocusState(){
+      OPS.taskFormFocusedForm='';
+      OPS.taskFormFocusedField='';
+      OPS.taskFormSelectionStart=null;
+      OPS.taskFormSelectionEnd=null;
+    }
+
+    function rememberTaskFormFocus(){
+      if(!documentRef){
+        clearTaskFormFocusState();
+        return;
+      }
+      const active=documentRef.activeElement;
+      if(!active||typeof active.closest!=='function'){
+        clearTaskFormFocusState();
+        return;
+      }
+      const form=active.closest('form[data-ops-submit="save-task"], form[data-ops-submit="create-epic"]');
+      const field=active.closest('[name]');
+      if(!form||!field||!root()||!root().contains(form)){
+        clearTaskFormFocusState();
+        return;
+      }
+      OPS.taskFormFocusedForm=form.dataset.opsSubmit||'';
+      OPS.taskFormFocusedField=field.getAttribute('name')||'';
+      OPS.taskFormSelectionStart=typeof field.selectionStart==='number'?field.selectionStart:null;
+      OPS.taskFormSelectionEnd=typeof field.selectionEnd==='number'?field.selectionEnd:null;
+    }
+
+    function restoreTaskFormFocus(){
+      if(!OPS.taskFormFocusedForm||!OPS.taskFormFocusedField)return;
+      const selector=`form[data-ops-submit="${OPS.taskFormFocusedForm}"] [name="${OPS.taskFormFocusedField}"]`;
+      const field=root()&&root().querySelector(selector);
+      if(!field||field.disabled)return;
+      const start=typeof OPS.taskFormSelectionStart==='number'?OPS.taskFormSelectionStart:null;
+      const end=typeof OPS.taskFormSelectionEnd==='number'?OPS.taskFormSelectionEnd:start;
+      const requestFrame=windowRef&&typeof windowRef.requestAnimationFrame==='function'
+        ? windowRef.requestAnimationFrame.bind(windowRef)
+        : (cb=>setTimeout(cb,0));
+      requestFrame(()=>{
+        if(!root()||!root().contains(field)||field.disabled)return;
+        if(typeof field.focus==='function')field.focus({preventScroll:true});
+        if(typeof field.setSelectionRange==='function'&&start!==null){
+          field.setSelectionRange(start,end===null?start:end);
+        }
+      });
+    }
+
+    function normalizeTaskFormDraft(epics,edit){
+      const epicIds=(epics||[]).map(epic=>String(epic&&epic.id||'').trim()).filter(Boolean);
+      const fallbackEpicId=epicIds[0]||'';
+      const existing=OPS.taskFormDraft&&typeof OPS.taskFormDraft==='object'?OPS.taskFormDraft:{};
+      if(edit&&edit.task){
+        const taskId=String(edit.task.id||'').trim();
+        const sameTask=String(existing.taskId||'').trim()===taskId;
+        const selectedEpicId=sameTask&&epicIds.includes(String(existing.epicId||'').trim())
+          ? String(existing.epicId||'').trim()
+          : String(edit.epic&&edit.epic.id||fallbackEpicId).trim();
+        OPS.taskFormDraft={
+          taskId,
+          text:sameTask?String(existing.text||''):String(edit.task.text||''),
+          epicId:selectedEpicId,
+          grade:normalizeTaskGrade(sameTask?existing.grade:edit.task.grade),
+          flags:sameTask?String(existing.flags||''):String((edit.task.flags||[]).join(', ')),
+          markers:sameTask?String(existing.markers||''):String((edit.task.markers||[]).join(', ')),
+          images:sameTask?String(existing.images||''):String(taskImageRefs(edit.task).join(', ')),
+        };
+        return OPS.taskFormDraft;
+      }
+      const selectedEpicId=epicIds.includes(String(existing.epicId||'').trim())
+        ? String(existing.epicId||'').trim()
+        : fallbackEpicId;
+      OPS.taskFormDraft={
+        taskId:'',
+        text:String(existing.taskId?'':existing.text||''),
+        epicId:selectedEpicId,
+        grade:normalizeTaskGrade(existing.taskId?'green':existing.grade),
+        flags:String(existing.taskId?'':existing.flags||''),
+        markers:String(existing.taskId?'':existing.markers||''),
+        images:String(existing.taskId?'':existing.images||''),
+      };
+      return OPS.taskFormDraft;
+    }
+
     function summarizeTaskFilters(epics,taskById,filters){
       const summary={total:0,filtered:0,active:0,ready:0,'in-progress':0,'ready-for-test':0,'needs-more-work':0,'not-synced':0,blocked:0,done:0,archived:0};
       (epics||[]).forEach(epic=>(epic.tasks||[]).forEach(task=>{
@@ -475,18 +560,20 @@
       const filters=currentTaskFilters();
       const filterSummary=summarizeTaskFilters(epics,taskLookup,filters);
       rememberTaskFilterFocus();
+      rememberTaskFormFocus();
       setDashboardTopbar(nameOf(project),`${counts.active} active | ${counts.done} done | ${OPS.taskData.branch||project.coreBranch||'main'}`);
       const edit=OPS.editingTask;
       const showCreateBand=!OPS.taskCreateCollapsed||!!edit;
       const filtersExpanded=!OPS.taskFiltersCollapsed;
-      const selectedEpicId=edit?edit.epic.id:(epics[0]&&epics[0].id)||'';
+      const taskDraft=normalizeTaskFormDraft(epics,edit);
+      const selectedEpicId=String(taskDraft.epicId||'').trim();
       const epicOptions=epics.map(epic=>`<option value="${esc(epic.id)}" ${epic.id===selectedEpicId?'selected':''}>${esc(epic.title)}</option>`).join('');
       const taskForm=epics.length?`
         <form class="tasks-form" data-ops-submit="save-task">
-          <input type="hidden" name="taskId" value="${edit?esc(edit.task.id):''}">
+          <input type="hidden" name="taskId" value="${esc(taskDraft.taskId||'')}">
           <label class="tasks-field">
             <span class="tasks-field-label">New task</span>
-            <input class="task-input" name="text" autocomplete="off" required value="${edit?esc(edit.task.text):''}" placeholder="Add a task for this epic">
+            <input class="task-input" name="text" autocomplete="off" required value="${esc(taskDraft.text||'')}" placeholder="Add a task for this epic">
           </label>
           <label class="tasks-field">
             <span class="tasks-field-label">Epic</span>
@@ -495,20 +582,20 @@
           <label class="tasks-field">
             <span class="tasks-field-label">Grade</span>
             <select class="task-select task-grade-select" name="grade">
-            ${['green','orange','red'].map(grade=>`<option value="${grade}" ${(edit&&edit.task.grade===grade)?'selected':''}>${grade}</option>`).join('')}
+            ${['green','orange','red'].map(grade=>`<option value="${grade}" ${taskDraft.grade===grade?'selected':''}>${grade}</option>`).join('')}
             </select>
           </label>
           <label class="tasks-field task-field-flags">
             <span class="tasks-field-label">Flags</span>
-            <input class="task-input" name="flags" autocomplete="off" value="${edit?esc((edit.task.flags||[]).join(', ')):''}" placeholder="Comma-separated, e.g. search">
+            <input class="task-input" name="flags" autocomplete="off" value="${esc(taskDraft.flags||'')}" placeholder="Comma-separated, e.g. search">
           </label>
           <label class="tasks-field">
             <span class="tasks-field-label">Markers</span>
-            <input class="task-input" name="markers" autocomplete="off" value="${edit?esc((edit.task.markers||[]).join(', ')):''}" placeholder="Comma-separated markers">
+            <input class="task-input" name="markers" autocomplete="off" value="${esc(taskDraft.markers||'')}" placeholder="Comma-separated markers">
           </label>
           <label class="tasks-field task-field-images">
             <span class="tasks-field-label">Images</span>
-            <input class="task-input" name="images" autocomplete="off" value="${edit?esc(taskImageRefs(edit.task).join(', ')):''}" placeholder="path or URL">
+            <input class="task-input" name="images" autocomplete="off" value="${esc(taskDraft.images||'')}" placeholder="path or URL">
           </label>
           <div class="tasks-form-actions">
             <button class="task-add-btn" type="submit">${edit?'Save task':'Add task'}</button>
@@ -593,7 +680,7 @@
                       <form class="tasks-form" data-ops-submit="create-epic">
                         <label class="tasks-field">
                           <span class="tasks-field-label">New epic</span>
-                          <input class="task-input" name="title" autocomplete="off" placeholder="Clean up the UI" required>
+                          <input class="task-input" name="title" autocomplete="off" value="${esc(OPS.createEpicDraftTitle||'')}" placeholder="Clean up the UI" required>
                         </label>
                         <div class="tasks-form-actions">
                           <button class="task-add-btn" type="submit">Add epic</button>
@@ -630,6 +717,7 @@
         </div>
       `;
       restoreTaskFilterFocus();
+      restoreTaskFormFocus();
     }
 
     function renderEpic(project,epic,tasks,taskById,index){
@@ -761,6 +849,28 @@
       updateTaskGrade(taskId,grade).catch(showError);
     }
 
+    function handleTaskFormField(event){
+      const form=event.target&&typeof event.target.closest==='function'
+        ? event.target.closest('form[data-ops-submit="save-task"], form[data-ops-submit="create-epic"]')
+        : null;
+      if(!form||!root()||!root().contains(form)||OPS.view!=='project-detail')return;
+      const data=Object.fromEntries(new FormData(form).entries());
+      if(form.dataset.opsSubmit==='create-epic'){
+        OPS.createEpicDraftTitle=String(data.title||'');
+        return;
+      }
+      if(form.dataset.opsSubmit!=='save-task')return;
+      OPS.taskFormDraft={
+        taskId:String(data.taskId||''),
+        text:String(data.text||''),
+        epicId:String(data.epicId||''),
+        grade:normalizeTaskGrade(data.grade||'green'),
+        flags:String(data.flags||''),
+        markers:String(data.markers||''),
+        images:String(data.images||''),
+      };
+    }
+
     return {
       splitImageRefs,
       normalizeTaskFilterStatus,
@@ -805,8 +915,12 @@
       taskMarkerList,
       taskFlagList,
       formatTaskDependencyLabel,
+      rememberTaskFormFocus,
+      restoreTaskFormFocus,
+      normalizeTaskFormDraft,
       handleTaskFilterField,
       handleTaskRowField,
+      handleTaskFormField,
     };
   }
 

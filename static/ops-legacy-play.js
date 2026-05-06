@@ -14,6 +14,9 @@
     const loadNotifications=ctx&&ctx.loadNotifications;
     const playInspectOverlayUrl=ctx&&ctx.playInspectOverlayUrl;
     const openProjectDetail=ctx&&ctx.openProjectDetail;
+    const notificationById=ctx&&ctx.notificationById;
+    const notificationTarget=ctx&&ctx.notificationTarget;
+    const playNotificationFallbackError=ctx&&ctx.playNotificationFallbackError;
     const windowRef=(ctx&&ctx.windowRef)||window;
     if(!OPS||typeof api!=='function'||typeof projectUrl!=='function'||typeof renderCurrentOpsView!=='function'||typeof showToast!=='function'||typeof esc!=='function'||!svg||!AgentBridgeRef||!AgentBridgeRef.play||!AgentBridgeRef.runtime){
       return {};
@@ -132,18 +135,22 @@
       const content=loading?'':String(doc.content||'');
       const target=loading?'Loading Play config...':String(doc.targetPath||doc.info&&doc.info.path||'');
       return `
-        <form class="ops-play-config-form" data-ops-submit="play-config" data-project-id="${esc(project.id)}">
-          <div class="ops-play-config-header">
+        <form class="tasks-card ops-play-config-panel" data-ops-submit="play-config" data-project-id="${esc(project.id)}">
+          <div class="tasks-card-header ops-play-config-header">
             <div>
-              <span>Play config</span>
-              <small>${esc(target)}</small>
+              <div class="tasks-card-title">Play config</div>
+              <div class="tasks-card-subtitle">${esc(target)}</div>
             </div>
-            <button class="ops-icon-btn" type="button" data-ops-action="close-play-config" title="Close">${svg.close}</button>
+            <div class="tasks-card-actions">
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="close-play-config">${svg.close}<span>Close</span></button>
+            </div>
           </div>
-          <textarea name="content" rows="14" spellcheck="false" ${loading?'disabled':''}>${esc(content)}</textarea>
-          <div class="ops-form-actions">
-            <button class="ops-btn primary" type="submit" ${loading?'disabled':''}>${svg.check}<span>Save</span></button>
-            <button class="ops-btn" type="button" data-ops-action="reload-play-config" data-project-id="${esc(project.id)}">${svg.refresh}<span>Reload</span></button>
+          <div class="tasks-card-body ops-play-config-body">
+            <textarea name="content" rows="14" spellcheck="false" ${loading?'disabled':''}>${esc(content)}</textarea>
+            <div class="tasks-card-actions ops-form-actions">
+              <button class="menu-action-btn small" type="submit" ${loading?'disabled':''}>${svg.check}<span>Save Play config</span></button>
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="reload-play-config" data-project-id="${esc(project.id)}">${svg.refresh}<span>Reload</span></button>
+            </div>
           </div>
         </form>
       `;
@@ -164,20 +171,22 @@
       const canLogs=!!(status.logsAvailable||running||status.status==='failed'||OPS.playLogsByProject[project.id]);
       const className=options&&options.detail?'ops-play-controls detail':'ops-play-controls';
       const blockClass=options&&options.detail?'ops-play-block detail':'ops-play-block';
+      const primaryButtonClass=options&&options.detail?'menu-action-btn small':'ops-btn primary';
+      const secondaryButtonClass=options&&options.detail?'menu-action-btn secondary small':'ops-btn';
       const startTitle=status.configAvailable?playStatusTitle(status):'Add project_play.json or .cloud-terminal/play.json to enable Play.';
       const summary=playStatusSummary(status);
       return `
         <div class="${blockClass}">
           <div class="${className}">
             <span class="ops-play-status ${esc(playStatusKind(status))}" title="${esc(playStatusTitle(status))}">${esc(playStatusLabel(status))}</span>
-            <button class="ops-btn" type="button" data-ops-action="show-play-config" data-project-id="${esc(project.id)}">${svg.edit}<span>Configure</span></button>
-            <button class="ops-btn" type="button" data-ops-action="start-play" data-project-id="${esc(project.id)}" title="${esc(startTitle)}" ${canStart?'':'disabled'}>${svg.play}<span>${busy&&OPS.playBusyByProject[project.id]==='start'?'Starting...':'Start'}</span></button>
-            ${canOpen?`<button class="ops-btn primary" type="button" data-ops-action="open-play" data-project-id="${esc(project.id)}">${svg.play}<span>Open</span></button>`:''}
-            ${canSnapshot?`<button class="ops-btn" type="button" data-ops-action="snapshot-play" data-project-id="${esc(project.id)}">${svg.folder}<span>${busy&&OPS.playBusyByProject[project.id]==='snapshot'?'Capturing...':'Snapshot'}</span></button>`:''}
-            ${canScreenshot?`<button class="ops-btn" type="button" data-ops-action="screenshot-play" data-project-id="${esc(project.id)}">${svg.folder}<span>${busy&&OPS.playBusyByProject[project.id]==='screenshot'?'Capturing...':'Screenshot'}</span></button>`:''}
-            ${canRestart?`<button class="ops-btn" type="button" data-ops-action="restart-play" data-project-id="${esc(project.id)}">${svg.refresh}<span>${busy&&OPS.playBusyByProject[project.id]==='restart'?'Restarting...':'Restart'}</span></button>`:''}
-            ${canStop?`<button class="ops-btn" type="button" data-ops-action="stop-play" data-project-id="${esc(project.id)}">${svg.close}<span>Stop</span></button>`:''}
-            ${canLogs?`<button class="ops-btn" type="button" data-ops-action="show-play-logs" data-project-id="${esc(project.id)}">Logs</button>`:''}
+            <button class="${secondaryButtonClass}" type="button" data-ops-action="show-play-config" data-project-id="${esc(project.id)}">${svg.edit}<span>Configure</span></button>
+            <button class="${primaryButtonClass}" type="button" data-ops-action="start-play" data-project-id="${esc(project.id)}" title="${esc(startTitle)}" ${canStart?'':'disabled'}>${svg.play}<span>${busy&&OPS.playBusyByProject[project.id]==='start'?'Starting...':'Start'}</span></button>
+            ${canOpen?`<button class="${primaryButtonClass}" type="button" data-ops-action="open-play" data-project-id="${esc(project.id)}">${svg.play}<span>Open</span></button>`:''}
+            ${canSnapshot?`<button class="${secondaryButtonClass}" type="button" data-ops-action="snapshot-play" data-project-id="${esc(project.id)}">${svg.folder}<span>${busy&&OPS.playBusyByProject[project.id]==='snapshot'?'Capturing...':'Snapshot'}</span></button>`:''}
+            ${canScreenshot?`<button class="${secondaryButtonClass}" type="button" data-ops-action="screenshot-play" data-project-id="${esc(project.id)}">${svg.folder}<span>${busy&&OPS.playBusyByProject[project.id]==='screenshot'?'Capturing...':'Screenshot'}</span></button>`:''}
+            ${canRestart?`<button class="${secondaryButtonClass}" type="button" data-ops-action="restart-play" data-project-id="${esc(project.id)}">${svg.refresh}<span>${busy&&OPS.playBusyByProject[project.id]==='restart'?'Restarting...':'Restart'}</span></button>`:''}
+            ${canStop?`<button class="${secondaryButtonClass}" type="button" data-ops-action="stop-play" data-project-id="${esc(project.id)}">${svg.close}<span>Stop</span></button>`:''}
+            ${canLogs?`<button class="${secondaryButtonClass}" type="button" data-ops-action="show-play-logs" data-project-id="${esc(project.id)}">Logs</button>`:''}
           </div>
           ${summary?`<div class="ops-play-summary ${esc(playStatusKind(status))}">${esc(summary)}</div>`:''}
         </div>
@@ -188,14 +197,22 @@
       const entry=OPS.playLogsByProject[projectId];
       if(!entry)return '';
       const text=typeof entry==='string'?entry:(entry.text||'');
+      const lineCount=(text.match(/\n/g)||[]).length+(text?1:0);
       return `
-        <div class="ops-play-log-panel">
-          <div class="ops-play-log-header">
-            <span>Play logs</span>
-            <button class="ops-btn" type="button" data-ops-action="show-play-logs" data-project-id="${esc(projectId)}">${svg.refresh}<span>Refresh</span></button>
+        <section class="tasks-card ops-play-log-panel">
+          <div class="tasks-card-header ops-play-log-header">
+            <div>
+              <div class="tasks-card-title">Play logs</div>
+              <div class="tasks-card-subtitle">${esc(lineCount?`${lineCount} line${lineCount===1?'':'s'} captured`:'No Play logs yet')}</div>
+            </div>
+            <div class="tasks-card-actions">
+              <button class="menu-action-btn secondary small" type="button" data-ops-action="show-play-logs" data-project-id="${esc(projectId)}">${svg.refresh}<span>Refresh</span></button>
+            </div>
           </div>
-          <pre class="ops-play-logs">${esc(text||'No Play logs yet.')}</pre>
-        </div>
+          <div class="tasks-card-body">
+            <pre class="ops-play-logs">${esc(text||'No Play logs yet.')}</pre>
+          </div>
+        </section>
       `;
     }
 
@@ -210,13 +227,17 @@
         snapshot.size?`${snapshot.size} bytes`:'',
       ].filter(Boolean).join(' | ');
       return `
-        <div class="ops-play-snapshot-panel">
-          <div>
-            <span>Runtime snapshot</span>
-            <small>${esc(label||'Captured runtime response')}</small>
+        <section class="tasks-card ops-play-snapshot-panel">
+          <div class="tasks-card-header">
+            <div>
+              <div class="tasks-card-title">Runtime snapshot</div>
+              <div class="tasks-card-subtitle">${esc(label||'Captured runtime response')}</div>
+            </div>
+            <div class="tasks-card-actions">
+              ${href?`<a class="menu-action-btn secondary small" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${svg.folder}<span>Open</span></a>`:''}
+            </div>
           </div>
-          ${href?`<a class="ops-btn" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${svg.folder}<span>Open</span></a>`:''}
-        </div>
+        </section>
       `;
     }
 
@@ -231,13 +252,17 @@
         screenshot.createdAt||'',
       ].filter(Boolean).join(' | ');
       return `
-        <div class="ops-play-snapshot-panel">
-          <div>
-            <span>Runtime screenshot</span>
-            <small>${esc(label||'Captured browser screenshot')}</small>
+        <section class="tasks-card ops-play-snapshot-panel">
+          <div class="tasks-card-header">
+            <div>
+              <div class="tasks-card-title">Runtime screenshot</div>
+              <div class="tasks-card-subtitle">${esc(label||'Captured browser screenshot')}</div>
+            </div>
+            <div class="tasks-card-actions">
+              ${href?`<a class="menu-action-btn secondary small" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${svg.folder}<span>Open</span></a>`:''}
+            </div>
           </div>
-          ${href?`<a class="ops-btn" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${svg.folder}<span>Open</span></a>`:''}
-        </div>
+        </section>
       `;
     }
 
@@ -358,34 +383,32 @@
 
     function openPlayNotification(notificationId){
       const id=String(notificationId||'').trim();
-      return AgentBridgeRef.play.notificationTarget(id)
-        .then(target=>{
-          const url=typeof playInspectOverlayUrl==='function'?playInspectOverlayUrl({inspectUrl:target&&target.inspectUrl}):'';
-          if(!url){
-            showToast('No Play inspect URL found for this notification.',3000);
-            return;
-          }
-          windowRef.location.assign(url);
-        })
-        .catch(err=>{
-          showToast(err&&err.message?err.message:'No Play inspect URL found for this notification.',3000);
-        });
+      const note=typeof notificationById==='function'?notificationById(id):null;
+      const url=typeof playInspectOverlayUrl==='function'?playInspectOverlayUrl(note||{}):'';
+      if(!url){
+        showToast('No Play inspect URL found for this notification.',3000);
+        return Promise.resolve();
+      }
+      windowRef.location.assign(url);
+      return Promise.resolve();
     }
 
     async function repairPlayNotification(notificationId){
       const id=String(notificationId||'').trim();
-      const targetInfo=await AgentBridgeRef.play.notificationTarget(id).catch(err=>{
-        showToast(err&&err.message?err.message:'Notification was not found.',2600);
-        return null;
-      });
-      if(!targetInfo)return;
-      const target=(targetInfo&&targetInfo.terminalTarget&&typeof targetInfo.terminalTarget==='object')?targetInfo.terminalTarget:{};
+      const note=typeof notificationById==='function'?notificationById(id):null;
+      if(!note){
+        showToast('Notification was not found.',2600);
+        return;
+      }
+      const target=typeof notificationTarget==='function'?notificationTarget(note):{};
       const projectId=String(target.projectId||'').trim();
       if(!projectId){
         showToast('Project metadata is missing for this Play repair request.',3200);
         return;
       }
-      const fallbackError=String(targetInfo&&targetInfo.fallbackError||'').trim();
+      const fallbackError=typeof playNotificationFallbackError==='function'
+        ? playNotificationFallbackError(note)
+        : String(note&&note.playFallbackError||'').trim();
       if(typeof openProjectDetail==='function')await openProjectDetail(projectId);
       await showProjectPlayLogs(projectId).catch(()=>null);
       await showProjectPlayConfig(projectId).catch(()=>null);

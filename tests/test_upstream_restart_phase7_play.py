@@ -201,6 +201,31 @@ def test_phase7_play_start_stop_status_and_logs(monkeypatch, tmp_path, git_avail
     assert _response_json(stop)["stopped"] is True
 
 
+def test_phase7_ops_notifications_include_play_ready_state(monkeypatch, tmp_path, git_available):
+    _repo, project_id = setup_project(monkeypatch, tmp_path, valid_proxy_config())
+
+    from api import ops_notifications, play_pipeline
+
+    with play_pipeline._LOCK:
+        state = play_pipeline.PlayPipelineState(project_id=project_id)
+        state.project_id = project_id
+        state.status = "ready"
+        state.running = True
+        state.ready = True
+        state.inspect_url = f"/play-project/{project_id}/app"
+        state.ready_at = "2026-05-06T06:00:00Z"
+        state.updated_at = "2026-05-06T06:00:00Z"
+        play_pipeline._PIPELINES[project_id] = state
+
+    payload = ops_notifications.list_pending_notifications(project_id)
+    play_note = next(item for item in payload["notifications"] if item["kind"] == "play")
+
+    assert play_note["project"]["id"] == project_id
+    assert play_note["inspectUrl"] == f"/play-project/{project_id}/app"
+    assert play_note["playStatus"] == "ready"
+    assert play_note["playNeedsRepair"] is False
+
+
 def test_phase7_play_proxy_dispatch_rewrites_html_and_locations(monkeypatch, tmp_path, git_available):
     setup_project(monkeypatch, tmp_path, valid_proxy_config())
 

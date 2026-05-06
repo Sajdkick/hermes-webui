@@ -190,6 +190,86 @@ def test_phase4_ops_sessions_route_enriches_latest_task_session_tip(monkeypatch,
     assert payload["groups"][0]["sessions"][0]["ops_project_id"] == project["id"]
 
 
+def test_phase4_ops_sessions_hides_orphaned_ops_task_sessions(monkeypatch, tmp_path):
+    from api import ops_projects, ops_runs, ops_sessions
+
+    project = {
+        "id": "project-1",
+        "name": "Hermes",
+        "fullName": "Sajdkick/hermes-webui",
+        "path": str(tmp_path / "repo"),
+        "resolvedPath": str((tmp_path / "repo").resolve()),
+        "coreBranch": "master",
+    }
+    monkeypatch.setattr(ops_projects, "get_ops_project", lambda project_id: project)
+    monkeypatch.setattr(
+        ops_projects,
+        "read_ops_project_tasks",
+        lambda project_id: {
+            "epics": [
+                {
+                    "title": "Ops",
+                    "tasks": [
+                        {
+                            "id": "task-1",
+                            "text": "Investigate the real session",
+                            "linkedSessions": [
+                                {
+                                    "sessionId": "linked-session",
+                                    "updatedAt": "2026-05-05T12:00:00Z",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(ops_runs, "list_ops_runs", lambda filters=None: {"runs": []})
+    monkeypatch.setattr(
+        ops_sessions,
+        "all_sessions",
+        lambda: [
+            {
+                "session_id": "linked-session",
+                "_lineage_root_id": "linked-session",
+                "workspace": str((tmp_path / "repo").resolve()),
+                "title": "Hermes: Investigate the real session",
+                "source_tag": "ops_task",
+                "archived": False,
+                "updated_at": "2026-05-05T12:00:00Z",
+            },
+            {
+                "session_id": "manual-session",
+                "_lineage_root_id": "manual-session",
+                "workspace": str((tmp_path / "repo").resolve()),
+                "title": "Manual investigation",
+                "archived": False,
+                "updated_at": "2026-05-05T12:05:00Z",
+            },
+            {
+                "session_id": "orphan-session",
+                "_lineage_root_id": "orphan-session",
+                "workspace": str((tmp_path / "repo").resolve()),
+                "title": "",
+                "source_tag": "ops_task",
+                "archived": False,
+                "updated_at": "2026-05-05T12:10:00Z",
+            },
+        ],
+    )
+
+    payload = ops_sessions.list_ops_sessions(project["id"])
+
+    session_ids = [session["session_id"] for session in payload["sessions"]]
+    assert "orphan-session" not in session_ids
+    assert "linked-session" in session_ids
+    assert "manual-session" in session_ids
+    assert payload["groups"][0]["sessionCount"] == 2
+    linked = next(session for session in payload["sessions"] if session["session_id"] == "linked-session")
+    assert linked["ops_task_id"] == "task-1"
+
+
 def test_phase4_close_task_session_archives_linked_session_and_stops_run(monkeypatch, tmp_path, git_available):
     monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
 
@@ -276,6 +356,43 @@ def test_phase4_complete_task_route_marks_task_done_and_run_succeeded(monkeypatc
     assert complete_payload["task"]["done"] is True
     assert complete_payload["task"]["completedAt"]
     assert complete_payload["run"]["status"] == "succeeded"
+
+    tasks = _FakeHandler()
+    assert handle_get(tasks, urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks")) is True
+    linked_task = next(epic["tasks"][0] for epic in _response_json(tasks)["epics"] if epic["id"] == epic_id)
+    assert linked_task["done"] is True
+
+
+def test_phase4_complete_task_route_without_linked_session_still_marks_task_done(monkeypatch, tmp_path, git_available):
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
+
+    repo = init_project_repo(tmp_path)
+
+    from api.routes import handle_get, handle_post
+
+    create = _FakeHandler({"name": "Sessionless Complete Project", "path": str(repo), "coreBranch": "main"})
+    assert handle_post(create, urlparse("http://example.com/api/ops/projects")) is True
+    project = _response_json(create)["project"]
+
+    epic_create = _FakeHandler({"title": "Phase 4"})
+    assert handle_post(epic_create, urlparse(f"http://example.com/api/ops/projects/{project['id']}/epics")) is True
+    epic_id = _response_json(epic_create)["epic"]["id"]
+
+    task_create = _FakeHandler({"epicId": epic_id, "text": "Complete this task without a linked session"})
+    assert handle_post(task_create, urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks")) is True
+    task = _response_json(task_create)["task"]
+
+    complete = _FakeHandler({})
+    assert handle_post(
+        complete,
+        urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks/{task['id']}/complete"),
+    ) is True
+    complete_payload = _response_json(complete)
+
+    assert complete_payload["ok"] is True
+    assert complete_payload["task"]["done"] is True
+    assert complete_payload["task"]["completedAt"]
+    assert complete_payload["run"] is None
 
     tasks = _FakeHandler()
     assert handle_get(tasks, urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks")) is True

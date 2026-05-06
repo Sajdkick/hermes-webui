@@ -36,6 +36,7 @@
     const loadProjectReviewRequests=ctx&&ctx.loadProjectReviewRequests;
     const loadProjectDeployment=ctx&&ctx.loadProjectDeployment;
     const loadProjectDatabase=ctx&&ctx.loadProjectDatabase;
+    const windowRef=(ctx&&ctx.windowRef)||window;
     if(
       !OPS
       || typeof api!=='function'
@@ -78,6 +79,14 @@
     }
 
     let activeProjectsLoadToken=0;
+
+    function syncStandaloneOpsHistory(view,projectId){
+      if(!windowRef||typeof windowRef.__opsLegacySyncHistoryState!=='function')return;
+      const current=typeof windowRef.__opsLegacyReadHistoryState==='function'
+        ? windowRef.__opsLegacyReadHistoryState(windowRef.history&&windowRef.history.state)
+        : null;
+      windowRef.__opsLegacySyncHistoryState(view,projectId,{mode:current?'push':'replace'});
+    }
 
     function normalizePath(value){
       return String(value||'').replace(/\/+$/,'');
@@ -444,7 +453,9 @@
       return OPS.projects;
     }
 
-    async function openProjects(){
+    async function openProjects(options){
+      const opts=options&&typeof options==='object'?options:{};
+      if(opts.historyMode!=='skip')syncStandaloneOpsHistory('projects','');
       OPS.view='projects';
       OPS.currentProject=null;
       OPS.taskData=null;
@@ -475,11 +486,19 @@
       return OPS.taskData;
     }
 
-    async function openProjectDetail(projectId){
+    async function openProjectDetail(projectId,options){
+      const opts=options&&typeof options==='object'?options:{};
+      if(opts.historyMode!=='skip')syncStandaloneOpsHistory('project-detail',projectId);
       const project=findProject(projectId);
       OPS.view='project-detail';
       OPS.currentProject=project;
       OPS.editingTask=null;
+      OPS.taskFormDraft=null;
+      OPS.createEpicDraftTitle='';
+      OPS.taskFormFocusedForm='';
+      OPS.taskFormFocusedField='';
+      OPS.taskFormSelectionStart=null;
+      OPS.taskFormSelectionEnd=null;
       OPS.selectedRunId='';
       OPS.runDetail=null;
       OPS.runReadableOutput=null;

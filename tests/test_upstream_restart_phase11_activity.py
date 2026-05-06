@@ -313,6 +313,127 @@ def test_phase11_home_session_activity_overview_matches_cloud_terminal_shape():
     assert completed.stdout.strip() == "ok"
 
 
+def test_phase11_home_active_session_rows_open_from_the_whole_card():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (() => {
+          const source = fs.readFileSync('static/ops-legacy-home.js', 'utf8');
+          const windowRef = { HermesOpsModules: {}, setInterval: () => 1 };
+          const context = {
+            console,
+            window: windowRef,
+            document: { activeElement: null },
+            navigator: {},
+            URL,
+            setTimeout,
+            clearTimeout,
+          };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const project = {
+            id: 'project-1',
+            name: 'Hermes',
+            fullName: 'Sajdkick/hermes-webui',
+            coreBranch: 'master',
+          };
+          const session = {
+            session_id: 'session-1',
+            title: 'Fix the live dashboard',
+            updated_at: 1746400800,
+            active_stream_id: 'stream-1',
+            projectId: 'project-1',
+          };
+
+          const dashboard = context.window.HermesOpsModules.home.bindDashboard({
+            OPS: {
+              loading: false,
+              projects: [project],
+              sessions: [session],
+              sessionActivity: [],
+              sessionActivityGroups: [],
+              sessionActivityCollapsed: {},
+              sessionActivityInitialized: {},
+              sessionActivityExpanded: true,
+              sessionActivityLastRefreshedAt: 0,
+              sessionActivityError: '',
+              sessionActivityBusy: false,
+              sessionActivityFocusGroupId: '',
+              quickTaskImages: [],
+            },
+            AgentBridge: { sessions: {} },
+            renderCurrentOpsView: () => {},
+            root: () => ({ contains: () => true, querySelectorAll: () => [] }),
+            esc: (value) => String(value ?? ''),
+            svg: { folder: '', close: '', chat: '', play: '', refresh: '', check: '', arrow: '' },
+            showError: () => {},
+            setBusy: () => {},
+            setDashboardTopbar: () => {},
+            renderNotifications: () => '',
+            normalizedAutoApprovalPolicy: () => ({ enabled: false }),
+            loadProjects: async () => [],
+            openProjectDetail: async () => null,
+            loadNotifications: async () => [],
+            loadOpsRuns: async () => [],
+            loadNotificationDiagnostics: async () => null,
+            openOpsSession: async () => null,
+            findProject: (projectId) => projectId === 'project-1' ? project : null,
+            projectUsesBranchTitle: () => false,
+            projectBranchLabel: () => 'master',
+            projectCardTitle: (entry) => entry.fullName || entry.name || entry.id,
+            projectRepositoryLabel: (entry) => entry.fullName || entry.name || entry.id,
+            normalizeRunStatus: () => 'running',
+            runStatusLabel: () => 'Running',
+            runStatusKind: () => 'running',
+            formatOpsDateTime: () => 'now',
+            renderProjectGitQuickAction: () => '',
+            renderProjectPlayQuickAction: () => '',
+            renderProjectActivityQuickAction: () => '',
+            sessionAccentStyle: () => '',
+            sessionGroupAccentStyle: () => '',
+            sessionRefValue: (entry) => entry.session_id || entry.id,
+            canonicalTaskSessions: (sessions) => sessions,
+            projectSessionsFor: () => [session],
+            isSessionForProject: () => true,
+            taskImageLabel: () => '',
+            writeStoredJson: () => {},
+            sessionActivityStorageKey: 'activity-collapse',
+            navigatorRef: {},
+            windowRef,
+            documentRef: context.document,
+            URLRef: URL,
+            MediaRecorderRef: function(){},
+            FileRef: function(){},
+            showPromptDialog: async () => null,
+            showConfirmDialog: async () => false,
+            requestAnimationFrameRef: (cb) => cb(),
+            taskDictationPrompt: '',
+            taskDictationAudioBitsPerSecond: 0,
+            runActiveStatusValues: ['running'],
+          });
+
+          const html = dashboard.renderProjectSessionRows(project, [session]);
+          if (!html.includes('data-ops-session-row="true"')) throw new Error('Missing interactive session-row marker.');
+          if (!html.includes('data-ops-action="open-session"')) throw new Error('Missing whole-row open-session action.');
+          if (!html.includes('ops-session running interactive')) throw new Error('Missing interactive active-session card class.');
+          if (!html.includes('Open session')) throw new Error('Missing explicit open-session button.');
+
+          console.log('ok');
+        })();
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
 def test_phase11_home_menu_shell_matches_cloud_terminal_shape():
     script = textwrap.dedent(
         """
@@ -434,10 +555,16 @@ def test_phase11_home_menu_shell_matches_cloud_terminal_shape():
           if (!html.includes('menu-quick-task-form')) throw new Error('Missing Cloud Terminal quick task form wrapper.');
           if (!html.includes('task-add-btn')) throw new Error('Missing Cloud Terminal quick task primary button style.');
           if (!html.includes('Create & run')) throw new Error('Missing Cloud Terminal quick task submit label.');
+          if (!html.includes('Run as standing /goal')) throw new Error('Missing Hermes quick-task goal-mode toggle.');
           if (!html.includes('menu-actions')) throw new Error('Missing Cloud Terminal menu action strip.');
           if (!html.includes('data-ops-action="show-create-project"')) throw new Error('Missing create-project menu action.');
+          if (!html.includes('data-ops-action="view-deployments"')) throw new Error('Missing deployments menu action.');
+          if (!html.includes('data-ops-action="view-todos"')) throw new Error('Missing todos menu action.');
+          if (!html.includes('data-ops-action="view-files"')) throw new Error('Missing files menu action.');
+          if (!html.includes('data-ops-action="view-settings"')) throw new Error('Missing settings menu action.');
+          if (!html.includes('Back to terminal')) throw new Error('Missing back-to-terminal menu action.');
+          if (html.includes('Back to Hermes')) throw new Error('Legacy back-to-Hermes action should not remain in the Cloud Terminal parity shell.');
           if (!html.includes('while this menu is visible.')) throw new Error('Missing Cloud Terminal active-session help copy.');
-          if (html.includes('Run as standing /goal')) throw new Error('Hermes-only goal-mode control should not be rendered in the Cloud Terminal parity shell.');
           if (html.includes('ops-home-top')) throw new Error('Legacy Hermes home top bar should not render in the Cloud Terminal parity shell.');
 
           console.log('ok');
@@ -631,6 +758,279 @@ def test_phase11_project_runs_match_cloud_terminal_card_shape():
           if (!detailHtml.includes('menu-notification-list')) throw new Error('Missing Cloud Terminal notification list inside run detail.');
           if (!detailHtml.includes('menu-notification-response-panel')) throw new Error('Missing Cloud Terminal response panel inside run detail.');
           if (detailHtml.includes('ops-icon-btn')) throw new Error('Legacy Hermes icon-only close button should not render in run detail.');
+
+          console.log('ok');
+        })();
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_phase11_project_side_panels_match_cloud_terminal_card_shape():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (() => {
+          const windowRef = {
+            HermesOpsModules: {},
+            location: { assign: () => {} },
+            setTimeout,
+            clearTimeout,
+          };
+          const context = {
+            console,
+            window: windowRef,
+            URL,
+            setTimeout,
+            clearTimeout,
+          };
+          vm.createContext(context);
+          [
+            'static/ops-legacy-deployments.js',
+            'static/ops-legacy-database.js',
+            'static/ops-legacy-health.js',
+            'static/ops-legacy-play.js',
+          ].forEach((path) => vm.runInContext(fs.readFileSync(path, 'utf8'), context));
+
+          const project = {
+            id: 'project-1',
+            name: 'Hermes',
+            active: true,
+            profile: 'default',
+            opsCapabilities: {
+              deployment: true,
+              dependencyHealth: true,
+              dependencyInstall: true,
+              inodeScan: true,
+              inodeCleanup: true,
+              projectActivity: true,
+              projectSettings: true,
+            },
+          };
+          const OPS = {
+            projects: [project],
+            currentProject: project,
+            deploymentsByProject: {
+              'project-1': {
+                deployment: {
+                  status: 'ready',
+                  summary: 'Deployment is healthy.',
+                  provider: 'manual',
+                  environment: 'production',
+                  url: 'https://example.com/deploy',
+                },
+                artifacts: [{ relativePath: 'Dockerfile', kind: 'dockerfile' }],
+                logs: [{ message: 'Deploy completed.' }],
+              },
+            },
+            deploymentBusyByProject: {},
+            databaseSettings: {
+              configured: true,
+              settings: { kind: 'sqlite', label: 'Main DB', path: '/tmp/main.db' },
+            },
+            databaseTables: [{ name: 'users', columns: [{}, {}] }],
+            databaseBusy: false,
+            databaseError: '',
+            projectDatabaseByProject: {
+              'project-1': {
+                settings: {
+                  configured: true,
+                  inherited: true,
+                  settings: { kind: 'postgres', label: 'Project DB', path: 'postgres://db' },
+                },
+                tables: [{ name: 'tasks', columns: [{}] }],
+              },
+            },
+            projectDatabaseBusyByProject: {},
+            migrationHealth: {
+              status: 'ready',
+              summary: 'Ready to retire the old Cloud Terminal shell.',
+              checks: [{ id: 'check-1', title: 'Paths', status: 'ready', summary: 'No legacy paths remain.' }],
+              counts: { projects: 1, tasks: 2, activeRuns: 0 },
+            },
+            migrationHealthBusy: false,
+            artifactHealth: {
+              issueCount: 0,
+              artifactCount: 4,
+              fileReferenceCount: 2,
+              urlReferenceCount: 2,
+              missingFileCount: 0,
+              orphanArtifactCount: 0,
+              issues: [],
+            },
+            artifactHealthBusy: false,
+            projectHealthByProject: {
+              'project-1': {
+                dependencies: {
+                  manager: 'pnpm',
+                  status: 'ready',
+                  installCommandText: 'pnpm install',
+                  supported: true,
+                },
+                inodeScan: {
+                  totalInodes: 24,
+                  totalBytes: 4096,
+                  directories: [{ path: 'node_modules' }],
+                },
+                cleanup: {
+                  status: 'finished',
+                  removed: [],
+                },
+              },
+            },
+            projectHealthBusyByProject: {},
+            gatherReportsByProject: {
+              'project-1': [{
+                status: 'succeeded',
+                title: 'Runtime gather report',
+                updatedAt: '2026-05-05T12:00:00Z',
+                eventsCount: 2,
+                runId: 'run-1',
+                reportPath: '/tmp/report.json',
+                summary: 'Gather completed.',
+              }],
+            },
+            gatherBusyByProject: {},
+            reviewRequestsByProject: {
+              'project-1': [{
+                status: 'requested',
+                title: 'Runtime review',
+                updatedAt: '2026-05-05T12:00:00Z',
+                eventsCount: 1,
+                runId: 'run-2',
+                kind: 'visual',
+                reviewPath: '/tmp/review.json',
+                summary: 'Waiting for review.',
+              }],
+            },
+            reviewBusyByProject: {},
+            playConfigEditingProjectId: 'project-1',
+            playConfigByProject: {
+              'project-1': {
+                targetPath: '/tmp/project_play.json',
+                content: '{\\n  "version": 2\\n}',
+              },
+            },
+            playStatusByProject: {
+              'project-1': {
+                status: 'ready',
+                kind: 'ready',
+                label: 'Play ready',
+                title: 'Play is ready.',
+                summary: 'Inspect overlay is available.',
+                configAvailable: true,
+                configValid: true,
+                inspectUrl: 'https://example.com/inspect',
+                ready: true,
+                running: false,
+                logsAvailable: true,
+              },
+            },
+            playBusyByProject: {},
+            playLogsByProject: {
+              'project-1': { text: 'first line\\nsecond line' },
+            },
+            playSnapshotsByProject: {
+              'project-1': {
+                bodyPath: '/tmp/snapshot.json',
+                statusCode: 200,
+                contentType: 'application/json',
+                size: 42,
+              },
+            },
+            playScreenshotsByProject: {
+              'project-1': {
+                screenshotPath: '/tmp/screenshot.png',
+                selector: 'main',
+                size: 84,
+                createdAt: '2026-05-05T12:00:00Z',
+              },
+            },
+          };
+
+          const shared = {
+            OPS,
+            api: async () => ({}),
+            projectUrl: (projectId, path) => `/api/ops/projects/${projectId}${path}`,
+            renderCurrentOpsView: () => {},
+            showToast: () => {},
+            showPromptDialog: async () => '',
+            showConfirmDialog: async () => true,
+            esc: (value) => String(value ?? ''),
+            svg: {
+              refresh: '',
+              plus: '',
+              check: '',
+              play: '',
+              folder: '',
+              edit: '',
+              close: '',
+              grid: '',
+              trash: '',
+            },
+            nameOf: (entry) => entry.name || entry.id,
+            findProject: (projectId) => projectId === project.id ? project : null,
+            openProjects: () => {},
+            renderProjectProfileOptions: () => '<option value="default">Default</option>',
+            mergeProjectUpdate: () => {},
+            AgentBridge: {
+              runtime: {
+                gatherReports: async () => ({ reports: OPS.gatherReportsByProject['project-1'] }),
+                reviewRequests: async () => ({ reviews: OPS.reviewRequestsByProject['project-1'] }),
+                screenshot: async () => ({ screenshot: OPS.playScreenshotsByProject['project-1'] }),
+              },
+              play: {
+                status: async () => OPS.playStatusByProject['project-1'],
+                config: async () => OPS.playConfigByProject['project-1'],
+                saveConfig: async () => ({ saved: true }),
+                logs: async () => OPS.playLogsByProject['project-1'],
+                notificationTarget: async () => ({}),
+              },
+            },
+            loadNotifications: async () => {},
+            playInspectOverlayUrl: ({ inspectUrl }) => inspectUrl || '',
+            openProjectDetail: async () => {},
+            windowRef: { location: { assign: () => {} } },
+          };
+
+          const deployments = context.window.HermesOpsModules.deployments.bindDashboard(shared);
+          const database = context.window.HermesOpsModules.database.bindDashboard(shared);
+          const health = context.window.HermesOpsModules.health.bindDashboard(shared);
+          const play = context.window.HermesOpsModules.play.bindDashboard(shared);
+
+          const panels = [
+            ['deployment', deployments.renderProjectDeployment(project), ['tasks-card ops-deployment-panel', 'menu-action-btn small'], [/class="ops-btn/, /class="ops-panel/]],
+            ['database', database.renderDatabasePanel(), ['tasks-card ops-database-panel', 'menu-action-btn small'], [/class="ops-btn/, /class="ops-panel/]],
+            ['project database', database.renderProjectDatabase(project), ['tasks-card ops-project-database-panel'], [/class="ops-btn/, /class="ops-panel/]],
+            ['migration health', health.renderMigrationHealthPanel(), ['tasks-card ops-migration-health-panel'], [/class="ops-btn/, /class="ops-panel/]],
+            ['artifact health', health.renderArtifactHealthPanel(), ['tasks-card ops-artifact-health-panel'], [/class="ops-btn/, /class="ops-panel/]],
+            ['project health', health.renderProjectHealth(project), ['tasks-card ops-project-health-panel', 'menu-action-btn danger small'], [/class="ops-btn/, /class="ops-panel/]],
+            ['project settings', health.renderProjectSettings(project), ['tasks-card ops-project-settings-panel', 'menu-action-btn small'], [/class="ops-btn/, /class="ops-panel/]],
+            ['gather reports', health.renderProjectGatherReports(project), ['tasks-card ops-gather-panel', 'menu-action-btn secondary small'], [/class="ops-btn/, /class="ops-panel/]],
+            ['review requests', health.renderProjectReviewRequests(project), ['tasks-card ops-gather-panel', 'menu-action-btn secondary small'], [/class="ops-btn/, /class="ops-panel/]],
+            ['play config', play.renderProjectPlayConfigEditor(project), ['tasks-card ops-play-config-panel', 'Save Play config'], [/ops-icon-btn/, /class="ops-btn/]],
+            ['play detail controls', play.renderProjectPlayControls(project, { detail: true }), ['menu-action-btn small', 'menu-action-btn secondary small'], [/class="ops-btn/]],
+            ['play logs', play.renderProjectPlayLogs(project.id), ['tasks-card ops-play-log-panel'], [/class="ops-btn/, /class="ops-panel/]],
+            ['play snapshot', play.renderProjectRuntimeSnapshot(project.id), ['tasks-card ops-play-snapshot-panel'], [/class="ops-btn/, /class="ops-panel/]],
+            ['play screenshot', play.renderProjectRuntimeScreenshot(project.id), ['tasks-card ops-play-snapshot-panel'], [/class="ops-btn/, /class="ops-panel/]],
+          ];
+
+          panels.forEach(([label, html, includes, excludes]) => {
+            includes.forEach((needle) => {
+              if (!html.includes(needle)) throw new Error(`Missing ${needle} in ${label}.`);
+            });
+            excludes.forEach((pattern) => {
+              if (pattern.test(html)) throw new Error(`Legacy shell pattern ${pattern} should not render in ${label}.`);
+            });
+          });
 
           console.log('ok');
         })();

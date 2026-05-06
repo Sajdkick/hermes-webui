@@ -306,6 +306,8 @@ def list_ops_sessions(project_id: str | None = None) -> dict:
         project = meta.get("project") if meta else None
         task = meta.get("task") if meta else None
         run = meta.get("run") if meta else None
+        if str(session.get("source_tag") or "").strip() == OPS_TASK_SOURCE_TAG and not task:
+            continue
         if not project:
             for candidate in projects:
                 if _session_matches_project(session, candidate):
@@ -442,11 +444,9 @@ def close_task_session(project_id: str, task_id: str, body: dict | None = None) 
     if not selected_linkage and linkages:
         selected_linkage = linkages[0]
 
-    resolved_session_id = (
-        str((selected_linkage or {}).get("sessionId") or "").strip()
-        or session_sidecars.resolve_session_id(requested_session_id)
-        or requested_session_id
-    )
+    resolved_session_id = str((selected_linkage or {}).get("sessionId") or "").strip()
+    if not resolved_session_id and requested_session_id:
+        resolved_session_id = session_sidecars.resolve_session_id(requested_session_id) or requested_session_id
     if not resolved_session_id:
         raise OpsSessionError("Session not found.", 404)
 

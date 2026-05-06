@@ -1028,7 +1028,7 @@
 .ops-project-health-grid span{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.04em;}
 .ops-project-health-grid strong{font-size:14px;color:var(--text);line-height:1.25;overflow-wrap:anywhere;}
 .ops-project-health-grid small{font-size:11px;color:var(--muted);line-height:1.35;overflow-wrap:anywhere;}
-.ops-project-health-grid .ops-btn{align-self:flex-start;margin-top:2px;}
+.ops-project-health-grid .ops-btn,.ops-project-health-grid .menu-action-btn{align-self:flex-start;margin-top:2px;}
 .ops-home-project-list,.ops-home-session-list{display:flex;flex-direction:column;gap:10px;padding:12px;}
 .ops-home-session-card{border:1px solid var(--border);border-radius:8px;background:var(--input-bg);overflow:hidden;}
 .ops-home-session-card-header{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--border);}
@@ -1201,8 +1201,8 @@
 .ops-play-config-header>div{min-width:0;display:flex;flex-direction:column;gap:3px;}
 .ops-play-config-header span{font-size:13px;font-weight:750;color:var(--text);}
 .ops-play-config-header small{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:min(720px,70vw);}
-.ops-play-config-form textarea{width:100%;min-width:0;box-sizing:border-box;border:1px solid var(--border2);border-radius:7px;background:var(--surface);color:var(--pre-text);padding:10px;font:11px/1.5 "SF Mono",ui-monospace,monospace;resize:vertical;outline:none;tab-size:2;}
-.ops-play-config-form textarea:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-bg);}
+.ops-play-config-form textarea,.ops-play-config-panel textarea{width:100%;min-width:0;box-sizing:border-box;border:1px solid var(--border2);border-radius:7px;background:var(--surface);color:var(--pre-text);padding:10px;font:11px/1.5 "SF Mono",ui-monospace,monospace;resize:vertical;outline:none;tab-size:2;}
+.ops-play-config-form textarea:focus,.ops-play-config-panel textarea:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-bg);}
 .ops-play-snapshot-panel{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg);padding:10px 12px;}
 .ops-project-detail .ops-play-snapshot-panel{margin:0;}
 .ops-play-snapshot-panel>div{display:flex;flex-direction:column;gap:3px;min-width:0;}
@@ -1337,6 +1337,9 @@ a.ops-run-artifact-title:hover{color:var(--accent-text);}
 .ops-project-sessions{display:flex;flex-direction:column;gap:8px;padding:10px 14px 14px;}
 .ops-session{--ops-session-row-accent:#60a5fa;--ops-session-row-accent-soft:rgba(96,165,250,.12);--ops-session-row-accent-border:rgba(96,165,250,.30);display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--ops-session-row-accent-border);border-radius:10px;background:linear-gradient(135deg,var(--ops-session-row-accent-soft) 0%,rgba(0,0,0,0) 38%),var(--input-bg);box-shadow:inset 3px 0 0 var(--ops-session-row-accent);}
 .ops-project-sessions .ops-session{border:1px solid var(--ops-session-row-accent-border);border-radius:10px;background:linear-gradient(135deg,var(--ops-session-row-accent-soft) 0%,rgba(0,0,0,0) 38%),var(--input-bg);}
+.ops-session.interactive{cursor:pointer;transition:border-color .18s ease,transform .15s ease,box-shadow .18s ease;}
+.ops-session.interactive:hover{border-color:var(--ops-session-row-accent);box-shadow:inset 3px 0 0 var(--ops-session-row-accent),0 0 0 1px rgba(15,23,42,.08);transform:translateY(-1px);}
+.ops-session.interactive:focus-visible{outline:2px solid var(--ops-session-row-accent);outline-offset:2px;}
 .ops-session:last-child{border-bottom:1px solid var(--border);}
 .ops-session.closed{opacity:.72;}
 .ops-session-main{min-width:0;display:flex;flex-direction:column;gap:5px;}
@@ -1359,6 +1362,89 @@ a.ops-run-artifact-title:hover{color:var(--accent-text);}
 .ops-project-secondary-panels-body{display:flex;flex-direction:column;gap:10px;padding:12px;}
 .tasks-card-body{display:flex;flex-direction:column;gap:10px;}
 .tasks-card-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-start;}
+.tasks-card.ops-deployment-panel,
+.tasks-card.ops-database-panel,
+.tasks-card.ops-project-database-panel,
+.tasks-card.ops-migration-health-panel,
+.tasks-card.ops-artifact-health-panel,
+.tasks-card.ops-project-health-panel,
+.tasks-card.ops-project-settings-panel,
+.tasks-card.ops-gather-panel,
+.tasks-card.ops-play-config-panel,
+.tasks-card.ops-play-snapshot-panel,
+.tasks-card.ops-play-log-panel,
+.tasks-card.ops-run-panel,
+.tasks-card.ops-run-detail{
+  border:1px solid var(--tasks-border);
+  border-radius:16px;
+  background:linear-gradient(160deg,rgba(17,27,43,.95),rgba(13,20,35,.95));
+  box-shadow:var(--tasks-shadow);
+  padding:14px;
+}
+.tasks-card.ops-deployment-panel .tasks-card-header,
+.tasks-card.ops-database-panel .tasks-card-header,
+.tasks-card.ops-project-database-panel .tasks-card-header,
+.tasks-card.ops-migration-health-panel .tasks-card-header,
+.tasks-card.ops-artifact-health-panel .tasks-card-header,
+.tasks-card.ops-project-health-panel .tasks-card-header,
+.tasks-card.ops-project-settings-panel .tasks-card-header,
+.tasks-card.ops-gather-panel .tasks-card-header,
+.tasks-card.ops-play-config-panel .tasks-card-header,
+.tasks-card.ops-play-snapshot-panel .tasks-card-header,
+.tasks-card.ops-play-log-panel .tasks-card-header,
+.tasks-card.ops-run-panel .tasks-card-header,
+.tasks-card.ops-run-detail .tasks-card-header{
+  margin-bottom:10px;
+  padding:0;
+  border-bottom:none;
+}
+.tasks-card.ops-deployment-panel .ops-deployment-body,
+.tasks-card.ops-database-panel .ops-database-body,
+.tasks-card.ops-project-database-panel .ops-database-body,
+.tasks-card.ops-gather-panel .ops-gather-list,
+.tasks-card.ops-play-config-panel .tasks-card-body,
+.tasks-card.ops-play-log-panel .tasks-card-body{
+  padding:0;
+  background:transparent;
+}
+.tasks-card.ops-migration-health-panel .ops-migration-health-counts,
+.tasks-card.ops-artifact-health-panel .ops-artifact-health-counts,
+.tasks-card.ops-project-health-panel .ops-project-health-grid,
+.tasks-card.ops-gather-panel .ops-gather-report,
+.tasks-card.ops-deployment-panel .ops-deployment-meta span,
+.tasks-card.ops-deployment-panel .ops-deployment-meta a,
+.tasks-card.ops-run-detail .ops-run-readable-body{
+  border-color:rgba(148,163,184,.24);
+}
+.tasks-card.ops-migration-health-panel .ops-migration-health-counts,
+.tasks-card.ops-artifact-health-panel .ops-artifact-health-counts,
+.tasks-card.ops-project-health-panel .ops-project-health-grid,
+.tasks-card.ops-gather-panel .ops-gather-report,
+.tasks-card.ops-deployment-panel .ops-deployment-body,
+.tasks-card.ops-database-panel .ops-database-body,
+.tasks-card.ops-project-database-panel .ops-database-body,
+.tasks-card.ops-play-log-panel .ops-play-logs{
+  background:rgba(10,17,30,.42);
+}
+.tasks-card.ops-migration-health-panel .ops-migration-health-counts,
+.tasks-card.ops-artifact-health-panel .ops-artifact-health-counts,
+.tasks-card.ops-project-health-panel .ops-project-health-grid{
+  border-top:1px solid rgba(148,163,184,.18);
+}
+.tasks-card.ops-play-config-panel .ops-form-actions{
+  align-items:center;
+}
+.tasks-card.ops-play-snapshot-panel,
+.tasks-card.ops-play-log-panel{
+  margin:0;
+}
+.tasks-card.ops-play-snapshot-panel{
+  display:block;
+}
+.tasks-card.ops-play-log-panel .ops-play-logs{
+  border:1px solid rgba(148,163,184,.24);
+  border-radius:12px;
+}
 .ops-epic{--ops-epic-accent:#38bdf8;--ops-epic-accent-soft:rgba(56,189,248,.12);--ops-epic-accent-border:rgba(56,189,248,.35);position:relative;border:1px solid var(--ops-epic-accent-border);border-radius:8px;background:linear-gradient(135deg,var(--ops-epic-accent-soft) 0%,rgba(0,0,0,0) 34%),var(--surface);overflow:hidden;box-shadow:0 0 0 1px rgba(0,0,0,.08);}
 .ops-epic::before{content:'';position:absolute;inset:0 auto 0 0;width:3px;background:var(--ops-epic-accent);pointer-events:none;}
 .ops-epic.collapsed .ops-task-list{display:none;}

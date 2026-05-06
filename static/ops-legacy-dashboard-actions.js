@@ -183,8 +183,8 @@
         if(action==='task-needs-more-work')return await markTaskNeedsMoreWork(taskId);
         if(action==='set-task-status-filter'){setTaskFilterStatus(btn.dataset.filterStatus);return renderProjectDetail();}
         if(action==='reset-task-filters'){resetTaskFilters();return renderProjectDetail();}
-        if(action==='cancel-edit'){OPS.editingTask=null;return renderProjectDetail();}
-        if(action==='edit-task'){OPS.editingTask=findTask(taskId);OPS.taskCreateCollapsed=false;return renderProjectDetail();}
+        if(action==='cancel-edit'){OPS.editingTask=null;OPS.taskFormDraft=null;return renderProjectDetail();}
+        if(action==='edit-task'){OPS.editingTask=findTask(taskId);OPS.taskFormDraft=null;OPS.taskCreateCollapsed=false;return renderProjectDetail();}
         if(action==='upload-task-image')return await uploadTaskImage(taskId);
         if(action==='new-chat')return await newChatInProject(projectId?findProject(projectId):null);
         if(action==='open-session')return await openOpsSession(sessionId);
@@ -329,6 +329,7 @@
         }
         if(kind==='create-epic'){
           await api(projectUrl(OPS.currentProject.id,'/epics'),{method:'POST',body:JSON.stringify({title:data.title})});
+          OPS.createEpicDraftTitle='';
           return await refreshDetail();
         }
         if(kind==='save-task'){
@@ -346,11 +347,13 @@
           }else{
             const created=await api(projectUrl(OPS.currentProject.id,'/tasks'),{method:'POST',body:JSON.stringify(body)});
             if(data.goalMode==='on'&&created&&created.task&&created.task.id){
+              OPS.taskFormDraft=null;
               await refreshDetail();
               await executeTask(created.task.id,{goalMode:true});
               return;
             }
           }
+          OPS.taskFormDraft=null;
           return await refreshDetail();
         }
       }catch(err){

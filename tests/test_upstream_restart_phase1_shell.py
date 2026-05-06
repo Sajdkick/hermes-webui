@@ -289,3 +289,127 @@ def test_legacy_bridge_merges_done_notifications_from_runs():
         text=True,
     )
     assert completed.stdout.strip() == "ok"
+
+
+def test_legacy_bridge_preserves_play_notifications_and_opens_them_locally():
+    script = textwrap.dedent(
+        """
+        (async () => {
+        const fs = require('fs');
+        const vm = require('vm');
+
+        const bridgeSource = fs.readFileSync('static/ops-legacy-agent-bridge.js', 'utf8');
+        const playSource = fs.readFileSync('static/ops-legacy-play.js', 'utf8');
+        const api = async (path) => {
+          if (path === '/api/ops/notifications/pending'){
+            return {
+              notifications: [{
+                notificationKey: 'play:project-1:ready:2026-05-06T06:00:00Z',
+                kind: 'play',
+                message: 'Play app is ready for inspection.',
+                project: { id: 'project-1', name: 'Hermes' },
+                inspectUrl: '/play-project/project-1/app',
+                playStatus: 'ready',
+                playNeedsRepair: false,
+                playFallbackError: '',
+                terminalTarget: { projectId: 'project-1', taskId: '', sessionId: '', runId: '' },
+                updatedAt: '2026-05-06T06:00:00Z'
+              }]
+            };
+          }
+          if (path === '/api/ops/runs'){
+            return { runs: [] };
+          }
+          if (path === '/api/ops/notifications/dismissed'){
+            return { dismissed: [] };
+          }
+          throw new Error('Unexpected API path: ' + path);
+        };
+
+        const assigned = [];
+        const context = {
+          console,
+          api,
+          projectUrl: (projectId, suffix='') => '/api/ops/projects/' + projectId + suffix,
+          fetch: async () => ({ ok: true, json: async () => ({}) }),
+          location: { href: 'http://example.com/ops', assign: (url) => assigned.push(url) },
+          URL,
+          URLSearchParams,
+          EventSource: function EventSource(){},
+          FormData: function FormData(){},
+          window: {},
+          document: {},
+          setTimeout,
+          clearTimeout,
+          Date,
+        };
+        context.window = context;
+        vm.createContext(context);
+        vm.runInContext(bridgeSource, context);
+        const payload = await context.window.AgentBridge.notifications.list();
+        const play = payload.notifications.find((entry) => entry.kind === 'play');
+        if (!play){
+          throw new Error('Expected a synthesized play notification.');
+        }
+        if (play.inspectUrl !== '/play-project/project-1/app'){
+          throw new Error('Play notification did not preserve the inspect URL.');
+        }
+
+        vm.runInContext(playSource, context);
+        const dashboard = context.window.HermesOpsModules.play.bindDashboard({
+          OPS: {
+            notifications: [play],
+            playStatusByProject: {},
+            playBusyByProject: {},
+            playConfigByProject: {},
+            playLogsByProject: {},
+            playSnapshotsByProject: {},
+            playScreenshotsByProject: {},
+          },
+          api,
+          projectUrl: (projectId, suffix='') => '/api/ops/projects/' + projectId + suffix,
+          renderCurrentOpsView: () => {},
+          showToast: (message) => { throw new Error(message); },
+          esc: (value) => String(value ?? ''),
+          svg: {},
+          AgentBridge: {
+            play: {
+              status: async () => ({}),
+              config: async () => ({}),
+              logs: async () => ({ text: '' }),
+              start: async () => ({}),
+              restart: async () => ({}),
+              stop: async () => ({}),
+              notificationTarget: async () => {
+                throw new Error('play notificationTarget should not be called for local play notifications');
+              },
+            },
+            runtime: {},
+          },
+          loadNotifications: async () => [],
+          playInspectOverlayUrl: (note) => note && note.inspectUrl ? note.inspectUrl : '',
+          openProjectDetail: async () => null,
+          notificationById: (id) => id === play.id ? play : null,
+          notificationTarget: (note) => note && note.terminalTarget ? note.terminalTarget : {},
+          playNotificationFallbackError: (note) => note && note.playFallbackError || '',
+          windowRef: context.window,
+        });
+
+        await dashboard.openPlayNotification(play.id);
+        if (assigned[0] !== '/play-project/project-1/app'){
+          throw new Error('Play notification did not open using the local inspect URL.');
+        }
+        console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
