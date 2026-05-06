@@ -42,6 +42,17 @@ async function cancelSessionStream(session){
   if(typeof renderSessionList==='function') renderSessionList();
 }
 
+async function _savedSessionShouldStaySidebarOnly(sid){
+  if(!sid) return false;
+  try{
+    const data = await api(`/api/session?session_id=${encodeURIComponent(sid)}&messages=0&resolve_model=0`);
+    const session = data&&data.session;
+    return !!(session&&(session.active_stream_id||session.pending_user_message));
+  }catch(e){
+    return false;
+  }
+}
+
 // ── Mobile navigation ──────────────────────────────────────────────────────
 let _workspacePanelMode='closed'; // 'closed' | 'browse' | 'preview'
 
@@ -818,7 +829,7 @@ $('modelSelect').onchange=async()=>{
     : {model:selectedModel,model_provider:null};
   if(typeof closeModelDropdown==='function') closeModelDropdown();
   if(typeof _writePersistedModelState==='function') _writePersistedModelState(modelState.model,modelState.model_provider);
-  else localStorage.setItem('hermes-webui-model', modelState.model);
+  else try{localStorage.setItem('hermes-webui-model',modelState.model)}catch{}
   await api('/api/session/update',{method:'POST',body:JSON.stringify({
     session_id:S.session.session_id,
     workspace:S.session.workspace,
@@ -968,13 +979,22 @@ document.addEventListener('keydown',async e=>{
 });
 $('msg').addEventListener('paste',e=>{
   const items=Array.from(e.clipboardData?.items||[]);
-  const imageItems=items.filter(i=>i.type.startsWith('image/'));
-  if(!imageItems.length)return;
+  // When the clipboard carries BOTH text and an image (common from Notes,
+  // Word, browsers, Slack — the OS attaches a rendered preview alongside
+  // the plain text), prefer the text and let the browser paste normally.
+  // Only intercept when the clipboard is image-only (true screenshot paste).
+  // Tighten the image filter to kind==='file' so string items advertising an
+  // image MIME (e.g. text/html with an embedded data URI) are not misclassified.
+  const hasText=items.some(i=>i.kind==='string'&&(i.type==='text/plain'||i.type==='text/html'));
+  const imageItems=items.filter(i=>i.kind==='file'&&i.type.startsWith('image/'));
+  if(!imageItems.length||hasText)return;
   e.preventDefault();
-  const files=imageItems.map(i=>{
+  const pasteTs=Date.now();
+  const files=imageItems.map((i,idx)=>{
     const blob=i.getAsFile();
     const ext=i.type.split('/')[1]||'png';
-    return new File([blob],`screenshot-${Date.now()}.${ext}`,{type:i.type});
+    const suffix=imageItems.length>1?`-${idx+1}`:'';
+    return new File([blob],`screenshot-${pasteTs}${suffix}.${ext}`,{type:i.type});
   });
   addFiles(files);
   setStatus(t('image_pasted')+files.map(f=>f.name).join(', '));
@@ -1234,6 +1254,7 @@ function applyBotName(){
     _bootSettings=s;
     window._sendKey=s.send_key||'enter';
     window._showTokenUsage=!!s.show_token_usage;
+    window._showTps=!!s.show_tps;
     window._showCliSessions=!!s.show_cli_sessions;
     window._soundEnabled=!!s.sound_enabled;
     window._notificationsEnabled=!!s.notifications_enabled;
@@ -1267,6 +1288,7 @@ function applyBotName(){
   }catch(e){
     window._sendKey='enter';
     window._showTokenUsage=false;
+    window._showTps=false;
     window._showCliSessions=false;
     window._soundEnabled=false;
     window._notificationsEnabled=false;
@@ -1290,7 +1312,7 @@ function applyBotName(){
   // ?test_updates=1 in URL forces banner display for testing (bypasses sessionStorage guards)
   const _testUpdates=new URLSearchParams(location.search).get('test_updates')==='1';
   if(_testUpdates||(_bootSettings.check_for_updates!==false&&!sessionStorage.getItem('hermes-update-checked')&&!sessionStorage.getItem('hermes-update-dismissed'))){
-    const _checkUrl='/api/updates/check'+(_testUpdates?'?simulate=1':'');
+    const _checkUrl='api/updates/check'+(_testUpdates?'?simulate=1':'');
     api(_checkUrl).then(d=>{if(!_testUpdates)sessionStorage.setItem('hermes-update-checked','1');if((d.webui&&d.webui.behind>0)||(d.agent&&d.agent.behind>0))_showUpdateBanner(d);}).catch(()=>{});
   }
   // Fetch active profile
@@ -1338,9 +1360,18 @@ function applyBotName(){
   // Initialize reasoning chip on boot (fixes #1103 — chip hidden until session load)
   if(typeof fetchReasoningChip==='function') fetchReasoningChip();
   const urlSession=(typeof _sessionIdFromLocation==='function')?_sessionIdFromLocation():null;
-  const saved=urlSession||localStorage.getItem('hermes-webui-session');
+  const savedLocal=localStorage.getItem('hermes-webui-session');
+  const saved=urlSession||savedLocal;
   if(saved){
     try{
+      if(!urlSession&&savedLocal&&await _savedSessionShouldStaySidebarOnly(savedLocal)){
+        S.session=null; S.messages=[]; S.activeStreamId=null; S.busy=false;
+        S._bootReady=true;
+        syncTopbar();syncWorkspacePanelState();
+        $('emptyState').style.display='';
+        await renderSessionList();if(typeof startGatewaySSE==='function')startGatewaySSE();
+        return;
+      }
       await loadSession(saved);
       // If the restored session has no messages it is an ephemeral scratch pad —
       // treat the page as a fresh start rather than resuming a blank conversation.

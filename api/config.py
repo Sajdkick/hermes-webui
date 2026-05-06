@@ -14,6 +14,7 @@ import copy
 import json
 import logging
 import os
+import queue
 import sys
 import threading
 import time
@@ -183,6 +184,45 @@ else:
 _cfg_cache = {}
 _cfg_lock = threading.Lock()
 _cfg_mtime: float = 0.0  # last known mtime of config.yaml; 0 = never loaded
+_cfg_path: Path | None = None  # active config.yaml path for the disk-loaded cache
+_cfg_fingerprint: str | None = None  # serialized snapshot from the last disk load
+
+
+def _fingerprint_config(data: dict) -> str:
+    """Return a stable fingerprint for config dictionaries.
+
+    A few tests and legacy call sites still mutate ``cfg`` directly for
+    in-memory overrides.  Path-aware reloads should not immediately discard
+    those overrides just because the active profile path differs from the last
+    disk load, but an unchanged disk-loaded cache must still reload on profile
+    switches.
+    """
+    try:
+        return json.dumps(data, sort_keys=True, separators=(",", ":"), default=str)
+    except Exception:
+        return repr(data)
+
+
+def _cfg_has_in_memory_overrides() -> bool:
+    """True when cfg was changed after the last successful reload_config().
+
+    Detects two override shapes:
+      1. ``_cfg_cache`` was mutated in place (fingerprint differs).
+      2. ``cfg`` (the module attribute) was rebound to a different dict —
+         e.g. ``monkeypatch.setattr(config, "cfg", {...})`` in tests. The
+         alias-with-the-cache pattern at module load means this is a common
+         test-isolation override, and silently reloading from disk over it
+         (the v0.51.7 path-aware reload regression) breaks any test that
+         relies on the override.
+    """
+    if _cfg_fingerprint is not None and _fingerprint_config(_cfg_cache) != _cfg_fingerprint:
+        return True
+    # Module attribute rebound away from _cfg_cache by a test or runtime caller.
+    try:
+        return cfg is not _cfg_cache
+    except NameError:
+        # cfg not yet defined (during initial reload_config() at import time).
+        return False
 
 
 def _get_config_path() -> Path:
@@ -198,22 +238,66 @@ def _get_config_path() -> Path:
         return HOME / ".hermes" / "config.yaml"
 
 
+_WEBUI_SESSION_SAVE_MODES = {"deferred", "eager"}
+_DEFAULT_WEBUI_SESSION_SAVE_MODE = "deferred"
+
+
 def get_config() -> dict:
     """Return the cached config dict, loading from disk if needed."""
-    if not _cfg_cache:
+    config_path = _get_config_path()
+    try:
+        current_mtime = config_path.stat().st_mtime
+    except OSError:
+        current_mtime = 0.0
+    cache_stale = current_mtime != _cfg_mtime or _cfg_path != config_path
+    if not _cfg_cache or (cache_stale and not _cfg_has_in_memory_overrides()):
         reload_config()
+    # When a test (or runtime caller) has rebound ``cfg`` to a different dict
+    # via monkeypatch.setattr(config, "cfg", ...), return that override rather
+    # than the underlying _cfg_cache. Without this branch, get_config() would
+    # silently bypass the override even though _cfg_has_in_memory_overrides()
+    # correctly suppressed the reload.
+    try:
+        if cfg is not _cfg_cache:
+            return cfg
+    except NameError:
+        pass
     return _cfg_cache
+
+
+def get_webui_session_save_mode(config_data: dict | None = None) -> str:
+    """Return the validated first-turn session persistence mode.
+
+    ``deferred`` preserves the current first-turn sidecar behaviour: persist
+    pending_user_message/runtime fields before streaming, then merge the turn
+    after the agent finishes. ``eager`` additionally checkpoints the current
+    user turn into ``messages`` before launching the agent thread. Unknown
+    values fail closed to ``deferred`` so a typo never reintroduces eager disk
+    writes unexpectedly.
+    """
+    active_cfg = config_data if isinstance(config_data, dict) else cfg
+    webui_cfg = active_cfg.get("webui", {}) if isinstance(active_cfg, dict) else {}
+    if not isinstance(webui_cfg, dict):
+        return _DEFAULT_WEBUI_SESSION_SAVE_MODE
+    mode = webui_cfg.get("session_save_mode", _DEFAULT_WEBUI_SESSION_SAVE_MODE)
+    if isinstance(mode, str):
+        normalized = mode.strip().lower()
+        if normalized in _WEBUI_SESSION_SAVE_MODES:
+            return normalized
+    return _DEFAULT_WEBUI_SESSION_SAVE_MODE
 
 
 def reload_config() -> None:
     """Reload config.yaml from the active profile's directory."""
-    global _cfg_mtime
+    global _cfg_mtime, _cfg_path, _cfg_fingerprint
     with _cfg_lock:
         _cfg_cache.clear()
         config_path = _get_config_path()
         # Remember the old mtime so we can tell whether config actually changed
         # vs. first-ever load (mtime == 0.0, e.g. server start or profile switch).
         _old_cfg_mtime = _cfg_mtime
+        _cfg_path = config_path
+        _cfg_mtime = 0.0
         try:
             import yaml as _yaml
 
@@ -227,6 +311,7 @@ def reload_config() -> None:
                         _cfg_mtime = 0.0
         except Exception:
             logger.debug("Failed to load yaml config from %s", config_path)
+        _cfg_fingerprint = _fingerprint_config(_cfg_cache)
         # Bust the models cache so the next request sees fresh config values.
         # Only delete the disk cache when config has actually changed -- not on
         # first-ever load (when _old_cfg_mtime == 0.0, i.e. server start or
@@ -1146,6 +1231,72 @@ def _deduplicate_model_ids(groups: list[dict]) -> None:
                 model["label"] = f"{original_id} ({provider_name})"
 
 
+# ── Local-server provider preservation (#1625) ─────────────────────────────
+#
+# LM Studio, Ollama, llama.cpp, vLLM, TabbyAPI etc. are inference servers,
+# not OpenAI-compatible proxies. They register models under their FULL path
+# as the registry key (the HuggingFace-style "namespace/model" id, e.g.
+# "qwen/qwen3.6-27b"). Stripping the namespace prefix would cause a registry
+# miss and the server loads a brand-new instance with default settings,
+# silently ignoring the user's tuned context length / parallel slots.
+#
+# This is distinct from OpenAI-compatible proxies (LiteLLM, OpenRouter relays)
+# where stripping "openai/gpt-5.4" → "gpt-5.4" is the correct behavior.
+#
+# Detection has two layers:
+#   1. Static set of known local-server provider names (canonical + common
+#      custom-provider naming).
+#   2. Loopback / private-host base_url heuristic: an OpenAI-compatible URL
+#      pointing at 127.0.0.1, localhost, or a private IP block is almost
+#      certainly a local model server, regardless of the provider name.
+#      Reuses the same private-IP detection logic used elsewhere in
+#      api/config.py for SSRF host trust.
+_LOCAL_SERVER_PROVIDERS = {
+    "lmstudio",     # canonical (in hermes_cli.models.CANONICAL_PROVIDERS)
+    "lm-studio",    # alias used in some custom_providers configs (#1625 Opus NIT)
+    "ollama",       # via custom_providers, common pattern
+    "llamacpp",     # via custom_providers
+    "llama-cpp",    # alias
+    "vllm",         # via custom_providers
+    "tabby",        # via custom_providers (TabbyAPI)
+    "tabbyapi",     # alias
+    "koboldcpp",    # local llama.cpp UI fork
+    "textgen",      # text-generation-webui (oobabooga) OpenAI-compat extension
+    "localai",      # LocalAI project (#1625 Opus NIT)
+}
+
+
+def _base_url_points_at_local_server(base_url: str) -> bool:
+    """True if base_url's host is a loopback or private IP (likely local server).
+
+    Reuses ipaddress.is_loopback / is_private / is_link_local — the same
+    heuristic used in the `api/config.py` SSRF/credential-routing code.
+    Errors (DNS failure, malformed URL) return False so callers fall back to
+    the static-provider-name check.
+    """
+    if not base_url:
+        return False
+    try:
+        from urllib.parse import urlparse
+        import ipaddress
+        host = (urlparse(base_url).hostname or "").lower()
+        if not host:
+            return False
+        # Plain-text "localhost" doesn't ipaddress-parse but is unambiguous.
+        if host in ("localhost", "ip6-localhost", "ip6-loopback"):
+            return True
+        try:
+            addr = ipaddress.ip_address(host)
+        except ValueError:
+            # Not an IP literal — could be a hostname like "ollama.internal".
+            # Don't try DNS resolution here (slow + ambient): only IP literals
+            # and the `localhost` alias get the no-strip treatment via this path.
+            return False
+        return addr.is_loopback or addr.is_private or addr.is_link_local
+    except Exception:
+        return False
+
+
 def resolve_model_provider(model_id: str) -> tuple:
     """Resolve model name, provider, and base_url for AIAgent.
 
@@ -1249,6 +1400,15 @@ def resolve_model_provider(model_id: str) -> tuple:
         # just because the model name contains a slash (e.g. google/gemma-4-26b-a4b).
         # The user has explicitly pointed at a base_url, so trust their routing config.
         if config_base_url:
+            # Local model servers (LM Studio, Ollama, llama.cpp, vLLM, TabbyAPI)
+            # register models under their full HuggingFace-style id. Stripping the
+            # prefix breaks the lookup and causes a fresh instance to load with
+            # default settings, ignoring user-tuned context length / parallel slots.
+            # See #1625. Detect either by canonical provider name OR by base_url
+            # pointing at a loopback/private host.
+            if (str(config_provider or "").lower() in _LOCAL_SERVER_PROVIDERS
+                    or _base_url_points_at_local_server(config_base_url)):
+                return model_id, config_provider, config_base_url
             # Only strip the provider prefix when it's a known provider namespace
             # (e.g. "openai/gpt-5.4" → "gpt-5.4" for a custom OpenAI-compatible proxy).
             # Unknown prefixes (e.g. "zai-org/GLM-5.1" on DeepInfra) are intrinsic to
@@ -1483,6 +1643,7 @@ def set_hermes_default_model(model_id: str) -> dict:
 # ── TTL cache for get_available_models() ─────────────────────────────────────
 _available_models_cache: dict | None = None
 _available_models_cache_ts: float = 0.0
+_available_models_cache_source_fingerprint: dict | None = None
 _AVAILABLE_MODELS_CACHE_TTL: float = 86400.0  # 24 hours
 _available_models_cache_lock = threading.RLock()  # must be RLock: cold path refactoring moved slow work inside this lock, requiring re-entry
 _cache_build_cv = threading.Condition(_available_models_cache_lock)  # shares underlying RLock so notify_all() is safe inside with _available_models_cache_lock
@@ -1505,7 +1666,80 @@ _provider_models_invalidated_ts: dict[str, float] = {}  # provider_id -> timesta
 # HERMES_WEBUI_STATE_DIR / port) has its own file and test runs never
 # pollute the production server's cache. Also works on macOS and Windows
 # where /dev/shm does not exist.
+def _current_webui_version() -> str | None:
+    """Lazy resolver for the WebUI version, used to stamp the disk cache (#1633).
+
+    `api.updates` imports `api.config` at module-load time, so we cannot
+    `from api.updates import WEBUI_VERSION` at the top of this module without a
+    circular import. Instead we resolve lazily on each cache load/save.
+
+    Returns the runtime version string (e.g. ``v0.50.293``) when api.updates
+    has been imported, or None if it isn't loaded yet (boot-time corner case
+    before the server has finished initializing). A None return is treated as
+    "do not stamp / do not validate" by the cache layer so cache reads/writes
+    that happen during early init still work — the next call after init will
+    stamp normally.
+    """
+    try:
+        # Read attribute via dotted lookup so we don't add an import-time edge.
+        import sys as _sys
+        mod = _sys.modules.get('api.updates')
+        if mod is None:
+            return None
+        v = getattr(mod, 'WEBUI_VERSION', None)
+        return str(v) if v else None
+    except Exception:
+        return None
+
+
+# Disk-cache schema version (#1633).
+#
+# Bumped any time the disk cache shape changes in a backward-incompatible way
+# (e.g. new required field, renamed key). Independent of the WebUI version
+# stamp — _webui_version forces a rebuild on every release; _schema_version
+# guarantees that even if a future release accidentally reuses the same
+# WebUI version string (or a debug build doesn't have a version), a structural
+# change still invalidates the cache.
+_MODELS_CACHE_SCHEMA_VERSION = 3
+
+
 _models_cache_path = STATE_DIR / "models_cache.json"
+
+
+def _get_auth_store_path() -> Path:
+    """Return the auth.json path for the active Hermes profile."""
+    try:
+        from api.profiles import get_active_hermes_home as _gah
+
+        return _gah() / "auth.json"
+    except ImportError:
+        return HOME / ".hermes" / "auth.json"
+
+
+def _models_cache_file_fingerprint(path: Path) -> dict:
+    """Return non-secret identity metadata for a cache dependency file.
+
+    The /api/models response depends on config.yaml (model/provider defaults)
+    and auth.json (active_provider + credential_pool).  The cache only needs
+    cheap invalidation signals here, not file contents; never include secrets.
+    """
+    fingerprint = {"path": str(Path(path).expanduser())}
+    try:
+        st = Path(path).stat()
+    except OSError:
+        fingerprint["missing"] = True
+        return fingerprint
+    fingerprint["mtime_ns"] = st.st_mtime_ns
+    fingerprint["size"] = st.st_size
+    return fingerprint
+
+
+def _models_cache_source_fingerprint() -> dict:
+    """Return the current config/auth-store fingerprint for /api/models cache."""
+    return {
+        "config_yaml": _models_cache_file_fingerprint(_get_config_path()),
+        "auth_json": _models_cache_file_fingerprint(_get_auth_store_path()),
+    }
 
 
 def _delete_models_cache_on_disk() -> None:
@@ -1516,7 +1750,15 @@ def _delete_models_cache_on_disk() -> None:
 
 
 def _is_valid_models_cache(cache: object) -> bool:
-    """Return True when a disk cache payload has the full /api/models shape."""
+    """Return True when a cache payload has the full /api/models shape.
+
+    SHAPE-only check: validates structural correctness of an in-memory or
+    on-disk cache. Use _is_loadable_disk_cache() for the strictness needed
+    when reading from disk (it adds version-stamp invalidation per #1633).
+
+    Kept loose so in-memory cache writes (which never touch disk and so don't
+    need version stamping) can use this validator unchanged.
+    """
     if not isinstance(cache, dict):
         return False
     if not {"active_provider", "default_model", "configured_model_badges", "groups"}.issubset(cache):
@@ -1530,8 +1772,68 @@ def _is_valid_models_cache(cache: object) -> bool:
     )
 
 
+def _is_loadable_disk_cache(cache: object) -> bool:
+    """Return True when an on-disk cache is safe to use after a process boot.
+
+    Adds two checks on top of _is_valid_models_cache (#1633):
+      1. ``_schema_version`` matches `_MODELS_CACHE_SCHEMA_VERSION`. A bumped
+         schema version unconditionally invalidates older cache files.
+      2. ``_webui_version`` matches the current runtime version. Forces a
+         rebuild after every release so users see picker-shape fixes
+         immediately, instead of waiting up to 24 hours for the TTL to expire.
+         If the runtime version cannot be resolved (early-init edge case),
+         skip this check rather than wedge the boot.
+
+    Note: ``_webui_version`` is a string equality check, not a semver compare —
+    two debug builds with the same `WEBUI_VERSION` string but different actual
+    code wouldn't invalidate via this axis. ``_schema_version`` is the
+    independent invalidation axis for breaking changes that lack a tag bump;
+    bump it whenever the cache shape changes incompatibly.
+    """
+    if not _is_valid_models_cache(cache):
+        return False
+    if not isinstance(cache, dict):  # appease type-narrowing — already guarded above
+        return False
+    cached_schema = cache.get("_schema_version")
+    if cached_schema != _MODELS_CACHE_SCHEMA_VERSION:
+        # DEBUG telemetry per stage-294 absorption: makes "why did my cache
+        # rebuild" investigations one log-grep away.
+        logger.debug(
+            "models cache rejected: schema=%r vs runtime=%r",
+            cached_schema, _MODELS_CACHE_SCHEMA_VERSION,
+        )
+        return False
+    runtime_version = _current_webui_version()
+    if runtime_version is not None:
+        cached_version = cache.get("_webui_version")
+        if not isinstance(cached_version, str) or cached_version != runtime_version:
+            logger.debug(
+                "models cache rejected: webui_version=%r vs runtime=%r",
+                cached_version, runtime_version,
+            )
+            return False
+    cached_sources = cache.get("_source_fingerprint")
+    runtime_sources = _models_cache_source_fingerprint()
+    if cached_sources != runtime_sources:
+        logger.debug(
+            "models cache rejected: source_fingerprint=%r vs runtime=%r",
+            cached_sources,
+            runtime_sources,
+        )
+        return False
+    return True
+
+
 def _load_models_cache_from_disk() -> dict | None:
-    """Load /api/models cache from disk if it exists and has current metadata."""
+    """Load /api/models cache from disk if it exists and has current metadata.
+
+    Adds the per-release version check from #1633: a cache stamped with a
+    different WebUI version is treated as missing, forcing a fresh rebuild
+    that picks up any picker-shape fixes shipped in the new release. The
+    returned dict is the SHAPE-only cache (without the `_webui_version` /
+    `_schema_version` stamps) so callers don't have to know about the
+    on-disk metadata fields.
+    """
     try:
         import json as _j
 
@@ -1539,28 +1841,53 @@ def _load_models_cache_from_disk() -> dict | None:
             return None
         with open(_models_cache_path, encoding="utf-8") as f:
             cache = _j.load(f)
-        return cache if _is_valid_models_cache(cache) else None
+        if not _is_loadable_disk_cache(cache):
+            return None
+        # Strip the disk-only metadata before returning, so the in-memory
+        # cache shape stays exactly what the rest of the code expects.
+        return {
+            "active_provider": cache["active_provider"],
+            "default_model": cache["default_model"],
+            "configured_model_badges": cache["configured_model_badges"],
+            "groups": cache["groups"],
+        }
     except Exception:
         return None
 
 
 def _save_models_cache_to_disk(cache: dict) -> None:
-    """Save cache to disk so it survives server restarts."""
+    """Save cache to disk so it survives server restarts.
+
+    Stamps the payload with `_webui_version` and `_schema_version` (#1633) so
+    a subsequent process running a different WebUI version, or a future
+    release that bumps the schema, will treat the file as invalid and
+    rebuild from live provider data on its first /api/models call.
+
+    The version stamp is omitted (not the literal None — the field is just
+    skipped) when the runtime version cannot be resolved at the moment of
+    save, which would happen only in a very early boot path before
+    api.updates is loaded. _is_loadable_disk_cache treats a missing field as
+    a mismatch (since runtime_version is non-None on every subsequent call),
+    so this is safe — at worst we write one cache file that gets rejected
+    once on the next boot.
+    """
     try:
         if not _is_valid_models_cache(cache):
             return
+        payload = {
+            "_schema_version": _MODELS_CACHE_SCHEMA_VERSION,
+            "_source_fingerprint": _models_cache_source_fingerprint(),
+            "active_provider": cache["active_provider"],
+            "default_model": cache["default_model"],
+            "configured_model_badges": cache["configured_model_badges"],
+            "groups": cache["groups"],
+        }
+        runtime_version = _current_webui_version()
+        if runtime_version is not None:
+            payload["_webui_version"] = runtime_version
         tmp = str(_models_cache_path) + f".{os.getpid()}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "active_provider": cache["active_provider"],
-                    "default_model": cache["default_model"],
-                    "configured_model_badges": cache["configured_model_badges"],
-                    "groups": cache["groups"],
-                },
-                f,
-                indent=2,
-            )
+            json.dump(payload, f, indent=2)
         os.rename(tmp, str(_models_cache_path))
     except Exception:
         pass  # Non-fatal -- cache will rebuild on next call
@@ -1568,15 +1895,27 @@ def _save_models_cache_to_disk(cache: dict) -> None:
 
 def _get_fresh_memory_models_cache(now: float) -> dict | None:
     """Return a valid fresh in-memory /api/models cache, or clear stale shapes."""
-    global _available_models_cache, _available_models_cache_ts
+    global _available_models_cache, _available_models_cache_ts, _available_models_cache_source_fingerprint
     if _available_models_cache is None:
         return None
     if (now - _available_models_cache_ts) >= _AVAILABLE_MODELS_CACHE_TTL:
+        return None
+    current_sources = _models_cache_source_fingerprint()
+    if _available_models_cache_source_fingerprint != current_sources:
+        logger.debug(
+            "models memory cache rejected: source_fingerprint=%r vs runtime=%r",
+            _available_models_cache_source_fingerprint,
+            current_sources,
+        )
+        _available_models_cache = None
+        _available_models_cache_ts = 0.0
+        _available_models_cache_source_fingerprint = None
         return None
     if _is_valid_models_cache(_available_models_cache):
         return copy.deepcopy(_available_models_cache)
     _available_models_cache = None
     _available_models_cache_ts = 0.0
+    _available_models_cache_source_fingerprint = None
     return None
 
 
@@ -1594,10 +1933,11 @@ def invalidate_models_cache():
     result from the disk cache because the disk hit is checked before the memory
     cache rebuild runs.
     """
-    global _cache_build_in_progress, _available_models_cache, _available_models_cache_ts, _cache_build_cv
+    global _cache_build_in_progress, _available_models_cache, _available_models_cache_ts, _available_models_cache_source_fingerprint, _cache_build_cv
     with _available_models_cache_lock:
         _available_models_cache = None
         _available_models_cache_ts = 0.0
+        _available_models_cache_source_fingerprint = None
         _cache_build_in_progress = False
         _cache_build_cv.notify_all()
         # Clear the credential pool cache too. The cache key is provider_id
@@ -1634,10 +1974,11 @@ def invalidate_provider_models_cache(provider_id: str):
     Args:
         provider_id: canonical provider id (e.g. 'openai', 'anthropic', 'custom:my-key')
     """
-    global _available_models_cache, _available_models_cache_ts, _CREDENTIAL_POOL_CACHE
+    global _available_models_cache, _available_models_cache_ts, _available_models_cache_source_fingerprint, _CREDENTIAL_POOL_CACHE
     with _available_models_cache_lock:
         _available_models_cache = None
         _available_models_cache_ts = 0.0
+        _available_models_cache_source_fingerprint = None
         _provider_models_invalidated_ts[provider_id] = time.time()
         # Also evict the credential pool so the next cold path re-loads it.
         # Must evict both the original key and its canonical form (load_pool
@@ -1680,6 +2021,106 @@ def _get_label_for_model(model_id: str, existing_groups: list) -> str:
     )
 
 
+def _read_live_provider_model_ids(provider_id: str) -> list[str]:
+    """Return live model IDs from Hermes CLI for a provider, or [] on failure.
+
+    WebUI's static ``_PROVIDER_MODELS`` table is only a fallback.  The agent CLI
+    owns the provider registry and catalog-discovery logic, so ordinary picker
+    groups should ask ``hermes_cli.models.provider_model_ids()`` first (#1240).
+    Provider aliases are tried as a secondary lookup because WebUI keeps a few
+    display-facing IDs (for example ``google`` / ``x-ai``) that Hermes CLI may
+    normalize internally.
+    """
+    pid = str(provider_id or "").strip()
+    if not pid:
+        return []
+    try:
+        from hermes_cli.models import provider_model_ids as _provider_model_ids
+    except Exception:
+        return []
+
+    candidates = [pid]
+    try:
+        alias = _resolve_provider_alias(pid)
+    except Exception:
+        alias = ""
+    if alias and alias not in candidates:
+        candidates.append(alias)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        try:
+            live_ids = _provider_model_ids(candidate) or []
+        except Exception:
+            logger.debug("Failed to load %s models from hermes_cli", candidate)
+            continue
+        result: list[str] = []
+        for mid in live_ids:
+            mid_s = str(mid or "").strip()
+            if mid_s and mid_s not in seen:
+                seen.add(mid_s)
+                result.append(mid_s)
+        if result:
+            return result
+    return []
+
+
+def _models_from_live_provider_ids(provider_id: str, live_ids: list[str]) -> list[dict]:
+    """Convert Hermes CLI model ids into WebUI picker model entries."""
+    formatter = _format_ollama_label if provider_id in ("ollama", "ollama-cloud") else None
+    models: list[dict] = []
+    seen: set[str] = set()
+    for mid in live_ids:
+        mid_s = str(mid or "").strip()
+        if not mid_s or mid_s in seen:
+            continue
+        seen.add(mid_s)
+        label = formatter(mid_s) if formatter else _get_label_for_model(mid_s, [])
+        models.append({"id": mid_s, "label": label})
+    return models
+
+
+def _read_visible_codex_cache_model_ids() -> list[str]:
+    """Return visible model slugs from Codex's local models_cache.json.
+
+    The agent's provider_model_ids('openai-codex') intentionally filters IDs
+    with ``supported_in_api: false``. Codex CLI still lists some of those models
+    in its picker (notably ``gpt-5.3-codex-spark`` from #1680), so the WebUI
+    merges this visible local catalog to stay in sync with Codex itself.
+    """
+    codex_home = Path(os.getenv("CODEX_HOME", "").strip() or (HOME / ".codex")).expanduser()
+    cache_path = codex_home / "models_cache.json"
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+    entries = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(entries, list):
+        return []
+
+    sortable: list[tuple[int, str]] = []
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        slug = item.get("slug")
+        if not isinstance(slug, str) or not slug.strip():
+            continue
+        visibility = item.get("visibility", "")
+        if isinstance(visibility, str) and visibility.strip().lower() in ("hide", "hidden"):
+            continue
+        priority = item.get("priority")
+        rank = int(priority) if isinstance(priority, (int, float)) else 10_000
+        sortable.append((rank, slug.strip()))
+
+    sortable.sort(key=lambda item: (item[0], item[1]))
+    ordered: list[str] = []
+    for _, slug in sortable:
+        if slug not in ordered:
+            ordered.append(slug)
+    return ordered
+
+
 def get_available_models() -> dict:
     """
     Return available models grouped by provider.
@@ -1696,14 +2137,19 @@ def get_available_models() -> dict:
         'groups': [{'provider': str, 'models': [{'id': str, 'label': str}]}]
     }
     """
-    global _cache_build_in_progress, _available_models_cache, _available_models_cache_ts, _cache_build_cv
+    global _cache_build_in_progress, _available_models_cache, _available_models_cache_ts, _available_models_cache_source_fingerprint, _cache_build_cv
     # Config mtime check — must come before any config reads.
     # (Test #585 verifies _current_mtime appears before active_provider = None)
     try:
-        _current_mtime = Path(_get_config_path()).stat().st_mtime
+        _current_path = _get_config_path()
+        _current_mtime = _current_path.stat().st_mtime
     except OSError:
+        _current_path = _get_config_path()
         _current_mtime = 0.0
-    if _current_mtime != _cfg_mtime:
+    if (
+        (_current_mtime != _cfg_mtime or _current_path != _cfg_path)
+        and not _cfg_has_in_memory_overrides()
+    ):
         reload_config()
     # ── COLD PATH helper ─────────────────────────────────────────────────────
     # Extracted so it runs inside _available_models_cache_lock (RLock) to
@@ -1831,12 +2277,7 @@ def get_available_models() -> dict:
 
         # 2. Read auth store (active_provider fallback + credential_pool inspection)
         auth_store = {}
-        try:
-            from api.profiles import get_active_hermes_home as _gah
-
-            auth_store_path = _gah() / "auth.json"
-        except ImportError:
-            auth_store_path = HOME / ".hermes" / "auth.json"
+        auth_store_path = _get_auth_store_path()
         if auth_store_path.exists():
             try:
                 import json as _j
@@ -2328,6 +2769,20 @@ def get_available_models() -> dict:
             for pid in sorted(detected_providers):
                 if pid.startswith("custom:") and pid in _named_custom_groups:
                     _nc_display, _nc_models = _named_custom_groups[pid]
+                    # If all named-group models were deduped (already auto-detected
+                    # from base_url /v1/models), fall back to auto-detected models
+                    # instead of silently dropping the group (issue #1619).
+                    #
+                    # Per Opus advisor on stage-295: the load-bearing fix for the
+                    # reporter's symptom is the api/routes.py:/api/models/live
+                    # broadening to handle custom:* slugs. This block is defensive
+                    # belt-and-braces — under current _named_custom_groups
+                    # population logic (atomic add+append inside the same dedup
+                    # guard at line ~2640), an empty list shouldn't reach here.
+                    # Kept for future-proofing in case the population logic
+                    # changes (e.g. supporting model-less custom_providers entries).
+                    if not _nc_models:
+                        _nc_models = auto_detected_models_by_provider.get(pid, [])
                     if _nc_models:
                         groups.append({"provider": _nc_display, "provider_id": pid, "models": _nc_models})
                     continue
@@ -2444,6 +2899,43 @@ def get_available_models() -> dict:
                                 "models": models,
                             }
                         )
+                elif pid == "openai-codex":
+                    # Codex account catalogs drift faster than WebUI releases
+                    # (for example gpt-5.3-codex-spark in #1680). Ask the
+                    # agent's Codex resolver first so /api/models inherits the
+                    # live Codex API / local ~/.codex cache / static fallback
+                    # chain instead of freezing the picker to WebUI's curated
+                    # _PROVIDER_MODELS snapshot.
+                    raw_models = []
+                    codex_ids = []
+                    try:
+                        from hermes_cli.models import provider_model_ids as _provider_model_ids
+
+                        codex_ids = [mid for mid in (_provider_model_ids("openai-codex") or []) if mid]
+                    except Exception:
+                        logger.warning("Failed to load OpenAI Codex models from hermes_cli")
+
+                    for mid in _read_visible_codex_cache_model_ids():
+                        if mid not in codex_ids:
+                            codex_ids.append(mid)
+
+                    raw_models = [
+                        {"id": mid, "label": _get_label_for_model(mid, [])}
+                        for mid in codex_ids
+                    ]
+
+                    if not raw_models:
+                        raw_models = copy.deepcopy(_PROVIDER_MODELS.get("openai-codex", []))
+
+                    if raw_models:
+                        models = _apply_provider_prefix(raw_models, pid, active_provider)
+                        groups.append(
+                            {
+                                "provider": provider_name,
+                                "provider_id": pid,
+                                "models": models,
+                            }
+                        )
                 elif pid == "nous":
                     # Nous Portal exposes a curated catalog (~30 models on most
                     # accounts, up to several hundred for enterprise tiers) via
@@ -2542,18 +3034,33 @@ def get_available_models() -> dict:
                             group_entry["extra_models"] = extras
                         groups.append(group_entry)
                 elif pid in _PROVIDER_MODELS or pid in cfg.get("providers", {}):
-                    raw_models = copy.deepcopy(_PROVIDER_MODELS.get(pid, []))
-                    detected_models = auto_detected_models_by_provider.get(pid, [])
-                    if detected_models and not raw_models:
-                        raw_models = copy.deepcopy(detected_models)
-
                     provider_cfg = cfg.get("providers", {}).get(pid, {})
+                    raw_models = []
+
+                    # User-configured model allowlists are explicit local
+                    # source-of-truth and should still beat auto-discovery.
+                    # Otherwise, ask Hermes CLI first so WebUI tracks the same
+                    # live catalog as the agent/CLI picker; WebUI's static
+                    # _PROVIDER_MODELS table is now a fallback only (#1240).
                     if isinstance(provider_cfg, dict) and "models" in provider_cfg:
                         cfg_models = provider_cfg["models"]
                         if isinstance(cfg_models, dict):
                             raw_models = [{"id": k, "label": k} for k in cfg_models.keys()]
                         elif isinstance(cfg_models, list):
                             raw_models = [{"id": k, "label": k} for k in cfg_models]
+
+                    if not raw_models:
+                        raw_models = _models_from_live_provider_ids(
+                            pid,
+                            _read_live_provider_model_ids(pid),
+                        )
+
+                    if not raw_models:
+                        raw_models = copy.deepcopy(_PROVIDER_MODELS.get(pid, []))
+
+                    detected_models = auto_detected_models_by_provider.get(pid, [])
+                    if detected_models and not raw_models:
+                        raw_models = copy.deepcopy(detected_models)
                     models = _apply_provider_prefix(raw_models, pid, active_provider)
                     groups.append(
                         {
@@ -2703,6 +3210,7 @@ def get_available_models() -> dict:
             reload_config()
             _available_models_cache = None
             _available_models_cache_ts = 0.0
+            _available_models_cache_source_fingerprint = None
             disk_groups = None
 
         # Serve from memory cache if fresh
@@ -2715,6 +3223,7 @@ def get_available_models() -> dict:
         if disk_groups is not None:
             _available_models_cache = disk_groups
             _available_models_cache_ts = now
+            _available_models_cache_source_fingerprint = _models_cache_source_fingerprint()
             _save_models_cache_to_disk(disk_groups)
             return copy.deepcopy(disk_groups)
 
@@ -2732,6 +3241,7 @@ def get_available_models() -> dict:
         with _cache_build_cv:
             _available_models_cache = result
             _available_models_cache_ts = time.monotonic()
+            _available_models_cache_source_fingerprint = _models_cache_source_fingerprint()
             _cache_build_in_progress = False
             _cache_build_cv.notify_all()
         _save_models_cache_to_disk(result)
@@ -2745,6 +3255,57 @@ _INDEX_HTML_PATH = REPO_ROOT / "static" / "index.html"
 LOCK = threading.Lock()
 SESSIONS_MAX = 100
 CHAT_LOCK = threading.Lock()
+
+
+class StreamChannel:
+    """Broadcast SSE events to every connected browser tab for a stream.
+
+    While no tab is connected, events are buffered so the first/reconnected
+    subscriber still receives the stream tail that arrived during the gap.
+    Once one or more subscribers are attached, new events are broadcast to all
+    of them instead of being consumed destructively by a single queue reader.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._subscribers: list[queue.Queue] = []
+        self._offline_buffer: list[tuple[str, object]] = []
+
+    def subscribe(self) -> queue.Queue:
+        q: queue.Queue = queue.Queue()
+        with self._lock:
+            # Replay buffered events to the new subscriber INSIDE the lock so a
+            # concurrent put_nowait() can't broadcast a newer event before we
+            # finish replaying the older buffered tail. queue.Queue.put_nowait
+            # is non-blocking on an unbounded queue, so holding the lock here
+            # is safe. Per Opus advisor on stage-292.
+            for item in self._offline_buffer:
+                q.put_nowait(item)
+            self._subscribers.append(q)
+        return q
+
+    def unsubscribe(self, q: queue.Queue) -> None:
+        with self._lock:
+            try:
+                self._subscribers.remove(q)
+            except ValueError:
+                pass
+
+    def put_nowait(self, item: tuple[str, object]) -> None:
+        with self._lock:
+            subscribers = list(self._subscribers)
+            if not subscribers:
+                self._offline_buffer.append(item)
+                return
+            self._offline_buffer.clear()
+        for q in subscribers:
+            q.put_nowait(item)
+
+
+def create_stream_channel() -> StreamChannel:
+    return StreamChannel()
+
+
 STREAMS: dict = {}
 STREAMS_LOCK = threading.Lock()
 CANCEL_FLAGS: dict = {}
@@ -2821,6 +3382,7 @@ _SETTINGS_DEFAULTS = {
     "onboarding_completed": False,
     "send_key": "enter",  # 'enter' or 'ctrl+enter'
     "show_token_usage": False,  # show input/output token badge below assistant messages
+    "show_tps": False,  # show tokens-per-second chip in assistant message headers
     "show_cli_sessions": False,  # merge CLI sessions from state.db into the sidebar
     "sync_to_insights": False,  # mirror WebUI token usage to state.db for /insights
     "check_for_updates": True,  # check if webui/agent repos are behind upstream
@@ -2946,6 +3508,7 @@ _SETTINGS_ENUM_VALUES = {
 _SETTINGS_BOOL_KEYS = {
     "onboarding_completed",
     "show_token_usage",
+    "show_tps",
     "show_cli_sessions",
     "sync_to_insights",
     "check_for_updates",

@@ -45,6 +45,7 @@ docs/*
 !docs/migration/
 !docs/migration/upstream-restart-execution-plan.md
 !docs/migration/restart-progress.md
+!docs/troubleshooting.md
 
 # Local-only PR review harness: rendering drivers, sample bank, fixtures.
 # Used by Claude during deep reviews; never shared in the repo.

@@ -9,10 +9,10 @@ const SESSION_QUEUES={};  // keyed by session_id for queued follow-up turns
 // single-threaded so only one done event fires at a time in practice.
 let _queueDrainSid=null;
 const $=id=>document.getElementById(id);
-// Redirect to /login when the server responds with 401 (auth session expired).
-// Handles iOS PWA standalone mode where a server-side 302→/login would break
-// out of the PWA shell into Safari instead of navigating within it.
-function _redirectIfUnauth(res){if(res&&res.status===401){window.location.href='/login?next='+encodeURIComponent(window.location.pathname+window.location.search);return true;}return false;}
+// Redirect to login when the server responds with 401 (auth session expired).
+// Handles iOS PWA standalone mode and keeps subpath mounts like /hermes/ from
+// escaping to the personal site root /login.
+function _redirectIfUnauth(res){if(res&&res.status===401){window.location.href='login?next='+encodeURIComponent(window.location.pathname+window.location.search);return true;}return false;}
 function _getSessionQueue(sid, create=false){
   if(!sid) return [];
   if(!SESSION_QUEUES[sid]&&create) SESSION_QUEUES[sid]=[];
@@ -50,7 +50,15 @@ function _setCompressionSessionLock(sid){
   window._compressionLockSid=sid||null;
 }
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-
+function _matchBacktickFenceLine(line){
+  const m=String(line||'').match(/^[ ]{0,3}(`{3,})([^`]*)$/);
+  if(!m) return null;
+  return {fence:m[1],len:m[1].length,info:(m[2]||'').trim()};
+}
+function _isBacktickFenceClose(line,minLen){
+  const m=String(line||'').match(/^[ ]{0,3}(`{3,})[ \t]*$/);
+  return !!(m&&m[1].length>=minLen);
+}
 /**
  * Render fenced code blocks inside user messages.
  * Extracts ```…``` fences, replaces them with placeholders,
@@ -58,13 +66,17 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
  * with the same <pre><code> pipeline used by renderMd().
  * All non-fenced text stays escaped (no bold/italic/link interpretation).
  */
+
 function _renderUserFencedBlocks(text){
   const stash=[];
   let s=String(text||'');
   // Extract fenced code blocks → stash, replace with null-token placeholder
-  // CommonMark line-anchored fence (fixes #1438): inner ``` inside content no longer truncates the block.
-  s=s.replace(/(^|\n)[ ]{0,3}```([a-zA-Z0-9_+-]*)\n(?:([\s\S]*?)\n)?[ ]{0,3}```(?=\n|$)/g,(_,lead,lang,code)=>{
-    lang=(lang||'').trim().toLowerCase();
+  // CommonMark §4.5 line-anchored fence: the closing run must use at least
+  // as many backticks as the opener, so inner triple-backtick fences remain content.
+  s=s.replace(/(^|\n)[ ]{0,3}(`{3,})([^\n`]*)\n(?:([\s\S]*?)\n)?[ ]{0,3}\2`*[ \t]*(?=\n|$)/g,(_,lead,_fence,info,code)=>{
+    const langInfo=(info||'').trim();
+    const langMatch=langInfo.match(/^(\w[\w+-]*)$/);
+    let lang=langMatch?(langMatch[1]||'').trim().toLowerCase():'';
     code=code||'';
     // Remove one trailing newline if present (the fence consumes its own)
     if(code.endsWith('\n')) code=code.slice(0,-1);
@@ -88,6 +100,169 @@ function _renderUserFencedBlocks(text){
   // Restore stashed code blocks
   s=s.replace(/\x00UF(\d+)\x00/g,(_,i)=>stash[+i]);
   return s;
+}
+function _statusCardHtml(card){
+  card=card||{};
+  const rows=Array.isArray(card.rows)?card.rows:[];
+  const sessionId=String(card.sessionId||'');
+  const shortSessionId=sessionId.length>22?`${sessionId.slice(0,10)}…${sessionId.slice(-8)}`:sessionId;
+  const copyIcon=(typeof li==='function')?li('copy',13):'Copy';
+  const copyBtn=sessionId
+    ? `<button class="status-card-session-copy" type="button" data-copy-status-session="${esc(card.sessionId||'')}" title="${esc(t('copy'))}" onclick="copyStatusSessionId(this);event.stopPropagation()"><span>${esc(shortSessionId)}</span>${copyIcon}</button>`
+    : '';
+  const rowHtml=rows.map(row=>`
+    <div class="status-card-row">
+      <span class="status-card-label">${esc(row.label||'')}</span>
+      <span class="status-card-value">${esc(row.value||'')}</span>
+    </div>`).join('');
+  return `<div class="status-card" data-status-card="1">
+    <div class="status-card-head">
+      <div class="status-card-title-wrap">
+        <div class="status-card-title">${esc(card.title||t('status_heading'))}</div>
+        <div class="status-card-subtitle">${esc(card.subtitle||'')}</div>
+      </div>
+      ${copyBtn}
+    </div>
+    <div class="status-card-grid">${rowHtml}</div>
+  </div>`;
+}
+
+const MESSAGE_RENDER_WINDOW_DEFAULT=50;
+let _messageRenderWindowSid=null;
+let _messageRenderWindowSize=MESSAGE_RENDER_WINDOW_DEFAULT;
+function _resetMessageRenderWindow(sid){
+  _messageRenderWindowSid=sid||null;
+  _messageRenderWindowSize=MESSAGE_RENDER_WINDOW_DEFAULT;
+}
+function _currentMessageRenderWindowSize(){
+  return Math.max(
+    MESSAGE_RENDER_WINDOW_DEFAULT,
+    Number(_messageRenderWindowSize)||MESSAGE_RENDER_WINDOW_DEFAULT
+  );
+}
+function _messageRenderableMessageCount(){
+  let count=0;
+  for(const m of (S.messages||[])){
+    if(!m||!m.role||m.role==='tool') continue;
+    if(_isContextCompactionMessage(m)||_isPreservedCompressionTaskListMessage(m)) continue;
+    const hasTc=Array.isArray(m.tool_calls)&&m.tool_calls.length>0;
+    const hasTu=Array.isArray(m.content)&&m.content.some(p=>p&&p.type==='tool_use');
+    if(msgContent(m)||m.attachments?.length||(m.role==='assistant'&&(hasTc||hasTu||_messageHasReasoningPayload(m)))) count++;
+  }
+  return count;
+}
+function _messageHiddenBeforeCount(){
+  return Math.max(0,_messageRenderableMessageCount()-_currentMessageRenderWindowSize());
+}
+function _wireMessageWindowLoadEarlierButton(){
+  const indicator=$('loadOlderIndicator');
+  if(!indicator) return;
+  indicator.onclick=()=>{
+    if(_messageHiddenBeforeCount()>0) _showEarlierRenderedMessages();
+    else if(typeof _loadOlderMessages==='function') _loadOlderMessages();
+  };
+}
+function _showEarlierRenderedMessages(){
+  const container=$('messages');
+  const prevScrollH=container?container.scrollHeight:0;
+  const prevScrollTop=container?container.scrollTop:0;
+  _messageRenderWindowSize=_currentMessageRenderWindowSize()+MESSAGE_RENDER_WINDOW_DEFAULT;
+  renderMessages();
+  if(container){
+    const newScrollH=container.scrollHeight;
+    container.scrollTop=prevScrollTop+(newScrollH-prevScrollH);
+  }
+  _scrollPinned=false;
+}
+
+const DASHBOARD_STATUS_TTL_MS=60000;
+let _dashboardStatusCache=null;
+let _dashboardStatusFetchedAt=0;
+
+function _dashboardIsBrowserLoopback(){
+  const host=(window.location.hostname||'').replace(/^\[|\]$/g,'').toLowerCase();
+  return host==='127.0.0.1'||host==='localhost'||host==='::1';
+}
+function _dashboardBrowserUrl(status){
+  if(!status||!status.running||!status.port) return '';
+  let source;
+  try{source=new URL(status.url||('http://127.0.0.1:'+status.port));}
+  catch(_){source=new URL('http://127.0.0.1:'+status.port);}
+  const browserHost=window.location.hostname||source.hostname;
+  const displayHost=browserHost.includes(':')&&!browserHost.startsWith('[')?'['+browserHost+']':browserHost;
+  return source.protocol+'//'+displayHost+':'+status.port;
+}
+function _applyDashboardStatus(status){
+  const running=!!(status&&status.running);
+  const url=running?_dashboardBrowserUrl(status):'';
+  const warning=running&&!_dashboardIsBrowserLoopback()?t('dashboard_loopback_warning'):'';
+  document.querySelectorAll('[data-dashboard-link]').forEach(btn=>{
+    btn.classList.toggle('dashboard-link-visible',running);
+    btn.style.display=running?'':'none';
+    btn.dataset.dashboardUrl=url;
+    btn.title=warning||t('tab_dashboard');
+    btn.setAttribute('aria-label',warning||t('tab_dashboard'));
+  });
+}
+async function refreshDashboardStatus(force=false){
+  const now=Date.now();
+  if(!force&&_dashboardStatusCache&&(now-_dashboardStatusFetchedAt)<DASHBOARD_STATUS_TTL_MS){
+    _applyDashboardStatus(_dashboardStatusCache);
+    return _dashboardStatusCache;
+  }
+  try{
+    const status=await api('/api/dashboard/status');
+    _dashboardStatusCache=status||{running:false};
+  }catch(_){
+    _dashboardStatusCache={running:false};
+  }
+  _dashboardStatusFetchedAt=Date.now();
+  _applyDashboardStatus(_dashboardStatusCache);
+  return _dashboardStatusCache;
+}
+async function loadDashboardSettings(){
+  const modeEl=$('settingsDashboardMode');
+  const urlEl=$('settingsDashboardUrl');
+  if(!modeEl&&!urlEl) return;
+  try{
+    const cfg=await api('/api/dashboard/config');
+    if(modeEl) modeEl.value=cfg.enabled||'auto';
+    if(urlEl) urlEl.value=cfg.url||'';
+  }catch(_){/* leave defaults visible */}
+}
+async function saveDashboardSettings(){
+  const modeEl=$('settingsDashboardMode');
+  const urlEl=$('settingsDashboardUrl');
+  const statusEl=$('settingsDashboardStatus');
+  const payload={enabled:(modeEl&&modeEl.value)||'auto',url:(urlEl&&urlEl.value||'').trim()};
+  try{
+    const saved=await api('/api/dashboard/config',{method:'POST',body:JSON.stringify(payload)});
+    if(modeEl) modeEl.value=saved.enabled||'auto';
+    if(urlEl) urlEl.value=saved.url||'';
+    if(statusEl) statusEl.textContent='Dashboard link settings saved.';
+    await refreshDashboardStatus(true);
+  }catch(err){
+    if(statusEl) statusEl.textContent='Dashboard link settings failed to save.';
+    else if(typeof showToast==='function') showToast('Dashboard link settings failed to save.');
+  }
+}
+function openHermesDashboard(event){
+  if(event){event.preventDefault();event.stopPropagation();}
+  const btn=event&&event.currentTarget?event.currentTarget:document.querySelector('[data-dashboard-link]');
+  const url=(btn&&btn.dataset&&btn.dataset.dashboardUrl)||_dashboardBrowserUrl(_dashboardStatusCache);
+  if(!url) return false;
+  window.open(url,'_blank','noopener,noreferrer');
+  return false;
+}
+function _initDashboardLinkProbe(){
+  loadDashboardSettings();
+  refreshDashboardStatus(true);
+  setInterval(refreshDashboardStatus,DASHBOARD_STATUS_TTL_MS);
+}
+if(document.readyState==='complete'){
+  _initDashboardLinkProbe();
+}else{
+  document.addEventListener('DOMContentLoaded',_initDashboardLinkProbe,{once:true});
 }
 
 /* ── Image lightbox — click any .msg-media-img to enlarge ─────────────────── */
@@ -576,9 +751,11 @@ function syncModelChip(){
   }
   const opt=_selectedModelOption();
   const text=opt?opt.textContent:getModelLabel(sel.value||'');
-  label.textContent=text;
-  if(mobileLabel) mobileLabel.textContent=text;
-  chip.title=sel.value||'Conversation model';
+  const gatewayRouting=_latestGatewayRoutingForSession(S.session);
+  const displayText=_formatGatewayModelLabel(sel.value||'',text,gatewayRouting)||text;
+  label.textContent=displayText;
+  if(mobileLabel) mobileLabel.textContent=displayText;
+  chip.title=gatewayRouting?`${sel.value||'Conversation model'} ${_gatewayRoutingLabel(gatewayRouting)}`:(sel.value||'Conversation model');
   chip.classList.toggle('active',!!(dd&&dd.classList.contains('open')));
   if(mobileAction) mobileAction.classList.toggle('active',!!(dd&&dd.classList.contains('open')));
 }
@@ -707,19 +884,28 @@ function renderModelDropdown(){
     }
     // Add remaining models matching filter
     let _lastGroup=null;
+    // Count models per group for heading labels (#1425)
+    const _groupCounts={};
+    for(const m of _modelData){
+      if(configuredIds.has(m.value)) continue;
+      if(m.group) _groupCounts[m.group]=(_groupCounts[m.group]||0)+1;
+    }
     for(const m of _modelData){
       if(configuredIds.has(m.value)||!matches(m)) continue;
       if(m.group&&m.group!==_lastGroup){
         const heading=document.createElement('div');
         heading.className='model-group';
-        heading.textContent=m.group;
+        const count=_groupCounts[m.group]||0;
+        heading.textContent=count>1?`${m.group} (${count})`:m.group;
         dd.appendChild(heading);
         _lastGroup=m.group;
       }
       const row=document.createElement('div');
       row.className='model-opt'+(m.value===sel.value?' active':'');
       const badgeHtml=m.badge?`<span class="model-opt-badge model-opt-badge--${esc(m.badge.role||'configured')}">${esc(m.badge.label||'Configured')}</span>`:'';
-      row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${m.name}</span>${badgeHtml}</div><span class="model-opt-id">${m.id}</span>`;
+      // Inline provider chip on every row that has a group (#1425)
+      const providerChip=m.group?`<span class="model-opt-provider">${esc(m.group)}</span>`:'';
+      row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${m.name}</span>${badgeHtml}${providerChip}</div><span class="model-opt-id">${m.id}</span>`;
       row.onclick=()=>selectModelFromDropdown(m.value);
       dd.appendChild(row);
     }
@@ -1191,21 +1377,56 @@ window.addEventListener('resize',function(){
 // Uses a guard flag to avoid the race where programmatic scrolls (from
 // scrollIfPinned / scrollToBottom) re-set _scrollPinned=true, overriding
 // the user's explicit scroll-up.  Fixes #1469 / #1360.
+// Direction-aware unpin (issue #1731): the hysteresis below is correct
+// for re-pinning (entering the near-bottom zone), but applying it to
+// unpinning stranded users who scrolled up by a small amount inside the
+// 250px zone — every upward sample still landed in the near-bottom
+// region, so the counter kept incrementing and _scrollPinned stayed
+// true. The next streaming token snapped them back. We now track
+// scrollTop direction: an explicit upward movement (scrollTop decreased
+// by more than 2px between samples) unpins immediately and resets the
+// counter, while downward / stationary movement falls through the
+// original hysteresis path so the macOS momentum re-pin protection from
+// #1360 is preserved.
+// rAF-debounced scroll listener (issue #1360): on macOS WKWebView, trackpad
+// momentum scrolling fires scroll events that interleave with the
+// _programmaticScroll setTimeout(0) guard. A mid-momentum scroll event can
+// either get swallowed (_programmaticScroll still true) or falsely report
+// the user is at the bottom (momentum hasn't settled). rAF defers the
+// distance check to the next paint frame when the browser's scroll
+// position has settled. A hysteresis counter requires two consecutive
+// near-bottom samples before re-pinning, preventing accidental re-pin
+// during initial deceleration.
 let _scrollPinned=true;
 let _programmaticScroll=false;
+let _nearBottomCount=0;
+let _lastScrollTop=null;
+// Reset hook for session-switch — called from sessions.js loadSession() to
+// prevent the new chat's first scroll comparing against the previous chat's
+// scrollTop (Opus stage-302 SHOULD-FIX, #1731 follow-up).
+function _resetScrollDirectionTracker(){ _lastScrollTop=null; }
+if (typeof window !== 'undefined') window._resetScrollDirectionTracker = _resetScrollDirectionTracker;
 (function(){
   const el=document.getElementById('messages');
   if(!el) return;
+  let _scrollRaf=0;
   el.addEventListener('scroll',()=>{
     if(_programmaticScroll) return; // ignore scrolls we triggered ourselves
-    const nearBottom=el.scrollHeight-el.scrollTop-el.clientHeight<250;
-    _scrollPinned=nearBottom;
-    const btn=$('scrollToBottomBtn');
-    if(btn) btn.style.display=_scrollPinned?'none':'flex';
-    // Load older messages when scrolled near the top
-    if(el.scrollTop<80 && typeof _messagesTruncated!=='undefined' && _messagesTruncated && typeof _loadOlderMessages==='function'){
-      _loadOlderMessages();
-    }
+    cancelAnimationFrame(_scrollRaf);
+    _scrollRaf=requestAnimationFrame(()=>{
+      const top=el.scrollTop;
+      const nearBottom=el.scrollHeight-top-el.clientHeight<250;
+      const movedUp=_lastScrollTop!==null && top<_lastScrollTop-2;
+      _lastScrollTop=top;
+      if(movedUp){ _nearBottomCount=0; _scrollPinned=false; } // #1731
+      else { _nearBottomCount=nearBottom?_nearBottomCount+1:0; _scrollPinned=_nearBottomCount>=2; } // #1360
+      const btn=$('scrollToBottomBtn');
+      if(btn) btn.style.display=_scrollPinned?'none':'flex';
+      // Load older messages when scrolled near the top
+      if(el.scrollTop<80 && typeof _messagesTruncated!=='undefined' && _messagesTruncated && typeof _loadOlderMessages==='function'){
+        _loadOlderMessages();
+      }
+    });
   });
 })();
 function _fmtTokens(n){if(!n||n<0)return'0';if(n>=1e6)return(n/1e6).toFixed(1)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'k';return String(n);}
@@ -1219,6 +1440,72 @@ function _formatTurnDuration(seconds){
   const s=total%60;
   if(h)return`${h}h ${m}m`;
   return`${m}m ${s}s`;
+}
+function _formatActiveElapsedTimer(seconds){
+  const n=Number(seconds);
+  if(!Number.isFinite(n)||n<0)return'';
+  const total=Math.max(0,Math.floor(n));
+  const m=Math.floor(total/60);
+  const s=total%60;
+  return`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+let _activityElapsedTimer=null;
+let _activityElapsedTimerGroup=null;
+function _activityElapsedStartedAt(group){
+  if(!group)return null;
+  const raw=(group.dataset&&group.dataset.turnStartedAt!==undefined&&group.dataset.turnStartedAt!=='')
+    ?group.dataset.turnStartedAt
+    :(S.session&&S.session.pending_started_at);
+  const started=Number(raw);
+  return Number.isFinite(started)&&started>0?started:null;
+}
+function _activityElapsedLabel(group){
+  const started=_activityElapsedStartedAt(group);
+  if(!started)return'';
+  return _formatActiveElapsedTimer((Date.now()/1000)-started);
+}
+function _setActivityElapsedStartedAt(group){
+  if(!group||group.getAttribute('data-live-tool-call-group')!=='1')return;
+  const started=_activityElapsedStartedAt(group);
+  if(started)group.setAttribute('data-turn-started-at',String(started));
+}
+function _updateActiveActivityElapsedTimer(){
+  const group=_activityElapsedTimerGroup;
+  if(!group||!group.isConnected||group.getAttribute('data-live-tool-call-group')!=='1'){
+    _clearActivityElapsedTimer();
+    return;
+  }
+  const durationEl=group.querySelector('.tool-call-group-duration');
+  const label=_activityElapsedLabel(group);
+  if(label){
+    group.setAttribute('data-active-turn-elapsed',label);
+  }else{
+    group.removeAttribute('data-active-turn-elapsed');
+  }
+  if(durationEl){
+    durationEl.textContent=label?`Working ${label}`:'';
+    durationEl.style.display=label?'':'none';
+  }
+}
+function _startActivityElapsedTimer(group){
+  if(!group||group.getAttribute('data-live-tool-call-group')!=='1')return;
+  _setActivityElapsedStartedAt(group);
+  if(_activityElapsedTimerGroup&&_activityElapsedTimerGroup!==group)_clearActivityElapsedTimer();
+  _activityElapsedTimerGroup=group;
+  _updateActiveActivityElapsedTimer();
+  if(!_activityElapsedTimer)_activityElapsedTimer=setInterval(_updateActiveActivityElapsedTimer,1000);
+}
+function _clearActivityElapsedTimer(){
+  if(_activityElapsedTimer){
+    clearInterval(_activityElapsedTimer);
+    _activityElapsedTimer=null;
+  }
+  if(_activityElapsedTimerGroup&&_activityElapsedTimerGroup.isConnected){
+    _activityElapsedTimerGroup.removeAttribute('data-active-turn-elapsed');
+    const durationEl=_activityElapsedTimerGroup.querySelector('.tool-call-group-duration');
+    if(durationEl){durationEl.textContent='';durationEl.style.display='none';}
+  }
+  _activityElapsedTimerGroup=null;
 }
 
 const _MOBILE_CONFIG_BASE_LABEL='Workspace, model, reasoning, and context settings';
@@ -1470,6 +1757,47 @@ function getModelLabel(modelId){
   return _last || 'Unknown';
 }
 
+function _gatewayProviderName(provider){
+  const text=String(provider||'').trim();
+  if(!text)return'';
+  return text.replace(/^custom:/,'').replace(/[-_]/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+}
+function _gatewayRoutingLabel(routing){
+  if(!routing)return'';
+  const provider=_gatewayProviderName(routing.used_provider||routing.provider);
+  return provider?`via ${provider}`:'';
+}
+function _formatGatewayModelLabel(modelId,labelText,routing){
+  if(!routing)return'';
+  const usedModel=String(routing.used_model||'').trim();
+  const base=usedModel?getModelLabel(usedModel):(labelText||getModelLabel(modelId));
+  const via=_gatewayRoutingLabel(routing);
+  return via?`${base} ${via}`:base;
+}
+function _gatewayRoutingFailoverText(routing){
+  if(!routing||!routing.has_failover)return'';
+  const attempts=Array.isArray(routing.routing)?routing.routing:[];
+  const providers=attempts.map(a=>_gatewayProviderName(a&&a.provider)).filter(Boolean);
+  const unique=[];providers.forEach(p=>{if(!unique.includes(p))unique.push(p);});
+  if(unique.length>=2)return`Failover: ${unique[0]} → ${unique[unique.length-1]}`;
+  const from=_gatewayProviderName(routing.requested_provider);
+  const to=_gatewayProviderName(routing.used_provider);
+  if(from&&to&&from!==to)return`Failover: ${from} → ${to}`;
+  return'Gateway failover detected';
+}
+function _gatewayModelWarningText(routing){
+  if(!routing||!routing.model_changed)return'';
+  const requested=getModelLabel(routing.requested_model||'requested model');
+  const used=getModelLabel(routing.used_model||'served model');
+  return`Model switched: ${requested} → ${used}`;
+}
+function _latestGatewayRoutingForSession(session){
+  if(!session)return null;
+  if(session.gateway_routing)return session.gateway_routing;
+  const history=Array.isArray(session.gateway_routing_history)?session.gateway_routing_history:[];
+  return history.length?history[history.length-1]:null;
+}
+
 function _stripXmlToolCallsDisplay(s){
   // Strip <function_calls>...</function_calls> blocks emitted by DeepSeek and
   // similar models in their raw response text.  These are processed separately
@@ -1516,7 +1844,8 @@ function renderMd(raw){
   s=(function _applyBlockquotes(input){
     const lines=input.split('\n');
     const out=[];
-    let inFence=false;     // inside a non-blockquote ```...``` fence
+    let inFence=false;     // inside a non-blockquote backtick fence
+    let fenceLen=0;
     let bqStart=-1;
     const flush=(end)=>{
       if(bqStart<0) return;
@@ -1539,13 +1868,15 @@ function renderMd(raw){
       const line=lines[i];
       if(inFence){
         out.push(line);
-        if(/^```/.test(line)) inFence=false;
+        if(_isBacktickFenceClose(line,fenceLen)){inFence=false;fenceLen=0;}
         continue;
       }
-      if(/^```/.test(line)){
+      const fenceOpen=_matchBacktickFenceLine(line);
+      if(fenceOpen){
         flush(i);
         out.push(line);
         inFence=true;
+        fenceLen=fenceOpen.len;
         continue;
       }
       if(/^>/.test(line)){
@@ -1589,14 +1920,16 @@ function renderMd(raw){
   const _preBlock_stash=[];
   const fence_stash=[];
   // CommonMark §4.5: opening fence must start a line (with up to 3 spaces of indent)
-  // and closing fence must also start a line. Without line anchoring, a literal ``` inside
-  // a code block (e.g. a regex pattern with ``` in a lookbehind, a script that documents
-  // fences) terminates the outer block at the wrong place, leaking content into the
-  // markdown stream where bold/italic/inline-code passes corrupt it. Fixes #1438.
-  s=s.replace(/(^|\n)[ ]{0,3}```(?:([\s\S]*?)\n)?[ ]{0,3}```(?=\n|$)/g,(_,lead,raw)=>{
-    const m=raw.match(/^(\w[\w+-]*)\n?([\s\S]*)$/);
-    const lang=m?(m[1]||'').trim().toLowerCase():'';
-    const code=m?m[2]:raw.replace(/^\n?/,'');
+  // and closing fence must start a line with the same backtick char and at least
+  // as many backticks as the opener. Without line/fence-length anchoring, a literal
+  // ``` inside a code block (e.g. a nested markdown example) terminates the outer
+  // block at the wrong place, leaking content into the markdown stream where
+  // bold/italic/inline-code passes corrupt it. Fixes #1438 and #1696.
+  s=s.replace(/(^|\n)[ ]{0,3}(`{3,})([^\n`]*)\n(?:([\s\S]*?)\n)?[ ]{0,3}\2`*[ \t]*(?=\n|$)/g,(_,lead,_fence,info,code)=>{
+    const langInfo=(info||'').trim();
+    const langMatch=langInfo.match(/^(\w[\w+-]*)$/);
+    const lang=langMatch?(langMatch[1]||'').trim().toLowerCase():'';
+    code=code||'';
     const codeLines=code.split('\n');
     const firstCodeLine=codeLines.find(line=>line.trim())||'';
     const firstMermaidLine=codeLines.map(line=>line.trim()).find(line=>line&&!line.startsWith('%%'))||'';
@@ -1665,7 +1998,6 @@ function renderMd(raw){
   s=s.replace(/<i>([\s\S]*?)<\/i>/gi,(_,t)=>'*'+t+'*');
   s=s.replace(/<code>([^<]*?)<\/code>/gi,(_,t)=>'`'+t+'`');
   s=s.replace(/<br\s*\/?>/gi,'\n');
-  s=s.replace(/\x00R(\d+)\x00/g,(_,i)=>rawPreStash[+i]);
   // ── Glued-bold-heading lift (issue #1446) ────────────────────────────────
   // LLMs in thinking/reasoning mode frequently emit a "section header" glued
   // to the end of the previous paragraph with no whitespace, like:
@@ -1797,6 +2129,9 @@ function renderMd(raw){
   s=s.replace(/(<a\b[^>]*>[\s\S]*?<\/a>)/g,m=>{_a_stash.push(m);return `\x00A${_a_stash.length-1}\x00`;});
   s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g,(_,label,url)=>`<a href="${url.replace(/"/g,'%22')}" target="_blank" rel="noopener">${esc(label)}</a>`);
   s=s.replace(/\x00A(\d+)\x00/g,(_,i)=>_a_stash[+i]);
+  // Restore raw <pre> only after markdown rewrites so literal preformatted
+  // content stays placeholder-protected, then let the sanitizer normalize tags.
+  s=s.replace(/\x00R(\d+)\x00/g,(_,i)=>rawPreStash[+i]);
   // Sanitize any remaining HTML tags.  The renderer intentionally returns
   // HTML and inserts it with innerHTML later, so tag names alone are not enough:
   // raw/model-provided HTML like <img onerror=...> or <a href="javascript:...">
@@ -1911,7 +2246,15 @@ function renderMd(raw){
   // with <br>. Token \x00E (next free after B D F G L M C O A).
   // Fixes #745: code blocks collapse to single line when not preceded by blank line.
   const _pre_stash=[];
-  s=s.replace(/(<div class="pre-header">[\s\S]*?<\/div>)?<pre>[\s\S]*?<\/pre>|<div class="(mermaid-block|katex-block)"[\s\S]*?<\/div>/g,m=>{
+  // #1463 / #1618: regex must match <pre> with ANY attributes — PR #484 added
+  // <pre class="tree-raw-view"> for JSON/YAML and <pre class="diff-block"> for
+  // diff/patch which the literal-<pre> shape missed. Newlines inside those
+  // blocks were falling through to the paragraph wrap below and getting
+  // converted to <br>, causing the YAML/JSON/diff collapse. PR #1516's CSS
+  // fix targeted the wrong layer (Prism token white-space) — by the time it
+  // ran, the \n had already been replaced. The CSS rule is kept as defense
+  // in depth.
+  s=s.replace(/(<div class="pre-header">[\s\S]*?<\/div>)?<pre[^>]*>[\s\S]*?<\/pre>|<div class="(mermaid-block|katex-block)"[\s\S]*?<\/div>/g,m=>{
     _pre_stash.push(m);
     return '\x00E'+(_pre_stash.length-1)+'\x00';
   });
@@ -2182,6 +2525,7 @@ function setBusy(v){
   S.busy=v;
   updateSendBtn();
   if(!v){
+    if(typeof _clearActivityElapsedTimer==='function') _clearActivityElapsedTimer();
     setStatus('');
     setComposerStatus('');
     const sid=_queueDrainSid||(S.session&&S.session.session_id);
@@ -2644,6 +2988,16 @@ function _fallbackCopy(text){
     finally{document.body.removeChild(ta);}
   });
 }
+function copyStatusSessionId(btn){
+  const text=btn&&btn.getAttribute('data-copy-status-session');
+  if(!text)return;
+  _copyText(text).then(()=>{
+    const orig=btn.innerHTML;
+    btn.innerHTML=(typeof li==='function')?li('check',13):t('copied');
+    btn.classList.add('copied');
+    setTimeout(()=>{btn.innerHTML=orig;btn.classList.remove('copied');},1500);
+  }).catch(()=>showToast(t('copy_failed')));
+}
 function copyMsg(btn){
   const row=btn.closest('[data-raw-text]');
   const text=row?row.dataset.rawText:'';
@@ -2824,6 +3178,176 @@ function dismissReconnect() {
   $('reconnectBanner').classList.remove('visible');
   clearInflight();
 }
+
+// ── Live host resource health panel (#693) ──
+const SYSTEM_HEALTH_INTERVAL_MS=5000;
+let _systemHealthTimer=null;
+function _systemHealthPercent(metric){
+  const percent=Number(metric&&metric.percent);
+  if(!Number.isFinite(percent)) return null;
+  return Math.max(0,Math.min(100,Math.round(percent*10)/10));
+}
+function _formatSystemHealthPercent(percent){
+  if(percent == null) return '—';
+  return `${percent.toFixed(percent%1?1:0)}%`;
+}
+function _formatSystemHealthBytes(metric){
+  if(!metric||!metric.used_bytes||!metric.total_bytes) return '';
+  const units=['B','KB','MB','GB','TB'];
+  const fmt=(bytes)=>{
+    let value=Number(bytes)||0, idx=0;
+    while(value>=1024&&idx<units.length-1){value/=1024;idx++;}
+    return `${value.toFixed(value>=10||idx===0?0:1)} ${units[idx]}`;
+  };
+  return `${fmt(metric.used_bytes)} / ${fmt(metric.total_bytes)}`;
+}
+function _updateSystemHealthMetric(name,metric){
+  const row=document.querySelector(`[data-system-health-metric="${name}"]`);
+  if(!row) return;
+  const rawPercent=_systemHealthPercent(metric);
+  const percent=rawPercent == null ? 0 : rawPercent;
+  const label=row.querySelector('[data-system-health-value]');
+  const bar=row.querySelector('.system-health-bar');
+  const fill=row.querySelector('.system-health-bar-fill');
+  const text=_formatSystemHealthPercent(rawPercent);
+  if(label){
+    label.textContent=text;
+    const bytes=(name==='memory'||name==='disk')?_formatSystemHealthBytes(metric):'';
+    label.title=bytes||text;
+  }
+  if(bar) bar.setAttribute('aria-valuenow',String(percent));
+  if(fill) fill.style.width=`${percent}%`;
+}
+function setSystemHealthUnavailable(message){
+  const panel=$('systemHealthPanel');
+  const status=$('systemHealthStatus');
+  if(!panel) return;
+  panel.classList.remove('loading');
+  panel.classList.add('unavailable');
+  if(status) status.textContent=message||'Unavailable';
+  ['cpu','memory','disk'].forEach(name=>_updateSystemHealthMetric(name,null));
+}
+function renderSystemHealth(payload){
+  const panel=$('systemHealthPanel');
+  const status=$('systemHealthStatus');
+  if(!panel) return;
+  if(!payload||payload.available===false){
+    setSystemHealthUnavailable('Unavailable');
+    return;
+  }
+  panel.classList.remove('loading','unavailable');
+  if(status) status.textContent=payload.status==='partial'?'Partial':'Live';
+  _updateSystemHealthMetric('cpu',payload.cpu);
+  _updateSystemHealthMetric('memory',payload.memory);
+  _updateSystemHealthMetric('disk',payload.disk);
+}
+async function pollSystemHealth(){
+  if(document.visibilityState !== 'visible') return;
+  if(!_systemHealthPanelIsVisible()) return;
+  try{
+    const payload=await api('/api/system/health');
+    renderSystemHealth(payload);
+  }catch(_){
+    setSystemHealthUnavailable('Unavailable');
+  }
+}
+function _systemHealthPanelIsVisible(){
+  return document.visibilityState === 'visible' &&
+    !!document.querySelector('main.main.showing-insights') &&
+    !!$('systemHealthPanel');
+}
+function startSystemHealthMonitor(){
+  if(!_systemHealthPanelIsVisible()) return;
+  if(_systemHealthTimer) return;
+  void pollSystemHealth();
+  _systemHealthTimer=setInterval(pollSystemHealth,SYSTEM_HEALTH_INTERVAL_MS);
+}
+function stopSystemHealthMonitor(){
+  if(_systemHealthTimer){clearInterval(_systemHealthTimer);_systemHealthTimer=null;}
+}
+function _syncSystemHealthMonitorVisibility(){
+  if(_systemHealthPanelIsVisible()) startSystemHealthMonitor();
+  else stopSystemHealthMonitor();
+}
+document.addEventListener('visibilitychange',_syncSystemHealthMonitorVisibility);
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',startSystemHealthMonitor);
+else startSystemHealthMonitor();
+
+// ── Hermes agent/gateway heartbeat alert (#716) ──
+const AGENT_HEALTH_INTERVAL_MS=30000;
+const AGENT_HEALTH_DISMISSED_KEY='agent-health-dismissed';
+let _agentHealthTimer=null;
+let _agentHealthLastState='unknown';
+function _agentHealthDismissed(){
+  try{return localStorage.getItem(AGENT_HEALTH_DISMISSED_KEY)==='1';}
+  catch(_){return false;}
+}
+function _setAgentHealthDismissed(value){
+  try{
+    if(value)localStorage.setItem(AGENT_HEALTH_DISMISSED_KEY,'1');
+    else localStorage.removeItem(AGENT_HEALTH_DISMISSED_KEY);
+  }catch(_){ }
+}
+function _hideAgentHealthAlert(){
+  const banner=$('agentHealthBanner');
+  if(banner){banner.classList.remove('visible');banner.hidden=true;}
+}
+function _showAgentHealthAlert(payload){
+  if(_agentHealthDismissed()) return;
+  const banner=$('agentHealthBanner');
+  const title=$('agentHealthTitle');
+  const details=$('agentHealthDetails');
+  if(!banner) return;
+  if(title) title.textContent='Hermes agent is not responding';
+  const state=payload&&payload.details&&payload.details.gateway_state?` State: ${payload.details.gateway_state}.`:'';
+  if(details) details.textContent=`Gateway heartbeat failed.${state} Messages may not be delivered until it comes back.`;
+  banner.hidden=false;
+  banner.classList.add('visible');
+}
+function dismissAgentHealthAlert(){
+  _setAgentHealthDismissed(true);
+  _hideAgentHealthAlert();
+}
+async function pollAgentHealth(){
+  if(document.visibilityState !== 'visible') return;
+  try{
+    const payload=await api('/api/health/agent');
+    if(payload.alive === true){
+      _agentHealthLastState='alive';
+      _setAgentHealthDismissed(false);
+      _hideAgentHealthAlert();
+      return;
+    }
+    if(payload.alive === false){
+      _agentHealthLastState='down';
+      _showAgentHealthAlert(payload);
+      return;
+    }
+    if(payload.alive == null){
+      _agentHealthLastState='unknown';
+      _hideAgentHealthAlert();
+    }
+  }catch(_){
+    _agentHealthLastState='unknown';
+    _hideAgentHealthAlert();
+  }
+}
+function startAgentHealthMonitor(){
+  if(document.visibilityState !== 'visible') return;
+  if(_agentHealthTimer) return;
+  void pollAgentHealth();
+  _agentHealthTimer=setInterval(pollAgentHealth, AGENT_HEALTH_INTERVAL_MS);
+}
+function stopAgentHealthMonitor(){
+  if(_agentHealthTimer){clearInterval(_agentHealthTimer);_agentHealthTimer=null;}
+}
+function _syncAgentHealthMonitorVisibility(){
+  if(document.visibilityState === 'visible') startAgentHealthMonitor();
+  else stopAgentHealthMonitor();
+}
+document.addEventListener('visibilitychange',_syncAgentHealthMonitorVisibility);
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',startAgentHealthMonitor);
+else startAgentHealthMonitor();
 async function refreshSession() {
   // When the banner is in post-update restart mode, the "Reload" button
   // should do a full page reload — a session refresh would just 502 while
@@ -2844,10 +3368,17 @@ async function refreshSession() {
   } catch(e) { setStatus('Refresh failed: ' + e.message); }
 }
 // ── Update banner ──
+function _formatUpdateTargetStatus(label,info){
+  if(!info||!(info.behind>0)) return null;
+  const branch=info.branch?` (${info.branch})`:'';
+  return `${label}${branch}: ${info.behind} update${info.behind>1?'s':''}`;
+}
 function _showUpdateBanner(data){
   const parts=[];
-  if(data.webui&&data.webui.behind>0) parts.push(`WebUI: ${data.webui.behind} update${data.webui.behind>1?'s':''}`);
-  if(data.agent&&data.agent.behind>0) parts.push(`Agent: ${data.agent.behind} update${data.agent.behind>1?'s':''}`);
+  const webuiPart=_formatUpdateTargetStatus('WebUI',data.webui);
+  const agentPart=_formatUpdateTargetStatus('Agent',data.agent);
+  if(webuiPart) parts.push(webuiPart);
+  if(agentPart) parts.push(agentPart);
   if(!parts.length)return;
   const msg=$('updateMsg');
   if(msg) msg.textContent='\u2B06 '+parts.join(', ')+' available';
@@ -2879,8 +3410,30 @@ function dismissUpdate(){
   const b=$('updateBanner');if(b)b.classList.remove('visible');
   sessionStorage.setItem('hermes-update-dismissed','1');
 }
+function _isUpdateApplyNetworkError(error){
+  if(error && error.status) return false;
+  const message=(error&&error.message)||String(error||'');
+  return /Failed to fetch|NetworkError|Load failed/i.test(message);
+}
+function _formatUpdateApplyExceptionMessage(error){
+  if(_isUpdateApplyNetworkError(error)){
+    return 'Update failed: could not reach the WebUI server. It may have restarted or the connection was interrupted. Please wait a few seconds, reload the page, then check the server if it still does not come back.';
+  }
+  const message=(error&&error.message)||String(error||'unknown error');
+  return 'Update failed: '+message;
+}
 async function applyUpdates(){
+  if(window._updateApplyInFlight) return;
+  window._updateApplyInFlight=true;
   const btn=$('btnApplyUpdate');
+  const resetApplyButton=(delayMs)=>{
+    const reset=()=>{
+      window._updateApplyInFlight=false;
+      if(btn){btn.disabled=false;btn.textContent='Update Now';}
+    };
+    if(delayMs>0) setTimeout(reset,delayMs);
+    else reset();
+  };
   if(btn){btn.disabled=true;btn.textContent='Updating\u2026';}
   const errEl=$('updateError');
   if(errEl){errEl.style.display='none';errEl.textContent='';}
@@ -2896,7 +3449,7 @@ async function applyUpdates(){
       const res=await api('/api/updates/apply',{method:'POST',body:JSON.stringify({target})});
       if(!res.ok){
         _showUpdateError(target,res);
-        if(btn){btn.disabled=false;btn.textContent='Update Now';}
+        resetApplyButton(0);
         return;
       }
     }
@@ -2905,9 +3458,10 @@ async function applyUpdates(){
     sessionStorage.removeItem('hermes-update-dismissed');
     _waitForServerThenReload();
   }catch(e){
-    if(errEl){errEl.textContent='Update failed: '+e.message;errEl.style.display='block';}
-    else showToast('Update failed: '+e.message);
-    if(btn){btn.disabled=false;btn.textContent='Update Now';}
+    const msg=_formatUpdateApplyExceptionMessage(e);
+    if(errEl){errEl.textContent=msg;errEl.style.display='block';}
+    else showToast(msg);
+    resetApplyButton(_isUpdateApplyNetworkError(e)?5000:0);
   }
 }
 function _showUpdateError(target,res){
@@ -2976,7 +3530,7 @@ async function _waitForServerThenReload(opts){
   await new Promise(r=>setTimeout(r, interval));
   while(Date.now()<deadline){
     try{
-      const r=await fetch('/health',{cache:'no-store'});
+      const r=await fetch(new URL('health', document.baseURI||location.href).href,{cache:'no-store'});
       if(r.ok){
         let data={};
         try{ data=await r.json(); }catch(_){}
@@ -3061,7 +3615,19 @@ function syncTopbar(){
   const _topbarTitle=$('topbarTitle');if(_topbarTitle)_topbarTitle.textContent=sessionTitle;
   document.title=sessionTitle+' \u2014 '+(window._botName||'Hermes');
   const vis=S.messages.filter(m=>m&&m.role&&m.role!=='tool');
-  const _topbarMeta=$('topbarMeta');if(_topbarMeta)_topbarMeta.textContent=t('n_messages',vis.length);
+  const _topbarMeta=$('topbarMeta');
+  if(_topbarMeta){
+    const sourceLabel=(S.session&&S.session.is_cli_session&&(S.session.source_label||S.session.source_tag||S.session.raw_source))||'';
+    const metaText=t('n_messages',vis.length);
+    _topbarMeta.textContent=metaText;
+    if(sourceLabel){
+      const badge=document.createElement('span');
+      badge.className='topbar-source-badge';
+      badge.textContent=sourceLabel+(S.session.read_only?' · read-only':'');
+      _topbarMeta.appendChild(document.createTextNode(' '));
+      _topbarMeta.appendChild(badge);
+    }
+  }
   if(typeof syncAppTitlebar==='function') syncAppTitlebar();
   // If a profile switch just happened, apply its model rather than the session's stale value.
   // S._pendingProfileModel is set by switchToProfile() and cleared here after one application.
@@ -3148,15 +3714,43 @@ function _messageHasReasoningPayload(m){
   if(Array.isArray(m.content)) return m.content.some(p=>p&&(p.type==='thinking'||p.type==='reasoning'));
   return /<think>[\s\S]*?<\/think>|<\|channel>thought\n[\s\S]*?<channel\|>|<\|turn\|>thinking\n[\s\S]*?<turn\|>/.test(String(m.content||''));
 }
-function _assistantRoleHtml(tsTitle=''){
-  const _bn=window._botName||'Hermes';
-  return `<div class="msg-role assistant" ${tsTitle?`title="${esc(tsTitle)}"`:''}><div class="role-icon assistant">${esc(_bn.charAt(0).toUpperCase())}</div><span style="font-size:12px">${esc(_bn)}</span></div>`;
+function _formatTurnTps(value){
+  const n=Number(value);
+  if(!Number.isFinite(n)||n<=0) return '';
+  const fixed=n>=100?Math.round(n).toLocaleString():n>=10?n.toFixed(1):n.toFixed(1);
+  return `${fixed} t/s`;
 }
-function _createAssistantTurn(tsTitle=''){
+function isTpsDisplayEnabled(){
+  return window._showTps===true;
+}
+function _assistantRoleHtml(tsTitle='', tpsText=''){
+  const _bn=window._botName||'Hermes';
+  const tps=(isTpsDisplayEnabled()&&tpsText)?`<span class="msg-tps-inline" title="Tokens per second">${esc(tpsText)}</span>`:'';
+  return `<div class="msg-role assistant" ${tsTitle?`title="${esc(tsTitle)}"`:''}><div class="role-icon assistant">${esc(_bn.charAt(0).toUpperCase())}</div><span style="font-size:12px">${esc(_bn)}</span>${tps}</div>`;
+}
+function _setAssistantTurnTps(turn, tpsText=''){
+  if(!turn) return;
+  const role=turn.querySelector('.msg-role.assistant');
+  if(!role) return;
+  let chip=role.querySelector('.msg-tps-inline');
+  const text=String(tpsText||'').trim();
+  if(!text){if(chip) chip.remove();return;}
+  if(!chip){
+    chip=document.createElement('span');
+    chip.className='msg-tps-inline';
+    chip.title='Tokens per second';
+    role.appendChild(chip);
+  }
+  chip.textContent=text;
+}
+function _setLiveAssistantTps(value){
+  _setAssistantTurnTps($('liveAssistantTurn'), isTpsDisplayEnabled()?_formatTurnTps(value):'');
+}
+function _createAssistantTurn(tsTitle='', tpsText=''){
   const row=document.createElement('div');
   row.className='msg-row assistant-turn';
   row.dataset.role='assistant';
-  row.innerHTML=`${_assistantRoleHtml(tsTitle)}<div class="assistant-turn-blocks"></div>`;
+  row.innerHTML=`${_assistantRoleHtml(tsTitle, tpsText)}<div class="assistant-turn-blocks"></div>`;
   return row;
 }
 function _assistantTurnBlocks(turn){
@@ -3190,11 +3784,44 @@ function _thinkingActivityNode(text){
 // finalized into a settled assistant turn (the live attribute is removed in
 // _convertLiveActivityGroupToSettled / when liveAssistantTurn loses its id).
 let _liveActivityUserExpanded;
+const _activityDisclosureStoragePrefix='hermes-activity-disclosure:';
+function _activityDisclosureStorageKey(activityKey){
+  if(!activityKey||!S.session||!S.session.session_id) return null;
+  return _activityDisclosureStoragePrefix+S.session.session_id+':'+activityKey;
+}
+function _readActivityDisclosureState(activityKey){
+  const key=_activityDisclosureStorageKey(activityKey);
+  if(!key) return null;
+  try{
+    const saved=localStorage.getItem(key);
+    return saved==='open'||saved==='closed'?saved:null;
+  }catch(_){return null;}
+}
+function _writeActivityDisclosureState(activityKey, open){
+  const key=_activityDisclosureStorageKey(activityKey);
+  if(!key) return;
+  try{localStorage.setItem(key, open?'open':'closed');}catch(_){}
+}
+function _copyActivityDisclosureState(fromActivityKey, toActivityKey){
+  const state=_readActivityDisclosureState(fromActivityKey);
+  if(state) _writeActivityDisclosureState(toActivityKey, state==='open');
+}
+function _activityKeyForLiveTurn(){
+  return S.activeStreamId?'live:'+S.activeStreamId:null;
+}
 function _onLiveActivityToggle(group){
   if(!group) return;
   // Only track explicit user clicks on the live group, not programmatic toggles.
   if(group.getAttribute('data-live-tool-call-group')!=='1') return;
   _liveActivityUserExpanded = !group.classList.contains('tool-call-group-collapsed');
+}
+function _toggleActivityGroup(summary){
+  const group=summary&&summary.closest?summary.closest('.tool-call-group'):null;
+  if(!group) return;
+  const collapsed=group.classList.toggle('tool-call-group-collapsed');
+  summary.setAttribute('aria-expanded',String(!collapsed));
+  _writeActivityDisclosureState(group.getAttribute('data-activity-disclosure-key'), !collapsed);
+  if(typeof _onLiveActivityToggle==='function') _onLiveActivityToggle(group);
 }
 function _clearLiveActivityUserIntent(){
   _liveActivityUserExpanded = undefined;
@@ -3203,25 +3830,35 @@ function ensureActivityGroup(inner, opts){
   opts=opts||{};
   if(!inner) return null;
   const live=!!opts.live;
+  const activityKey=opts.activityKey||(live?_activityKeyForLiveTurn():null);
   const selector=live?'.tool-call-group[data-live-tool-call-group="1"]':'.tool-call-group[data-agent-activity-group="1"]';
   let group=inner.querySelector(selector);
   if(!group){
     group=document.createElement('div');
     let collapsed=opts.collapsed!==false;
+    const savedState=_readActivityDisclosureState(activityKey);
     // Restore the user's explicit expand intent when recreating the live
-    // activity group within the same turn (#1298).
+    // activity group within the same turn (#1298), then let persisted chat/turn
+    // state win across session switches and reloads.
     if(live && _liveActivityUserExpanded === true) collapsed=false;
     else if(live && _liveActivityUserExpanded === false) collapsed=true;
+    if(savedState==='open') collapsed=false;
+    else if(savedState==='closed') collapsed=true;
     group.className='tool-call-group agent-activity-group'+(collapsed?' tool-call-group-collapsed':'');
     group.setAttribute('data-tool-call-group','1');
     group.setAttribute('data-agent-activity-group','1');
+    if(activityKey) group.setAttribute('data-activity-disclosure-key',activityKey);
     if(live) group.setAttribute('data-live-tool-call-group','1');
-    group.innerHTML=`<button type="button" class="tool-call-group-summary" aria-expanded="${collapsed?'false':'true'}" onclick="const g=this.closest('.tool-call-group');const c=g.classList.toggle('tool-call-group-collapsed');this.setAttribute('aria-expanded',String(!c));if(typeof _onLiveActivityToggle==='function')_onLiveActivityToggle(g);"><span class="tool-call-group-chevron">${li('chevron-right',12)}</span><span class="tool-call-group-label">Activity</span><span class="tool-call-group-list">tools / thinking</span><span class="tool-call-group-duration"></span><span class="tool-call-group-count">0</span></button><div class="tool-call-group-body"></div>`;
+    group.innerHTML=`<button type="button" class="tool-call-group-summary" aria-expanded="${collapsed?'false':'true'}" onclick="_toggleActivityGroup(this)"><span class="tool-call-group-chevron">${li('chevron-right',12)}</span><span class="tool-call-group-label">Activity</span><span class="tool-call-group-duration"></span></button><div class="tool-call-group-body"></div>`;
     const anchor=opts.anchor||null;
     if(anchor&&anchor.parentElement===inner) anchor.insertAdjacentElement('afterend', group);
     else inner.appendChild(group);
+  }else if(activityKey&&!group.getAttribute('data-activity-disclosure-key')){
+    group.setAttribute('data-activity-disclosure-key',activityKey);
   }
+  if(live) _setActivityElapsedStartedAt(group);
   _syncToolCallGroupSummary(group);
+  if(live) _startActivityElapsedTimer(group);
   return group;
 }
 function _compressionStateForCurrentSession(){
@@ -3460,9 +4097,29 @@ function _preservedCompressionTaskListCardHtml(m, open=false){
 function _preservedCompressionTaskListCardsHtml(messages){
   return (messages||[]).map(m=>_preservedCompressionTaskListCardHtml(m, false)).join('');
 }
+function _latestTodoToolItems(messages){
+  for(let i=(messages||[]).length-1;i>=0;i--){
+    const m=messages[i];
+    if(!m||m.role!=='tool') continue;
+    try{
+      const payload=typeof m.content==='string'?JSON.parse(m.content):m.content;
+      if(payload&&Array.isArray(payload.todos)) return payload.todos;
+    }catch(_){ }
+  }
+  return null;
+}
+function _hasActiveTodoItems(items){
+  return Array.isArray(items) && items.some(item=>{
+    const status=String(item&&item.status||'').trim().toLowerCase();
+    return status==='pending'||status==='in_progress';
+  });
+}
 function _latestPreservedCompressionTaskListMessages(messages){
   const latest=[...(messages||[])].reverse().find(m=>_isPreservedCompressionTaskListMessage(m));
-  return latest?[latest]:[];
+  if(!latest) return [];
+  const latestTodos=_latestTodoToolItems(messages);
+  if(Array.isArray(latestTodos) && !_hasActiveTodoItems(latestTodos)) return [];
+  return [latest];
 }
 function _isSameLocalDay(dateA, dateB){
   return dateA.getFullYear()===dateB.getFullYear()
@@ -3602,10 +4259,28 @@ function clearMessageRenderCache(){
   _sessionHtmlCacheSid=null;
 }
 
-function renderMessages(){
+function _scrollAfterMessageRender(preserveScroll){
+  // Terminal stream renders can happen after S.activeStreamId is cleared.
+  // In that case, preserveScroll asks the normal pin-state helper to decide:
+  // pinned users stay at bottom; users who manually scrolled up stay put.
+  if(preserveScroll){
+    scrollIfPinned();
+    return;
+  }
+  if(S.activeStreamId){
+    scrollIfPinned();
+    return;
+  }
+  scrollToBottom();
+}
+
+function renderMessages(options){
+  const preserveScroll=!!(options&&options.preserveScroll);
   const inner=$('msgInner');
   const sid=S.session?S.session.session_id:null;
   const msgCount=S.messages.length;
+  if(sid!==_messageRenderWindowSid) _resetMessageRenderWindow(sid);
+  const renderWindowSize=_currentMessageRenderWindowSize();
   const hasTransientTranscriptUi=!!(
     (window._compressionUi&&(!window._compressionUi.sessionId||window._compressionUi.sessionId===sid)) ||
     (window._handoffUi&&(!window._handoffUi.sessionId||window._handoffUi.sessionId===sid))
@@ -3621,10 +4296,11 @@ function renderMessages(){
   // before those cards can be inserted.
   if(sid&&sid!==_sessionHtmlCacheSid&&!INFLIGHT[sid]&&!hasTransientTranscriptUi){
     const cached=_sessionHtmlCache.get(sid);
-    if(cached&&cached.msgCount===msgCount){
+    if(cached&&cached.msgCount===msgCount&&cached.renderWindowSize===renderWindowSize){
       inner.innerHTML=cached.html;
       _sessionHtmlCacheSid=sid;
-      if(S.activeStreamId){scrollIfPinned();}else{scrollToBottom();}
+      _wireMessageWindowLoadEarlierButton();
+      _scrollAfterMessageRender(preserveScroll);
       requestAnimationFrame(()=>{highlightCode();addCopyButtons();loadDiffInline();loadCsvInline();loadExcalidrawInline();loadPdfInline();loadHtmlInline();renderMermaidBlocks();renderKatexBlocks();});
       requestAnimationFrame(()=>{highlightCode();addCopyButtons();initTreeViews();loadPdfInline();loadHtmlInline();renderMermaidBlocks();renderKatexBlocks();});
       if(typeof _initMediaPlaybackObserver==='function') _initMediaPlaybackObserver();
@@ -3653,19 +4329,10 @@ function renderMessages(){
       const hasTu=Array.isArray(m.content)&&m.content.some(p=>p&&p.type==='tool_use');
       if(hasTc||hasTu||_messageHasReasoningPayload(m)) return true;
     }
-    return msgContent(m)||m.attachments?.length;
+    return m._statusCard||msgContent(m)||m.attachments?.length;
   });
   $('emptyState').style.display=(vis.length||preservedCompressionTaskMessages.length)?'none':'';
   inner.innerHTML='';
-  // Show "load older" indicator when older messages are available
-  if(typeof _messagesTruncated!=='undefined' && _messagesTruncated && S.messages.length>0){
-    const indicator=document.createElement('div');
-    indicator.id='loadOlderIndicator';
-    indicator.className='load-older-indicator';
-    indicator.textContent=typeof t==='function'?t('load_older_messages'):'↑ Scroll up or click to load older messages';
-    indicator.onclick=()=>{if(typeof _loadOlderMessages==='function') _loadOlderMessages();};
-    inner.appendChild(indicator);
-  }
   const compressionNode=compressionState?_compressionCardsNode(compressionState):null;
   const referenceMessage=S.messages.find(m=>_isContextCompactionMessage(m));
   const referenceText=referenceMessage?msgContent(referenceMessage)||String(referenceMessage.content||''):'';
@@ -3681,8 +4348,32 @@ function renderMessages(){
     if(_isPreservedCompressionTaskListMessage(m)){preservedCompressionRawIdxs.push(rawIdx);rawIdx++;continue;}
     const hasTc=Array.isArray(m.tool_calls)&&m.tool_calls.length>0;
     const hasTu=Array.isArray(m.content)&&m.content.some(p=>p&&p.type==='tool_use');
-    if(msgContent(m)||m.attachments?.length||(m.role==='assistant'&&(hasTc||hasTu||_messageHasReasoningPayload(m)))) visWithIdx.push({m,rawIdx});
+    if(msgContent(m)||m._statusCard||m.attachments?.length||(m.role==='assistant'&&(hasTc||hasTu||_messageHasReasoningPayload(m)))) visWithIdx.push({m,rawIdx});
     rawIdx++;
+  }
+  // Show a top affordance when earlier transcript content exists either in
+  // memory (DOM windowing) or on the server (paginated session fetch).
+  // Prefer expanding the local render window first so a fully loaded long
+  // session can reduce DOM nodes without losing in-memory transcript data.
+  const windowStart=Math.max(0, visWithIdx.length-renderWindowSize);
+  const hiddenBeforeCount=windowStart;
+  const renderVisWithIdx=visWithIdx.slice(windowStart);
+  const firstRenderedRawIdx=renderVisWithIdx.length?renderVisWithIdx[0].rawIdx:Infinity;
+  const hasServerOlder=!!(typeof _messagesTruncated!=='undefined' && _messagesTruncated && S.messages.length>0);
+  if(hiddenBeforeCount>0 || hasServerOlder){
+    const indicator=document.createElement('button');
+    indicator.type='button';
+    indicator.id='loadOlderIndicator';
+    indicator.className='load-older-indicator message-window-load-earlier';
+    indicator.textContent=hiddenBeforeCount>0
+      ? `Load earlier messages (${hiddenBeforeCount} hidden)`
+      : (typeof t==='function'?t('load_older_messages'):'Load earlier messages');
+    indicator.onclick=()=>{
+      if(hiddenBeforeCount>0) _showEarlierRenderedMessages();
+      else if(typeof _loadOlderMessages==='function') _loadOlderMessages();
+    };
+    inner.appendChild(indicator);
+    _wireMessageWindowLoadEarlierButton();
   }
   let lastUserRawIdx=-1;
   for(let i=visWithIdx.length-1;i>=0;i--){
@@ -3692,7 +4383,7 @@ function renderMessages(){
     }
   }
   const insertionAnchor=_compressionAnchorIndex(
-    visWithIdx,
+    renderVisWithIdx,
     compressionState ? compressionState.anchorMessageKey : sessionCompressionAnchorKey,
     compressionState
       ? (typeof compressionState.anchorVisibleIdx==='number' ? compressionState.anchorVisibleIdx : compressionState.anchorRawIdx)
@@ -3703,8 +4394,10 @@ function renderMessages(){
   const assistantSegments=new Map();
   const assistantThinking=new Map();
   const userRows=new Map();
-  for(let vi=0;vi<visWithIdx.length;vi++){
-    const {m,rawIdx}=visWithIdx[vi];
+  // Windowed render loop replaces the legacy full loop:
+  // for(let vi=0;vi<visWithIdx.length;vi++)
+  for(let vi=0;vi<renderVisWithIdx.length;vi++){
+    const {m,rawIdx}=renderVisWithIdx[vi];
     const _tsSep=m._ts||m.timestamp;
     if(_tsSep){
       const _d=new Date(_tsSep*1000);
@@ -3748,7 +4441,7 @@ function renderMessages(){
       }
     }
     const isUser=m.role==='user';
-    const isLastAssistant=!isUser&&vi===visWithIdx.length-1;
+    const isLastAssistant=!isUser&&vi===renderVisWithIdx.length-1;
     let filesHtml='';
     if(m.attachments&&m.attachments.length){
       // Static regression tests intentionally look for msg-media-img/msg-file-badge near this branch.
@@ -3762,6 +4455,7 @@ function renderMessages(){
       }).join('')}</div>`;
     }
     const bodyHtml = isUser ? _renderUserFencedBlocks(content) : renderMd(_stripXmlToolCallsDisplay(String(content)));
+    const statusHtml = (!isUser&&m._statusCard) ? _statusCardHtml(m._statusCard) : '';
     const isEditableUser=isUser&&rawIdx===lastUserRawIdx;
     const editBtn  = isEditableUser ? `<button class="msg-action-btn" title="${t('edit_message')}" onclick="editMessage(this)">${li('pencil',13)}</button>` : '';
     const undoBtn  = isLastAssistant ? `<button class="msg-action-btn" title="${t('undo_exchange')}" onclick="undoLastExchange()">${li('undo',13)}</button>` : '';
@@ -3806,7 +4500,7 @@ function renderMessages(){
     }
 
     if(!currentAssistantTurn){
-      currentAssistantTurn=_createAssistantTurn(tsTitle);
+      currentAssistantTurn=_createAssistantTurn(tsTitle, isTpsDisplayEnabled()?_formatTurnTps(m._turnTps):'');
       inner.appendChild(currentAssistantTurn);
     }
     const seg=document.createElement('div');
@@ -3827,8 +4521,10 @@ function renderMessages(){
       if(isSimplifiedToolCalling()) assistantThinking.set(rawIdx, thinkingText);
       else if(window._showThinking!==false) seg.insertAdjacentHTML('beforeend', _thinkingCardHtml(thinkingText));
     }
-    const hasVisibleBody=!!(String(content||'').trim()||filesHtml);
-    if(hasVisibleBody){
+    const hasVisibleBody=!!(String(content||'').trim()||filesHtml||statusHtml);
+    if(statusHtml){
+      seg.insertAdjacentHTML('beforeend', statusHtml);
+    }else if(hasVisibleBody){
       seg.insertAdjacentHTML('beforeend', `${filesHtml}<div class="msg-body">${bodyHtml}</div>${footHtml}`);
     }else if(!(thinkingText&&window._showThinking!==false&&!isSimplifiedToolCalling())){
       seg.classList.add('assistant-segment-anchor');
@@ -3840,8 +4536,8 @@ function renderMessages(){
   function _insertCompressionLikeNode(node, anchorIndex){
     if(!node) return;
     const anchorIdx=anchorIndex===undefined?insertionAnchor:anchorIndex;
-    if(anchorIdx!==null && visWithIdx[anchorIdx]){
-      const anchorRawIdx=visWithIdx[anchorIdx].rawIdx;
+    if(anchorIdx!==null && renderVisWithIdx[anchorIdx]){
+      const anchorRawIdx=renderVisWithIdx[anchorIdx].rawIdx;
       const anchorSeg=assistantSegments.get(anchorRawIdx);
       if(anchorSeg){
         const turn=anchorSeg.closest('.assistant-turn');
@@ -3861,13 +4557,13 @@ function renderMessages(){
   }
   function _insertCompressionLikeNodeByRawIdx(node, rawIdx){
     if(!node) return;
-    if(!visWithIdx.length){
+    if(!renderVisWithIdx.length){
       inner.appendChild(node);
       return;
     }
     let anchorIdx=null;
-    for(let i=0;i<visWithIdx.length;i++){
-      if(visWithIdx[i].rawIdx > rawIdx){
+    for(let i=0;i<renderVisWithIdx.length;i++){
+      if(renderVisWithIdx[i].rawIdx > rawIdx){
         anchorIdx=i;
         break;
       }
@@ -3876,7 +4572,7 @@ function renderMessages(){
       inner.appendChild(node);
       return;
     }
-    const anchorRawIdx=visWithIdx[anchorIdx].rawIdx;
+    const anchorRawIdx=renderVisWithIdx[anchorIdx].rawIdx;
     const anchorSeg=assistantSegments.get(anchorRawIdx);
     if(anchorSeg){
       const turn=anchorSeg.closest('.assistant-turn');
@@ -3902,16 +4598,17 @@ function renderMessages(){
     ? (()=>{const row=document.createElement('div');row.innerHTML=`<div class="compression-turn"><div class="compression-turn-blocks">${_preservedCompressionTaskListCardsHtml(preservedCompressionTaskMessages)}</div></div>`;return row.firstElementChild;})()
     : null;
   const preservedOnlyAnchor=preservedCompressionRawIdxs.length
-    ? (()=>{let idx=null;for(let i=0;i<visWithIdx.length;i++){if(visWithIdx[i].rawIdx<preservedCompressionRawIdxs[0]) idx=i;}return idx;})()
+    ? (()=>{let idx=null;for(let i=0;i<renderVisWithIdx.length;i++){if(renderVisWithIdx[i].rawIdx<preservedCompressionRawIdxs[0]) idx=i;}return idx;})()
     : null;
   const handoffSummaryStates=_collectHandoffSummaryStates(S.messages);
 
   _insertCompressionLikeNode(compressionNode);
   _insertCompressionLikeNode(referenceNode);
   _insertCompressionLikeNode(preservedOnlyNode, preservedOnlyAnchor);
-  _insertCompressionLikeNode(handoffState?_handoffCardsNode(handoffState):null, visWithIdx.length?visWithIdx.length-1:null);
+  _insertCompressionLikeNode(handoffState?_handoffCardsNode(handoffState):null, renderVisWithIdx.length?renderVisWithIdx.length-1:null);
   for(const entry of handoffSummaryStates){
     if(!entry||!entry.state) continue;
+    if(entry.rawIdx<firstRenderedRawIdx) continue;
     _insertCompressionLikeNodeByRawIdx(_handoffCardsNode(entry.state), entry.rawIdx);
   }
   renderCompressionUi();
@@ -4005,13 +4702,14 @@ function renderMessages(){
         const cards=byAssistant[aIdx]||[];
         let anchorRow=assistantSegments.get(aIdx)||null;
         if(!anchorRow&&assistantIdxs.length){
+          if(aIdx<assistantIdxs[0]) continue;
           const fallbackIdx=[...assistantIdxs].reverse().find(idx=>idx<=aIdx);
           anchorRow=fallbackIdx!==undefined?assistantSegments.get(fallbackIdx):assistantSegments.get(assistantIdxs[assistantIdxs.length-1]);
         }
         if(!anchorRow) continue;
         const anchorParent=anchorRow.parentElement;
         const insertAfterNode = anchorInsertAfter.get(anchorRow) || anchorRow;
-        const group=ensureActivityGroup(anchorParent,{collapsed:true,anchor:insertAfterNode});
+        const group=ensureActivityGroup(anchorParent,{collapsed:true,anchor:insertAfterNode,activityKey:`assistant:${aIdx}`});
         const sourceMsg=S.messages[aIdx]||{};
         if(sourceMsg._turnDuration!==undefined) group.setAttribute('data-turn-duration', String(sourceMsg._turnDuration));
         const body=group&&group.querySelector('.tool-call-group-body');
@@ -4029,6 +4727,7 @@ function renderMessages(){
         const aIdx = parseInt(key);
         let anchorRow=assistantSegments.get(aIdx)||null;
         if(!anchorRow&&assistantIdxs.length){
+          if(aIdx<assistantIdxs[0]) continue;
           const fallbackIdx=[...assistantIdxs].reverse().find(idx=>idx<=aIdx);
           anchorRow=fallbackIdx!==undefined?assistantSegments.get(fallbackIdx):assistantSegments.get(assistantIdxs[assistantIdxs.length-1]);
         }
@@ -4067,26 +4766,49 @@ function renderMessages(){
   }
   // Render per-turn duration and optional token usage on assistant messages.
   // Duration stays visible even when token usage is disabled, because it answers
-  // the basic "how long did that turn take?" UX question.
+  // the basic "how long did that turn take?" UX question. Only walk rendered
+  // assistant segments so hidden messages above the DOM window cannot skew the
+  // footer-to-message mapping.
   {
-    const asstRows=inner.querySelectorAll('.assistant-turn');
-    let ai=0; // assistant-only index for DOM rows
-    for(let mi=0;mi<S.messages.length;mi++){
-      const msg=S.messages[mi];
-      if(msg.role!=='assistant'){continue;}
+    const renderedAssistantIdxs=[...assistantSegments.keys()].sort((a,b)=>a-b);
+    for(const mi of renderedAssistantIdxs){
+      const msg=S.messages[mi]||{};
+      if(msg.role!=='assistant') continue;
+      const routing=msg._gatewayRouting||null;
+      const gatewayText=_formatGatewayModelLabel(S.session&&S.session.model||'', '', routing);
+      const failoverText=_gatewayRoutingFailoverText(routing);
+      const modelWarningText=_gatewayModelWarningText(routing);
       const hasTurnUsage=!!msg._turnUsage;
       const compactActivityForMessage=isSimplifiedToolCalling()&&(
         assistantThinking.has(mi)||
         (S.toolCalls||[]).some(tc=>tc&&(tc.assistant_msg_idx!==undefined?tc.assistant_msg_idx:-1)===mi)
       );
       const durationText=compactActivityForMessage?'':_formatTurnDuration(msg._turnDuration);
-      if(!hasTurnUsage&&!durationText){ai++;continue;}
-      if(ai>=asstRows.length) continue;
-      const row=asstRows[ai];
-      const footerRows=row.querySelectorAll('.msg-foot');
+      if(!hasTurnUsage&&!durationText&&!gatewayText&&!failoverText&&!modelWarningText) continue;
+      const seg=assistantSegments.get(mi);
+      const row=seg?seg.closest('.assistant-turn'):null;
+      const footerRows=row?row.querySelectorAll('.msg-foot'):[];
       const targetFoot=footerRows.length?footerRows[footerRows.length-1]:null;
-      if(!targetFoot||targetFoot.querySelector('.msg-usage-inline,.msg-duration-inline')){ai++;continue;}
+      if(!targetFoot||targetFoot.querySelector('.msg-usage-inline,.msg-duration-inline,.msg-gateway-inline,.gateway-failover-inline,.msg-model-warning-inline')) continue;
       const fragments=[];
+      if(modelWarningText){
+        const warning=document.createElement('span');
+        warning.className='msg-model-warning-inline';
+        warning.textContent=modelWarningText;
+        fragments.push(warning);
+      }
+      if(failoverText){
+        const failover=document.createElement('span');
+        failover.className='gateway-failover-inline';
+        failover.textContent=failoverText;
+        fragments.push(failover);
+      }
+      if(gatewayText){
+        const gateway=document.createElement('span');
+        gateway.className='msg-gateway-inline';
+        gateway.textContent=gatewayText;
+        fragments.push(gateway);
+      }
       if(durationText){
         const duration=document.createElement('span');
         duration.className='msg-duration-inline';
@@ -4108,17 +4830,12 @@ function renderMessages(){
         targetFoot.classList.add('msg-foot-with-usage');
         for(let i=fragments.length-1;i>=0;i--) targetFoot.insertBefore(fragments[i], targetFoot.firstChild);
       }
-      ai++;
     }
   }
   // Only force-scroll when not actively streaming — mid-stream re-renders
   // (tool completion, session switch) must not override the user's scroll position.
   // scrollIfPinned() respects _scrollPinned, so it's a no-op if user scrolled up.
-  if(S.activeStreamId){
-    scrollIfPinned();
-  } else {
-    scrollToBottom();
-  }
+  _scrollAfterMessageRender(preserveScroll);
   // Apply syntax highlighting after DOM is built
   requestAnimationFrame(()=>{highlightCode();addCopyButtons();loadDiffInline();loadCsvInline();loadExcalidrawInline();loadPdfInline();loadHtmlInline();renderMermaidBlocks();renderKatexBlocks();});
   requestAnimationFrame(()=>{highlightCode();addCopyButtons();initTreeViews();loadPdfInline();loadHtmlInline();renderMermaidBlocks();renderKatexBlocks();}); 
@@ -4134,7 +4851,7 @@ function renderMessages(){
     const _html=inner.innerHTML;
     // Only cache sessions with <300KB rendered HTML; evict oldest beyond 8 sessions.
     if(_html.length<300_000){
-      _sessionHtmlCache.set(sid,{html:_html,msgCount});
+      _sessionHtmlCache.set(sid,{html:_html,msgCount,renderWindowSize});
       if(_sessionHtmlCache.size>8){_sessionHtmlCache.delete(_sessionHtmlCache.keys().next().value);}
     }
   }
@@ -4219,33 +4936,25 @@ function _syncToolCallGroupSummary(group){
   if(!group) return;
   const cards=Array.from(group.querySelectorAll('.tool-card-row .tool-card'));
   const toolCount=cards.length;
-  const thinkingCount=group.querySelectorAll('.agent-activity-thinking .thinking-card').length;
-  const names=cards.map(card=>{
-    const el=card.querySelector('.tool-card-name');
-    return el?String(el.textContent||'').trim():'';
-  }).filter(Boolean);
-  const uniqueNames=[...new Set(names)];
   const label=group.querySelector('.tool-call-group-label');
-  const list=group.querySelector('.tool-call-group-list');
-  const badge=group.querySelector('.tool-call-group-count');
   const durationEl=group.querySelector('.tool-call-group-duration');
-  const parts=[];
-  if(thinkingCount) parts.push('thinking');
-  if(uniqueNames.length) parts.push(uniqueNames.slice(0,5).join(', ')+(uniqueNames.length>5?'…':''));
-  const total=toolCount+thinkingCount;
   if(label){
-    if(thinkingCount&&toolCount) label.textContent=`Activity: thinking + ${toolCount} tool${toolCount===1?'':'s'}`;
-    else if(thinkingCount) label.textContent='Activity: thinking';
-    else if(toolCount) label.textContent=`Activity: ${toolCount} tool${toolCount===1?'':'s'}`;
+    if(toolCount) label.textContent=`Activity: ${toolCount} tool${toolCount===1?'':'s'}`;
     else label.textContent='Activity';
   }
-  if(list) list.textContent=parts.join(' · ')||'tools / thinking';
   if(durationEl){
-    const durationText=_formatTurnDuration(group.dataset.turnDuration);
-    durationEl.textContent=durationText?`Done in ${durationText}`:'';
-    durationEl.style.display=durationText?'':'none';
+    if(group.getAttribute('data-live-tool-call-group')==='1'){
+      const activeText=_activityElapsedLabel(group);
+      if(activeText) group.setAttribute('data-active-turn-elapsed',activeText);
+      else group.removeAttribute('data-active-turn-elapsed');
+      durationEl.textContent=activeText?`Working ${activeText}`:'';
+      durationEl.style.display=activeText?'':'none';
+    }else{
+      const durationText=_formatTurnDuration(group.dataset.turnDuration);
+      durationEl.textContent=durationText?`Done in ${durationText}`:'';
+      durationEl.style.display=durationText?'':'none';
+    }
   }
-  if(badge) badge.textContent=String(total);
 }
 
 // ── Live tool card helpers (called during SSE streaming) ──
@@ -4309,7 +5018,7 @@ function appendLiveToolCard(tc){
   }
   const children=Array.from(inner.children);
   const anchor=children.filter(el=>el.matches('[data-live-assistant="1"],.tool-call-group,.tool-card-row,.agent-activity-thinking')).pop();
-  const group=ensureActivityGroup(inner,{live:true,collapsed:false,anchor});
+  const group=ensureActivityGroup(inner,{live:true,collapsed:true,anchor,activityKey:_activityKeyForLiveTurn()});
   const body=group.querySelector('.tool-call-group-body');
   // Update existing card in place (tool_complete after tool_start)
   if(tid){
@@ -4330,6 +5039,7 @@ function appendLiveToolCard(tc){
 }
 
 function clearLiveToolCards(){
+  if(typeof _clearActivityElapsedTimer==='function') _clearActivityElapsedTimer();
   const inner=_assistantTurnBlocks($('liveAssistantTurn'));
   if(inner) inner.querySelectorAll('.tool-call-group[data-live-tool-call-group],.tool-card-row[data-live-tid]').forEach(el=>el.remove());
   // Reset the per-turn user expand intent so the next turn starts at the
@@ -5100,7 +5810,7 @@ function appendThinking(text=''){
     el.id!=='toolRunningRow' &&
     el.matches('[data-live-assistant="1"],.tool-call-group,.tool-card-row,.agent-activity-thinking')
   ).pop();
-  const group=ensureActivityGroup(blocks,{live:true,collapsed:true,anchor});
+  const group=ensureActivityGroup(blocks,{live:true,collapsed:true,anchor,activityKey:_activityKeyForLiveTurn()});
   const body=group&&group.querySelector('.tool-call-group-body');
   if(!body) return;
   let row=body.querySelector('.agent-activity-thinking[data-thinking-active="1"]');
@@ -5133,7 +5843,10 @@ function removeThinking(){
   if(blocks) blocks.querySelectorAll('.agent-activity-thinking').forEach(el=>el.remove());
   if(blocks) blocks.querySelectorAll('.tool-call-group[data-agent-activity-group="1"]').forEach(group=>{
     _syncToolCallGroupSummary(group);
-    if(!group.querySelector('.tool-card-row,.agent-activity-thinking')) group.remove();
+    if(!group.querySelector('.tool-card-row,.agent-activity-thinking')){
+      if(typeof _clearActivityElapsedTimer==='function') _clearActivityElapsedTimer();
+      group.remove();
+    }
   });
   if(turn&&blocks&&!blocks.children.length) turn.remove();
 }
@@ -5241,9 +5954,28 @@ function _renderTreeItems(container, entries, depth){
 
     // Name
     const nameEl=document.createElement('span');
-    nameEl.className='file-name';nameEl.textContent=item.name;nameEl.title=t('double_click_rename');
+    nameEl.className='file-name';nameEl.textContent=item.name;
+    // Tooltip only on FILES — dblclick renames them. On directories, dblclick
+    // navigates into the folder; rename lives in the right-click context menu
+    // (the "Double-click to rename" hint here would be misleading). #1710.
+    if(item.type!=='dir')nameEl.title=t('double_click_rename');
+    // Single-click opens (file) or expand-toggles (dir) but is debounced 300ms so a
+    // double-click can cancel it and trigger rename instead. Without the debounce, the
+    // click bubbles to el.onclick before dblclick can fire — that's #1698. Without the
+    // restored activation, single-click on the filename does nothing — that's #1707.
+    let _nameClickTimer=null;
+    nameEl.onclick=(e)=>{
+      e.stopPropagation();
+      if(_nameClickTimer){clearTimeout(_nameClickTimer);_nameClickTimer=null;}
+      _nameClickTimer=setTimeout(()=>{
+        _nameClickTimer=null;
+        // Delegate to the row's existing single-click handler (openFile / dir toggle).
+        if(typeof el.onclick==='function')el.onclick(e);
+      },300);
+    };
     nameEl.ondblclick=(e)=>{
       e.stopPropagation();
+      if(_nameClickTimer){clearTimeout(_nameClickTimer);_nameClickTimer=null;}
       // For directories, double-click navigates (breadcrumb view)
       if(item.type==='dir'){loadDir(item.path);return;}
       const inp=document.createElement('input');
