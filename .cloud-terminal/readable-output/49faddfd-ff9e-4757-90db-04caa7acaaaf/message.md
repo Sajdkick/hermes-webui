@@ -1,31 +1,29 @@
-# Project Push Parity Fix
+# Active Sessions Fix
+
+## Root cause
+
+- The Ops home panel reads `/api/sessions/activity`, not `/api/ops/sessions`.
+- The live Hermes server was correctly returning your task session from `/api/ops/sessions`, but `/api/sessions/activity` filtered it out once the linked run became quiet or `succeeded` and the session no longer had a live stream.
+- That made the dashboard show `No active sessions.` even though the task session still existed and was still part of the open task flow.
 
 ## What changed
 
-- The Hermes `/ops` project-page push flow now matches Cloud Terminal more closely.
-- `Push changes` now auto-commits dirty worktrees instead of failing on uncommitted changes.
-- Push now targets the project core branch on `origin`, and if you start from a non-core branch it merges that branch into the core branch before pushing, the same way Cloud Terminal does.
-- `.cloud-terminal` runtime artifacts are now excluded from project git status and staging, so the project page no longer treats readable-output/session metadata as repo changes.
-- Successful pushes now also promote `not-synced` tasks to `ready-for-test`, matching Cloud Terminal’s post-push task behavior.
-- The Ops UI now reloads project state after push and refreshes the current project detail when task promotion happened, so the page reflects the updated task state immediately.
-- I also hardened the project helpers to accept serialized project objects that only carry `resolvedPath`, which removed a brittle mismatch between the git helpers and the shared project/task helpers.
-
-## Files
-
-- [api/ops_git.py](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/api/ops_git.py)
-- [api/ops_projects.py](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/api/ops_projects.py)
-- [static/ops-legacy-git.js](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/static/ops-legacy-git.js)
-- [tests/test_upstream_restart_phase8_git_status.py](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/tests/test_upstream_restart_phase8_git_status.py)
-- [tests/test_ops_git_push.py](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/tests/test_ops_git_push.py)
+- In [api/session_activity.py](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/api/session_activity.py), task-linked sessions now stay in the Ops activity list while the linked task is still open, even if the current run is quiet or already `succeeded`.
+- The same activity payload now keeps `readableOutputPending` true for completed task sessions when readable output exists, which matches the Cloud Terminal activity model instead of hiding unread output on `done` sessions.
+- I added a regression in [tests/test_upstream_restart_phase11_activity.py](/home/ubuntu/cloud-terminal-data/projects/hermes-webui/tests/test_upstream_restart_phase11_activity.py) for the exact failing lifecycle: task session, no live stream, terminal run status, still visible in the activity feed.
 
 ## Verification
 
-- `python -m py_compile api/ops_git.py api/ops_projects.py api/routes_ops_git.py`
-- `node --check static/ops-legacy-git.js`
-- `python -m pytest tests/test_ops_git_push.py tests/test_upstream_restart_phase8_git_status.py`
-  - Result: `9 passed`
-- `git diff --check`
+- Live diagnosis before the patch:
+  - `http://127.0.0.1:5003/api/ops/sessions` included your Hermes task session.
+  - `http://127.0.0.1:5003/api/sessions/activity` returned `sessionCount: 0`.
+- Code verification after the patch:
+  - `python -m py_compile api/session_activity.py api/ops_sessions.py api/routes_session_activity.py`
+  - `python -m pytest tests/test_upstream_restart_phase11_activity.py tests/test_upstream_restart_phase4_sessions.py`
+    - Result: `14 passed`
+  - `git diff --check`
 
-## Scope
+## Next step
 
-This pass fixed the project-page git/push behavior and the adjacent UI refresh/task-promotion discrepancies around that same flow. I did not claim parity for unrelated parts of `/ops` in this slice.
+- Restart Hermes once so the running server picks up the patched activity classifier, then reload `/ops`.
+- I could not trigger the managed restart from the terminal because the local Cloud Terminal control plane requires the same authenticated session token as the UI recovery page.

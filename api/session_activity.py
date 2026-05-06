@@ -253,9 +253,12 @@ def _is_activity_session(session: dict) -> bool:
         return False
     run = session.get("ops_run") if isinstance(session.get("ops_run"), dict) else {}
     run_status = str(run.get("status") or "").strip().lower()
+    task = session.get("ops_task") if isinstance(session.get("ops_task"), dict) else {}
     if session.get("waitingForApproval") or session.get("waitingForInput"):
         return True
     if _session_has_live_stream(session):
+        return True
+    if str(task.get("id") or "").strip() and task.get("done") is not True:
         return True
     return run_status in _ACTIVE_RUN_STATUSES
 
@@ -336,7 +339,7 @@ def _serialize_activity_session(session: dict, assignment_map: dict[str, str]) -
         "promptLine": None,
         "waitingForInput": bool(session.get("waitingForInput")),
         "waitingForInputSince": session.get("waitingSince"),
-        "readableOutputPending": bool(readable_output.get("available")) and status.get("key") not in {"done"},
+        "readableOutputPending": bool(readable_output.get("available")),
         "readableOutputUpdatedAt": readable_output.get("updatedAt"),
         "groupId": group_id,
         "running": True,

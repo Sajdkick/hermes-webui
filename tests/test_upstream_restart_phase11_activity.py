@@ -122,6 +122,56 @@ def test_phase11_session_activity_routes_support_groups_and_lineage_assignments(
     assert ungrouped_payload["sessions"][0]["groupId"] is None
 
 
+def test_phase11_session_activity_keeps_open_task_sessions_visible_after_run_quiets(monkeypatch, tmp_path):
+    from api import session_activity
+    from api.routes import handle_get
+
+    state_path = tmp_path / "session-activity.json"
+    monkeypatch.setattr(session_activity, "_state_path", lambda: state_path)
+    monkeypatch.setattr(
+        session_activity.ops_sessions,
+        "list_ops_sessions",
+        lambda: {
+            "sessions": [
+                {
+                    "session_id": "task-session-1",
+                    "_lineage_root_id": "task-session-1",
+                    "_lineage_tip_id": "task-session-1",
+                    "title": "Hermes: Fix the dashboard parity gap",
+                    "projectName": "Hermes",
+                    "repositoryLabel": "Sajdkick/hermes-webui",
+                    "branchLabel": "master",
+                    "active_stream_id": None,
+                    "message_count": 12,
+                    "updated_at": "2026-05-05T18:00:00Z",
+                    "ops_task": {
+                        "id": "task-1",
+                        "text": "Fix the dashboard parity gap",
+                        "done": False,
+                    },
+                    "ops_run": {
+                        "status": "succeeded",
+                        "readableOutput": {
+                            "available": True,
+                            "updatedAt": "2026-05-05T18:01:00Z",
+                        },
+                    },
+                }
+            ]
+        },
+    )
+
+    grouped = _FakeHandler()
+    assert handle_get(grouped, urlparse("http://example.com/api/sessions/activity")) is True
+    assert grouped.status == 200
+    payload = _response_json(grouped)
+
+    assert payload["sessionCount"] == 1
+    assert payload["sessions"][0]["id"] == "task-session-1"
+    assert payload["sessions"][0]["activityStatus"]["key"] == "done"
+    assert payload["sessions"][0]["readableOutputPending"] is True
+
+
 def test_phase11_home_session_activity_overview_matches_cloud_terminal_shape():
     script = textwrap.dedent(
         """

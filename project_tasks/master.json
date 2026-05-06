@@ -48,6 +48,17 @@
           "markers": [
             "AI suggestion"
           ]
+        },
+        {
+          "id": "7f9d2304-44fa-4650-b53c-9839f5fe8fdb",
+          "text": "Stop live `/api/ops/sessions` from surfacing stale test-generated and orphaned task sessions in the real Hermes dashboard so the Ops activity/project views do not fill with unnamed or irrelevant historical entries from old pytest/runtime artifacts.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-05T19:18:00.000Z",
+          "markers": [
+            "AI suggestion"
+          ]
         }
       ],
       "createdBy": {
@@ -87,7 +98,8 @@
           "updatedBy": {
             "id": "pontus",
             "label": "Pontus"
-          }
+          },
+          "lastSessionAt": "2026-05-05T17:51:54.406Z"
         },
         {
           "id": "096922cb-5426-426f-82c6-68c2022269ae",
