@@ -130,7 +130,7 @@
       const githubBranch=btn.dataset.githubBranch;
       try{
         if(action==='open-projects')return await openProjects();
-        if(action==='back-home')return openOpsDashboard();
+        if(action==='back-home')return openOpsDashboard({skipStoredState:true});
         const homeActionResult=await handleHomeAction(action,btn);
         if(homeActionResult!==false)return homeActionResult;
         if(action==='refresh-migration-health')return await loadMigrationHealth();

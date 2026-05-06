@@ -1007,7 +1007,7 @@
   function sessionRefValue(sessionLike){
     if(!sessionLike)return '';
     if(typeof sessionLike==='string')return String(sessionLike).trim();
-    return String(sessionLike.sessionKey||sessionLike.session_id||sessionLike.sessionId||'').trim();
+    return String(sessionLike.sessionKey||sessionLike.session_id||sessionLike.sessionId||sessionLike.id||'').trim();
   }
 
   function findSession(sessionId){

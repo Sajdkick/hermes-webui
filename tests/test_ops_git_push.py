@@ -98,6 +98,28 @@ def test_ops_git_post_route_is_registered_in_main_routes(monkeypatch):
     assert calls == [("/api/ops/projects/project-1/git/push", {"confirm": "push"})]
 
 
+def test_ops_git_commands_use_cloud_terminal_github_token_env(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        captured["env"] = kwargs.get("env") or {}
+        return subprocess.CompletedProcess(args, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setenv("GH_TOKEN", "test-token")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert ops_git._git_stdout(tmp_path, ["status"]) == "ok"
+
+    env = captured["env"]
+    assert captured["args"] == ["git", "status"]
+    assert env["GIT_ASKPASS"] == "echo"
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["GIT_CONFIG_COUNT"] == "1"
+    assert env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraheader"
+    assert env["GIT_CONFIG_VALUE_0"].startswith("AUTHORIZATION: basic ")
+
+
 def test_execute_project_push_pushes_ahead_commit(monkeypatch, tmp_path, git_available):
     remote = tmp_path / "origin.git"
     subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True, text=True)

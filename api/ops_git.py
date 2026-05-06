@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import os
 import subprocess
 import uuid
 from datetime import datetime, timezone
@@ -11,6 +13,8 @@ from api import ops_projects
 
 
 STATUS_EXCLUDED_PATHS = [".cloud-terminal", ".hermes", "project_tasks", "project_tasks.json"]
+TOKEN_ENV_NAMES = ("HERMES_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")
+GITHUB_HTTP_EXTRAHEADER_CONFIG_KEY = "http.https://github.com/.extraheader"
 
 
 class OpsGitError(Exception):
@@ -19,11 +23,52 @@ class OpsGitError(Exception):
         self.status = status
 
 
+def _append_git_config_entry(env: dict[str, str], key: str, value: str) -> dict[str, str]:
+    next_env = dict(env)
+    try:
+        config_count = int(next_env.get("GIT_CONFIG_COUNT") or "0")
+    except ValueError:
+        config_count = 0
+    if config_count < 0:
+        config_count = 0
+    next_env[f"GIT_CONFIG_KEY_{config_count}"] = key
+    next_env[f"GIT_CONFIG_VALUE_{config_count}"] = value
+    next_env["GIT_CONFIG_COUNT"] = str(config_count + 1)
+    return next_env
+
+
+def _github_token() -> str:
+    for name in TOKEN_ENV_NAMES:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _github_authorization_header(token: str) -> str:
+    encoded = base64.b64encode(f"x-access-token:{token}".encode("utf-8")).decode("ascii")
+    return f"AUTHORIZATION: basic {encoded}"
+
+
+def _git_env() -> dict[str, str]:
+    env = {
+        **os.environ,
+        "GIT_ASKPASS": "echo",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_SSH_COMMAND": os.environ.get("GIT_SSH_COMMAND") or "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
+    }
+    token = _github_token()
+    if token:
+        env = _append_git_config_entry(env, GITHUB_HTTP_EXTRAHEADER_CONFIG_KEY, _github_authorization_header(token))
+    return env
+
+
 def _run_git(repo_path: Path, args: list[str], *, timeout: float = 4.0) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(
             ["git", *args],
             cwd=str(repo_path),
+            env=_git_env(),
             capture_output=True,
             text=True,
             timeout=timeout,

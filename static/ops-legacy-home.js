@@ -985,6 +985,32 @@
       `;
     }
 
+    function renderHomeSessionActivityPanelMarkup(sessionOverview){
+      const sessionActivityExpanded=OPS.sessionActivityExpanded!==false;
+      return `
+          <section class="ops-panel repo-panel menu-session-activity-panel ops-session-overview-panel" aria-live="polite" data-ops-home-session-activity-panel="true">
+            <div class="menu-notification-header">
+              <div class="menu-notification-header-copy">
+                <div class="quick-response-title">Active sessions</div>
+                <div class="menu-session-activity-header-help">Heartbeat only, plus repo and branch. Group sessions with freeform labels. Refreshes every 5 seconds while this menu is visible.</div>
+              </div>
+              <div class="menu-notification-header-actions">
+                <button class="menu-action-btn secondary small" type="button" data-ops-action="create-session-activity-group" ${OPS.sessionActivityBusy?'disabled':''}>Add group</button>
+                <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-session-activity" ${OPS.sessionActivityBusy?'disabled':''}>${OPS.sessionActivityBusy?'Refreshing...':'Refresh'}</button>
+                <button class="menu-action-btn secondary small" type="button" data-ops-action="toggle-session-activity" aria-expanded="${sessionActivityExpanded?'true':'false'}">${sessionActivityExpanded?'Collapse':'Expand'}</button>
+              </div>
+            </div>
+            ${sessionOverview||renderHomeSessionOverview()}
+          </section>`;
+    }
+
+    function renderHomeSessionActivityPanel(){
+      const panel=root()&&root().querySelector('[data-ops-home-session-activity-panel="true"]');
+      if(!panel)return false;
+      panel.outerHTML=renderHomeSessionActivityPanelMarkup();
+      return true;
+    }
+
     function renderProjectSessionRows(project,sessionsOverride){
       const sessions=Array.isArray(sessionsOverride)?sessionsOverride:projectSessionsFor(project,OPS.sessions);
       const rows=sessions.length?sessions.map(session=>renderSessionWorkspaceRow(session,project)).join(''):`<div class="ops-project-session-empty">No active sessions for this project.</div>`;
@@ -1026,6 +1052,8 @@
         OPS.sessionActivityBusy=false;
         if(settings.render!==false&&windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home'){
           if(isQuickTaskFieldActive()){
+            OPS.sessionActivityRenderPending=false;
+            if(renderHomeSessionActivityPanel())return;
             OPS.sessionActivityRenderPending=true;
             return;
           }
@@ -1064,7 +1092,6 @@
       const sessionOverview=renderHomeSessionOverview();
       const autoPolicy=normalizedAutoApprovalPolicy();
       const notificationsBusy=!!OPS.notificationBusy;
-      const sessionActivityExpanded=OPS.sessionActivityExpanded!==false;
       el.innerHTML=`
         <div class="ops-dashboard ops-home-dashboard menu-page-content">
           <h2>Menu</h2>
@@ -1118,20 +1145,7 @@
             ${quickTaskMicStatus}
             ${quickTaskStatus}
           </section>
-          <section class="ops-panel repo-panel menu-session-activity-panel ops-session-overview-panel" aria-live="polite">
-            <div class="menu-notification-header">
-              <div class="menu-notification-header-copy">
-                <div class="quick-response-title">Active sessions</div>
-                <div class="menu-session-activity-header-help">Heartbeat only, plus repo and branch. Group sessions with freeform labels. Refreshes every 5 seconds while this menu is visible.</div>
-              </div>
-              <div class="menu-notification-header-actions">
-                <button class="menu-action-btn secondary small" type="button" data-ops-action="create-session-activity-group" ${OPS.sessionActivityBusy?'disabled':''}>Add group</button>
-                <button class="menu-action-btn secondary small" type="button" data-ops-action="refresh-session-activity" ${OPS.sessionActivityBusy?'disabled':''}>${OPS.sessionActivityBusy?'Refreshing...':'Refresh'}</button>
-                <button class="menu-action-btn secondary small" type="button" data-ops-action="toggle-session-activity" aria-expanded="${sessionActivityExpanded?'true':'false'}">${sessionActivityExpanded?'Collapse':'Expand'}</button>
-              </div>
-            </div>
-            ${sessionOverview}
-          </section>
+          ${renderHomeSessionActivityPanelMarkup(sessionOverview)}
           <div class="menu-actions">
             <button class="menu-action-btn" type="button" data-ops-action="open-projects">Projects</button>
             <button class="menu-action-btn" type="button" data-ops-action="view-deployments">View deployments</button>

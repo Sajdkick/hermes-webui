@@ -348,6 +348,77 @@
       });
     }
 
+    function projectDetailScrollEntries(container){
+      const entries=[];
+      if(!container)return entries;
+      [
+        ['root',container],
+        ['controls',container.querySelector('.tasks-controls')],
+        ['content',container.querySelector('.tasks-content')],
+        ['page',container.querySelector('.project-page-content')],
+      ].forEach(([key,node])=>{
+        if(!node)return;
+        entries.push({key,node,top:Number(node.scrollTop)||0,left:Number(node.scrollLeft)||0});
+      });
+      return entries;
+    }
+
+    function rememberProjectDetailLocalState(){
+      const container=root();
+      const detailState={
+        windowX:windowRef&&typeof windowRef.scrollX==='number'?windowRef.scrollX:null,
+        windowY:windowRef&&typeof windowRef.scrollY==='number'?windowRef.scrollY:null,
+        scrolls:projectDetailScrollEntries(container).map(entry=>({key:entry.key,top:entry.top,left:entry.left})),
+        details:[],
+      };
+      if(container&&typeof container.querySelectorAll==='function'){
+        detailState.details=Array.from(container.querySelectorAll('details')).map((detail,index)=>{
+          const summary=detail.querySelector('summary');
+          return {
+            index,
+            open:!!detail.open,
+            summary:String(summary&&summary.textContent||'').replace(/\s+/g,' ').trim(),
+            className:String(detail.className||''),
+          };
+        });
+      }
+      return detailState;
+    }
+
+    function restoreProjectDetailLocalState(state){
+      if(!state||!root())return;
+      const requestFrame=windowRef&&typeof windowRef.requestAnimationFrame==='function'
+        ? windowRef.requestAnimationFrame.bind(windowRef)
+        : (cb=>setTimeout(cb,0));
+      const apply=()=>{
+        const container=root();
+        if(!container)return;
+        if(Array.isArray(state.details)&&state.details.length&&typeof container.querySelectorAll==='function'){
+          const details=Array.from(container.querySelectorAll('details'));
+          state.details.forEach(saved=>{
+            const match=details.find((detail,index)=>{
+              const summary=detail.querySelector('summary');
+              const summaryText=String(summary&&summary.textContent||'').replace(/\s+/g,' ').trim();
+              return index===saved.index || (summaryText&&summaryText===saved.summary&&String(detail.className||'')===saved.className);
+            });
+            if(match)match.open=!!saved.open;
+          });
+        }
+        const scrolls=Array.isArray(state.scrolls)?state.scrolls:[];
+        const byKey=scrolls.reduce((acc,entry)=>{acc[entry.key]=entry;return acc;},{});
+        projectDetailScrollEntries(container).forEach(entry=>{
+          const saved=byKey[entry.key];
+          if(!saved)return;
+          entry.node.scrollTop=Number(saved.top)||0;
+          entry.node.scrollLeft=Number(saved.left)||0;
+        });
+        if(windowRef&&typeof windowRef.scrollTo==='function'&&state.windowY!==null){
+          windowRef.scrollTo(Number(state.windowX)||0,Number(state.windowY)||0);
+        }
+      };
+      requestFrame(()=>requestFrame(apply));
+    }
+
     function normalizeTaskFormDraft(epics,edit){
       const epicIds=(epics||[]).map(epic=>String(epic&&epic.id||'').trim()).filter(Boolean);
       const fallbackEpicId=epicIds[0]||'';
@@ -561,6 +632,7 @@
       const filterSummary=summarizeTaskFilters(epics,taskLookup,filters);
       rememberTaskFilterFocus();
       rememberTaskFormFocus();
+      const localState=rememberProjectDetailLocalState();
       setDashboardTopbar(nameOf(project),`${counts.active} active | ${counts.done} done | ${OPS.taskData.branch||project.coreBranch||'main'}`);
       const edit=OPS.editingTask;
       const showCreateBand=!OPS.taskCreateCollapsed||!!edit;
@@ -724,6 +796,7 @@
       `;
       restoreTaskFilterFocus();
       restoreTaskFormFocus();
+      restoreProjectDetailLocalState(localState);
     }
 
     function renderEpic(project,epic,tasks,taskById,index){
