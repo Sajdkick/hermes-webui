@@ -47,15 +47,19 @@ def _legacy_ops_shell_html() -> str:
     return _LEGACY_OPS_SHELL_PATH.read_text(encoding="utf-8").replace("__WEBUI_VERSION__", version_token)
 
 
+def serve_legacy_ops_shell(handler) -> bool:
+    try:
+        html = _legacy_ops_shell_html()
+    except OSError:
+        j(handler, {"error": "ops shell is unavailable"}, status=500)
+        return True
+    t(handler, html, content_type="text/html; charset=utf-8")
+    return True
+
+
 def handle_get(handler, parsed) -> bool:
     if parsed.path in ("/ops", "/ops/"):
-        try:
-            html = _legacy_ops_shell_html()
-        except OSError:
-            j(handler, {"error": "ops shell is unavailable"}, status=500)
-            return True
-        t(handler, html, content_type="text/html; charset=utf-8")
-        return True
+        return serve_legacy_ops_shell(handler)
 
     if parsed.path in ("/ops-phase", "/ops-phase/"):
         try:

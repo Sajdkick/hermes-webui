@@ -11,6 +11,13 @@
     const documentRef=(ctx&&ctx.documentRef)||(typeof document!=='undefined'?document:null);
     const windowRef=(ctx&&ctx.windowRef)||(typeof window!=='undefined'?window:null);
     const URLRef=(ctx&&ctx.URLRef)||(typeof URL!=='undefined'?URL:null);
+    const AgentBridgeRef=ctx&&ctx.AgentBridge;
+    const navigatorRef=ctx&&ctx.navigatorRef;
+    const MediaRecorderRef=ctx&&ctx.MediaRecorderRef;
+    const FileRef=ctx&&ctx.FileRef;
+    const BlobRef=ctx&&ctx.BlobRef;
+    const taskDictationPrompt=ctx&&ctx.taskDictationPrompt;
+    const taskDictationAudioBitsPerSecond=ctx&&ctx.taskDictationAudioBitsPerSecond;
     const summarizeEpics=ctx&&ctx.summarizeEpics;
     const nameOf=ctx&&ctx.nameOf;
     const projectPath=ctx&&ctx.projectPath;
@@ -84,6 +91,273 @@
           .map(item=>item.trim())
           .filter(Boolean)
       ));
+    }
+
+    function appendTranscriptText(current,next){
+      const trimmed=String(next||'').trim();
+      if(!trimmed)return String(current||'').trim();
+      const existing=String(current||'').trim();
+      return existing?`${existing} ${trimmed}`:trimmed;
+    }
+
+    function normalizeDictationLanguage(tag){
+      if(typeof tag!=='string')return '';
+      const trimmed=tag.trim();
+      if(!trimmed)return '';
+      const primary=trimmed.toLowerCase().split(/[-_]/)[0];
+      return primary.length>=2&&primary.length<=3?primary:'';
+    }
+
+    function getTaskFormDictationLanguage(){
+      const language=Array.isArray(navigatorRef&&navigatorRef.languages)&&navigatorRef.languages.length
+        ? navigatorRef.languages[0]
+        : navigatorRef&&navigatorRef.language;
+      return normalizeDictationLanguage(language);
+    }
+
+    function getTaskFormDictationPrompt(language){
+      if(language&&language!=='en')return '';
+      return taskDictationPrompt||'';
+    }
+
+    function getPreferredAudioMimeType(){
+      if(!MediaRecorderRef)return '';
+      const candidates=['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/ogg'];
+      return candidates.find(type=>MediaRecorderRef.isTypeSupported&&MediaRecorderRef.isTypeSupported(type))||'';
+    }
+
+    function getTaskFormDictationAudioConstraints(){
+      const supported=navigatorRef&&navigatorRef.mediaDevices&&typeof navigatorRef.mediaDevices.getSupportedConstraints==='function'
+        ? navigatorRef.mediaDevices.getSupportedConstraints()
+        : {};
+      const audio={};
+      if(supported.echoCancellation)audio.echoCancellation=true;
+      if(supported.noiseSuppression)audio.noiseSuppression=true;
+      if(supported.autoGainControl)audio.autoGainControl=true;
+      if(supported.channelCount)audio.channelCount={ideal:1};
+      if(supported.sampleRate)audio.sampleRate={ideal:48000};
+      if(supported.sampleSize)audio.sampleSize={ideal:16};
+      return Object.keys(audio).length?audio:true;
+    }
+
+    function createTaskFormDictationRecorder(stream,mimeType){
+      const options={};
+      if(mimeType)options.mimeType=mimeType;
+      if(Number.isFinite(taskDictationAudioBitsPerSecond))options.audioBitsPerSecond=taskDictationAudioBitsPerSecond;
+      try{
+        return new MediaRecorderRef(stream,Object.keys(options).length?options:undefined);
+      }catch(error){
+        if('audioBitsPerSecond' in options){
+          const fallback={...options};
+          delete fallback.audioBitsPerSecond;
+          return new MediaRecorderRef(stream,Object.keys(fallback).length?fallback:undefined);
+        }
+        throw error;
+      }
+    }
+
+    function setTaskFormMicStatus(message,type){
+      OPS.taskFormDictationStatus=String(message||'').trim();
+      OPS.taskFormDictationStatusKind=type==='error'||type==='success'?type:'info';
+    }
+
+    function cleanupTaskFormDictationStream(){
+      const stream=OPS.taskFormDictationStream;
+      if(!stream||typeof stream.getTracks!=='function')return;
+      stream.getTracks().forEach(track=>{
+        try{track.stop();}catch(_){}
+      });
+      OPS.taskFormDictationStream=null;
+    }
+
+    function taskFormCanDictate(){
+      return !!(
+        OPS.taskFormDictationSupported
+        && AgentBridgeRef
+        && AgentBridgeRef.sessions
+        && typeof AgentBridgeRef.sessions.transcribeAudio==='function'
+        && navigatorRef
+        && navigatorRef.mediaDevices
+        && typeof navigatorRef.mediaDevices.getUserMedia==='function'
+        && MediaRecorderRef
+        && BlobRef
+      );
+    }
+
+    function taskFormMicButtonState(){
+      let label='Record';
+      let title='Record task text by voice';
+      if(OPS.taskFormDictationBusy){
+        label='Transcribing';
+        title='Transcribing audio...';
+      }else if(OPS.taskFormDictationActive){
+        label='Stop';
+        title='Stop recording';
+      }else if(!taskFormCanDictate()){
+        title='Voice dictation is not supported in this browser.';
+      }
+      return {
+        label,
+        title,
+        disabled:OPS.taskFormDictationBusy||(!OPS.taskFormDictationActive&&!taskFormCanDictate()),
+        listening:OPS.taskFormDictationActive,
+      };
+    }
+
+    function ensureTaskFormDraftText(value){
+      const draft=OPS.taskFormDraft&&typeof OPS.taskFormDraft==='object'?OPS.taskFormDraft:{};
+      OPS.taskFormDraft={
+        taskId:String(draft.taskId||''),
+        text:String(value||''),
+        epicId:String(draft.epicId||''),
+        grade:normalizeTaskGrade(draft.grade||'green'),
+        flags:String(draft.flags||''),
+        markers:String(draft.markers||''),
+        images:String(draft.images||''),
+      };
+    }
+
+    function stopTaskFormDictation(options){
+      const settings=options||{};
+      if(settings.discard)OPS.taskFormDictationDiscard=true;
+      OPS.taskFormDictationActive=false;
+      const recorder=OPS.taskFormDictationRecorder;
+      if(recorder&&recorder.state!=='inactive'){
+        try{
+          recorder.stop();
+          return;
+        }catch(_){}
+      }
+      OPS.taskFormDictationRecorder=null;
+      OPS.taskFormDictationChunks=[];
+      OPS.taskFormDictationDiscard=false;
+      cleanupTaskFormDictationStream();
+      if(settings.updateStatus!==false){
+        setTaskFormMicStatus(settings.discard?'Dictation canceled.':'Recording stopped.',settings.discard?'info':'success');
+      }
+      renderProjectDetail();
+    }
+
+    async function transcribeTaskFormAudio(blob){
+      if(!blob||!blob.size)return;
+      OPS.taskFormDictationBusy=true;
+      setTaskFormMicStatus('Transcribing with OpenAI...','info');
+      renderProjectDetail();
+      try{
+        const mimeType=String(blob.type||'audio/webm').trim()||'audio/webm';
+        const extension=mimeType.includes('ogg')?'ogg':'webm';
+        const file=FileRef
+          ? new FileRef([blob],`task-form-dictation.${extension}`,{type:mimeType})
+          : blob;
+        const language=getTaskFormDictationLanguage();
+        const options={filename:file&&file.name?file.name:`task-form-dictation.${extension}`};
+        const prompt=getTaskFormDictationPrompt(language);
+        if(prompt)options.prompt=prompt;
+        if(language)options.language=language;
+        const data=await AgentBridgeRef.sessions.transcribeAudio(file,options);
+        const transcript=String(data.transcript||data.text||'').trim();
+        if(!transcript){
+          setTaskFormMicStatus('No speech detected.','error');
+          return;
+        }
+        const current=OPS.taskFormDraft&&typeof OPS.taskFormDraft==='object'?OPS.taskFormDraft.text:'';
+        ensureTaskFormDraftText(appendTranscriptText(current,transcript));
+        setTaskFormMicStatus('Transcription added.','success');
+        renderProjectDetail();
+        restoreTaskFormFocus();
+      }catch(error){
+        setTaskFormMicStatus(error&&error.message?error.message:'Unable to transcribe audio.','error');
+      }finally{
+        OPS.taskFormDictationBusy=false;
+        renderProjectDetail();
+      }
+    }
+
+    function handleTaskFormDictationStop(recorder){
+      const chunks=Array.isArray(OPS.taskFormDictationChunks)?OPS.taskFormDictationChunks.slice():[];
+      const mimeType=String(recorder&&recorder.mimeType||'audio/webm').trim()||'audio/webm';
+      OPS.taskFormDictationRecorder=null;
+      OPS.taskFormDictationChunks=[];
+      OPS.taskFormDictationActive=false;
+      cleanupTaskFormDictationStream();
+      if(OPS.taskFormDictationDiscard){
+        OPS.taskFormDictationDiscard=false;
+        setTaskFormMicStatus('','info');
+        renderProjectDetail();
+        return;
+      }
+      if(!chunks.length){
+        setTaskFormMicStatus('No audio captured.','error');
+        renderProjectDetail();
+        return;
+      }
+      renderProjectDetail();
+      void transcribeTaskFormAudio(new BlobRef(chunks,{type:mimeType}));
+    }
+
+    async function startTaskFormDictation(){
+      if(OPS.taskFormDictationActive||OPS.taskFormDictationBusy)return;
+      if(!taskFormCanDictate()){
+        setTaskFormMicStatus('Voice dictation is not supported in this browser.','error');
+        renderProjectDetail();
+        return;
+      }
+      OPS.taskFormDictationDiscard=false;
+      OPS.taskFormDictationChunks=[];
+      setTaskFormMicStatus('Requesting microphone access...','info');
+      renderProjectDetail();
+      let stream=null;
+      try{
+        stream=await navigatorRef.mediaDevices.getUserMedia({audio:getTaskFormDictationAudioConstraints()});
+      }catch(error){
+        const errorName=String(error&&error.name||'').trim();
+        const message=errorName==='NotAllowedError'
+          ? 'Microphone access was denied.'
+          : errorName==='NotFoundError'
+            ? 'No microphone found.'
+            : 'Unable to access microphone.';
+        setTaskFormMicStatus(message,'error');
+        renderProjectDetail();
+        return;
+      }
+      OPS.taskFormDictationStream=stream;
+      let recorder=null;
+      try{
+        recorder=createTaskFormDictationRecorder(stream,getPreferredAudioMimeType());
+      }catch(error){
+        OPS.taskFormDictationSupported=false;
+        cleanupTaskFormDictationStream();
+        setTaskFormMicStatus('Recording is not supported in this browser.','error');
+        renderProjectDetail();
+        return;
+      }
+      OPS.taskFormDictationRecorder=recorder;
+      recorder.ondataavailable=event=>{
+        if(event.data&&event.data.size>0)OPS.taskFormDictationChunks.push(event.data);
+      };
+      recorder.onstart=()=>{
+        OPS.taskFormDictationActive=true;
+        setTaskFormMicStatus('Recording... Speak clearly and keep close to the mic.','info');
+        renderProjectDetail();
+      };
+      recorder.onstop=()=>handleTaskFormDictationStop(recorder);
+      recorder.onerror=()=>{
+        setTaskFormMicStatus('Recording error. Try again.','error');
+        stopTaskFormDictation({updateStatus:false,discard:true});
+      };
+      try{
+        recorder.start();
+      }catch(error){
+        OPS.taskFormDictationRecorder=null;
+        cleanupTaskFormDictationStream();
+        setTaskFormMicStatus('Unable to start recording.','error');
+        renderProjectDetail();
+      }
+    }
+
+    async function toggleTaskFormDictation(){
+      if(OPS.taskFormDictationActive)return stopTaskFormDictation();
+      return await startTaskFormDictation();
     }
 
     function normalizeTaskFilterStatus(value){
@@ -641,14 +915,20 @@
       const showCreateBand=!OPS.taskCreateCollapsed||!!edit;
       const filtersExpanded=!OPS.taskFiltersCollapsed;
       const taskDraft=normalizeTaskFormDraft(epics,edit);
+      const taskMicState=taskFormMicButtonState();
       const selectedEpicId=String(taskDraft.epicId||'').trim();
       const epicOptions=epics.map(epic=>`<option value="${esc(epic.id)}" ${epic.id===selectedEpicId?'selected':''}>${esc(epic.title)}</option>`).join('');
       const taskForm=epics.length?`
         <form class="tasks-form" data-ops-submit="save-task">
           <input type="hidden" name="taskId" value="${esc(taskDraft.taskId||'')}">
-          <label class="tasks-field">
-            <span class="tasks-field-label">New task</span>
-            <input class="task-input" name="text" autocomplete="off" required value="${esc(taskDraft.text||'')}" placeholder="Add a task for this epic">
+          <label class="tasks-field tasks-field-text">
+            <span class="tasks-field-label">${edit?'Task text':'New task'}</span>
+            <span class="task-input-row task-input-row-with-mic">
+              <input class="task-input" name="text" autocomplete="off" required value="${esc(taskDraft.text||'')}" placeholder="Add a task for this epic">
+              <button class="menu-action-btn secondary task-mic-btn task-input-mic ${taskMicState.listening?'listening':''}" type="button" data-ops-action="toggle-task-dictation" title="${esc(taskMicState.title)}" aria-pressed="${taskMicState.listening?'true':'false'}" ${taskMicState.disabled?'disabled':''}>
+                ${svg.mic||'🎙️'}<span>${esc(taskMicState.label)}</span>
+              </button>
+            </span>
           </label>
           <label class="tasks-field">
             <span class="tasks-field-label">Epic</span>
@@ -676,6 +956,7 @@
             <button class="task-add-btn" type="submit">${edit?'Save task':'Add task'}</button>
             ${edit?'<button class="menu-action-btn secondary" type="button" data-ops-action="cancel-edit">Cancel edit</button>':''}
           </div>
+          ${OPS.taskFormDictationStatus?`<div class="task-mic-status ${esc(OPS.taskFormDictationStatusKind||'info')}">${esc(OPS.taskFormDictationStatus)}</div>`:''}
         </form>
       `:'';
       const visibleEpics=epics
@@ -1000,6 +1281,7 @@
       rememberTaskFormFocus,
       restoreTaskFormFocus,
       normalizeTaskFormDraft,
+      toggleTaskFormDictation,
       handleTaskFilterField,
       handleTaskRowField,
       handleTaskFormField,

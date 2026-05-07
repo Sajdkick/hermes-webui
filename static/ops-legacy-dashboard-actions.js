@@ -94,6 +94,7 @@
     const createRunArtifact=ctx&&ctx.createRunArtifact;
     const saveProjectPlayConfig=ctx&&ctx.saveProjectPlayConfig;
     const createQuickTask=ctx&&ctx.createQuickTask;
+    const toggleTaskFormDictation=ctx&&ctx.toggleTaskFormDictation;
     const createAutoApprovalRule=ctx&&ctx.createAutoApprovalRule;
     const saveProjectSettings=ctx&&ctx.saveProjectSettings;
     const splitList=ctx&&ctx.splitList;
@@ -169,6 +170,7 @@
           return renderProjectDetail();
         }
         if(action==='toggle-task-create'){OPS.taskCreateCollapsed=!OPS.taskCreateCollapsed;return renderProjectDetail();}
+        if(action==='toggle-task-dictation'&&typeof toggleTaskFormDictation==='function')return await toggleTaskFormDictation();
         if(action==='toggle-task-filters'){OPS.taskFiltersCollapsed=!OPS.taskFiltersCollapsed;return renderProjectDetail();}
         if(action==='task-primary'){
           const mode=btn.dataset.taskMode||'execute';

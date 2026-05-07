@@ -2656,18 +2656,49 @@ if(typeof window!=='undefined'){
   });
 }
 
+function _optimisticallyRemoveSessionsFromClientCache(ids){
+  const idSet=new Set((ids||[]).map(id=>String(id||'')).filter(Boolean));
+  if(!idSet.size)return null;
+  const previousSessions=Array.isArray(_allSessions)?_allSessions.slice():[];
+  const previousContentResults=Array.isArray(_contentSearchResults)?_contentSearchResults.slice():[];
+  const previousSelected=new Set(_selectedSessions||[]);
+  _allSessions=previousSessions.filter(session=>!idSet.has(String(session&&session.session_id||'')));
+  _contentSearchResults=previousContentResults.filter(session=>!idSet.has(String(session&&session.session_id||'')));
+  if(_selectedSessions&&typeof _selectedSessions.delete==='function'){
+    idSet.forEach(id=>_selectedSessions.delete(id));
+  }
+  renderSessionListFromCache();
+  return {previousSessions,previousContentResults,previousSelected};
+}
+
+function _restoreOptimisticSessionRemoval(snapshot){
+  if(!snapshot)return;
+  _allSessions=Array.isArray(snapshot.previousSessions)?snapshot.previousSessions:[];
+  _contentSearchResults=Array.isArray(snapshot.previousContentResults)?snapshot.previousContentResults:[];
+  if(snapshot.previousSelected instanceof Set)_selectedSessions=snapshot.previousSelected;
+  renderSessionListFromCache();
+}
+
 async function deleteSession(sid){
+  const sessionId=String(sid||'').trim();
+  if(!sessionId)return;
   const ok=await showConfirmDialog({
     message:'Delete this conversation?',
     confirmLabel:t('delete_title'),
     danger:true
   });
   if(!ok)return;
+  const deletingActive=!!(S.session&&S.session.session_id===sessionId);
+  const optimisticSnapshot=_optimisticallyRemoveSessionsFromClientCache([sessionId]);
   try{
-    await api('/api/session/delete',{method:'POST',body:JSON.stringify({session_id:sid})});
-    _clearHandoffStorageForSession(sid);
-  }catch(e){setStatus(`Delete failed: ${e.message}`);return;}
-  if(S.session&&S.session.session_id===sid){
+    await api('/api/session/delete',{method:'POST',body:JSON.stringify({session_id:sessionId})});
+    _clearHandoffStorageForSession(sessionId);
+  }catch(e){
+    _restoreOptimisticSessionRemoval(optimisticSnapshot);
+    setStatus(`Delete failed: ${e.message}`);
+    return;
+  }
+  if(deletingActive){
     S.session=null;S.messages=[];S.entries=[];
     localStorage.removeItem('hermes-webui-session');
     // load the most recent remaining session, or show blank if none left

@@ -162,10 +162,19 @@
     taskFormDraft:null,
     createEpicDraftTitle:'',
     taskFormFocusedForm:'',
-    taskFormFocusedField:'',
-    taskFormSelectionStart:null,
-    taskFormSelectionEnd:null,
-    editingTask:null,
+      taskFormFocusedField:'',
+      taskFormSelectionStart:null,
+      taskFormSelectionEnd:null,
+      taskFormDictationSupported:!!(window.navigator&&window.navigator.mediaDevices&&window.navigator.mediaDevices.getUserMedia&&typeof window.MediaRecorder!=='undefined'),
+      taskFormDictationActive:false,
+      taskFormDictationBusy:false,
+      taskFormDictationStatus:'',
+      taskFormDictationStatusKind:'info',
+      taskFormDictationStream:null,
+      taskFormDictationRecorder:null,
+      taskFormDictationChunks:[],
+      taskFormDictationDiscard:false,
+      editingTask:null,
     loading:false,
     quickTaskProjectId:'',
     quickTaskText:'',
@@ -627,6 +636,13 @@
       documentRef:typeof document!=='undefined'?document:null,
       windowRef:typeof window!=='undefined'?window:null,
       URLRef:typeof URL!=='undefined'?URL:null,
+      AgentBridge:typeof AgentBridge!=='undefined'?AgentBridge:null,
+      navigatorRef:typeof navigator!=='undefined'?navigator:null,
+      MediaRecorderRef:typeof MediaRecorder!=='undefined'?MediaRecorder:null,
+      FileRef:typeof File!=='undefined'?File:null,
+      BlobRef:typeof Blob!=='undefined'?Blob:null,
+      taskDictationPrompt:TASK_DICTATION_PROMPT,
+      taskDictationAudioBitsPerSecond:TASK_DICTATION_AUDIO_BITS_PER_SECOND,
       taskQaStatusValues:TASK_QA_STATUS_VALUES,
       taskFilterStatusValues:TASK_FILTER_STATUS_VALUES,
       taskGradeValues:TASK_GRADE_VALUES,
@@ -674,6 +690,7 @@
   const handleTaskFilterField=(event)=>DASHBOARD_PROJECT_DETAIL.handleTaskFilterField(event);
   const handleTaskRowField=(event)=>DASHBOARD_PROJECT_DETAIL.handleTaskRowField(event);
   const handleTaskFormField=(event)=>DASHBOARD_PROJECT_DETAIL.handleTaskFormField(event);
+  const toggleTaskFormDictation=()=>DASHBOARD_PROJECT_DETAIL.toggleTaskFormDictation();
   const DASHBOARD_TASK_ACTIONS=OPS_MODULES.taskActions&&typeof OPS_MODULES.taskActions.bindDashboard==='function'
     ? OPS_MODULES.taskActions.bindDashboard({
       OPS,
@@ -955,6 +972,7 @@
       createRunArtifact:typeof createRunArtifact==='function'?createRunArtifact:null,
       saveProjectPlayConfig:typeof saveProjectPlayConfig==='function'?saveProjectPlayConfig:null,
       createQuickTask:typeof createQuickTask==='function'?createQuickTask:null,
+      toggleTaskFormDictation:typeof toggleTaskFormDictation==='function'?toggleTaskFormDictation:null,
       createAutoApprovalRule:typeof createAutoApprovalRule==='function'?createAutoApprovalRule:null,
       saveProjectSettings:typeof saveProjectSettings==='function'?saveProjectSettings:null,
       splitList:typeof splitList==='function'?splitList:null,

@@ -444,6 +444,9 @@ from api.config import (
     STREAMS,
     STREAMS_LOCK,
     CANCEL_FLAGS,
+    STREAM_PARTIAL_TEXT,
+    STREAM_REASONING_TEXT,
+    STREAM_LIVE_TOOL_CALLS,
     SERVER_START_TIME,
     _resolve_cli_toolsets,
     _INDEX_HTML_PATH,
@@ -2398,7 +2401,16 @@ def handle_get(handler, parsed) -> bool:
         stripped = parsed._replace(path=parsed.path[len("/session"):])
         return _serve_static(handler, stripped)
 
-    if parsed.path in ("/", "/index.html") or parsed.path.startswith("/session/"):
+    if parsed.path == "/":
+        # Cloud Terminal fork UX: make the ops dashboard the landing page while
+        # keeping the upstream chat shell available at /index.html and
+        # /session/<id>.  The shell rendering stays in the fork-owned ops module
+        # so this upstream route shim remains as small as possible.
+        from api.routes_ops_shell import serve_legacy_ops_shell
+
+        return serve_legacy_ops_shell(handler)
+
+    if parsed.path == "/index.html" or parsed.path.startswith("/session/"):
         from urllib.parse import quote
         from api.updates import WEBUI_VERSION
         version_token = quote(WEBUI_VERSION, safe="")
@@ -3021,7 +3033,18 @@ def handle_get(handler, parsed) -> bool:
 
     if parsed.path == "/api/chat/stream/status":
         stream_id = parse_qs(parsed.query).get("stream_id", [""])[0]
-        return j(handler, {"active": stream_id in STREAMS, "stream_id": stream_id})
+        with STREAMS_LOCK:
+            active = stream_id in STREAMS
+            partial_text = STREAM_PARTIAL_TEXT.get(stream_id, "") if active else ""
+            reasoning_text = STREAM_REASONING_TEXT.get(stream_id, "") if active else ""
+            live_tool_calls = list(STREAM_LIVE_TOOL_CALLS.get(stream_id, [])) if active else []
+        return j(handler, {
+            "active": active,
+            "stream_id": stream_id,
+            "partial_text": partial_text,
+            "reasoning_text": reasoning_text,
+            "tool_calls": live_tool_calls,
+        })
 
     if parsed.path == "/api/chat/cancel":
         stream_id = parse_qs(parsed.query).get("stream_id", [""])[0]

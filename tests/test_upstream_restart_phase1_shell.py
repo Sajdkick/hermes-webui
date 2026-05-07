@@ -32,6 +32,36 @@ class _FakeHandler:
         return None
 
 
+def test_root_landing_route_serves_legacy_ops_dashboard():
+    from api.routes import handle_get
+
+    handler = _FakeHandler()
+    parsed = urlparse("http://example.com/")
+
+    assert handle_get(handler, parsed) is True
+    assert handler.status == 200
+    assert (handler.header("Content-Type") or "").startswith("text/html")
+    html = bytes(handler.body).decode("utf-8")
+    assert 'src="static/ops-legacy-host.js?v=' in html
+    assert 'src="static/ops-legacy-dashboard.js?v=' in html
+    assert 'href="index.html" title="Back to Hermes"' in html
+    assert 'id="app"' not in html
+
+
+def test_chat_shell_stays_available_at_index_html():
+    from api.routes import handle_get
+
+    handler = _FakeHandler()
+    parsed = urlparse("http://example.com/index.html")
+
+    handle_get(handler, parsed)
+    assert handler.status == 200
+    assert (handler.header("Content-Type") or "").startswith("text/html")
+    html = bytes(handler.body).decode("utf-8")
+    assert 'id="appTitlebarTitle"' in html
+    assert 'src="static/ops-legacy-host.js?v=' not in html
+
+
 def test_ops_shell_route_is_registered_and_serves_html():
     from api.routes import handle_get
 

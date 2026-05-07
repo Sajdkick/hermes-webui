@@ -325,8 +325,12 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
   const existingLive=LIVE_STREAMS[activeSid];
   if(
     existingLive&&existingLive.streamId===streamId&&existingLive.source&&
-    // A same-stream transport can be reused unless the browser has already
-    // marked it closed; closed streams must still fall through to reopen.
+    // A same-stream transport can be reused unless this is an explicit
+    // reattach/reconnect path or the browser has already marked it closed.
+    // Mobile wake can leave EventSource looking OPEN while the server-side
+    // subscriber has stopped delivering useful events, so reattach must force
+    // a fresh SSE request.
+    !reconnecting&&
     (typeof EventSource==='undefined'||existingLive.source.readyState!==EventSource.CLOSED)
   ){
     return;
@@ -451,6 +455,8 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
   let _reconnectInProgress=false;
   let _reconnectWakeBound=false;
   let _terminalStateReached=false;
+  let _snapshotReplayText='';
+  let _snapshotReplayOffset=0;
 
   // Bug A fix (#631): track whether the stream has been finalized so any rAF
   // scheduled by a trailing 'token'/'reasoning' event that arrives in the same
@@ -510,6 +516,65 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
     _clearReconnectTimer();
     _reconnectTimer=setTimeout(_attemptReconnect, delay);
   }
+  function _applyStreamSnapshot(snapshot){
+    if(!snapshot||_terminalStateReached||_streamFinalized) return;
+    let changed=false;
+    const text=typeof snapshot.partial_text==='string'?snapshot.partial_text:'';
+    if(text&&text!==assistantText&&text.length>=assistantText.length){
+      const previous=assistantText;
+      assistantText=text;
+      if(text.startsWith(previous)){
+        _snapshotReplayText=text;
+        _snapshotReplayOffset=previous.length;
+      }else{
+        _snapshotReplayText='';
+        _snapshotReplayOffset=0;
+        segmentStart=0;
+        assistantRow=null;
+        assistantBody=null;
+        _smdEndParser();
+        _smdReconnect=true;
+      }
+      changed=true;
+    }
+    const reasoning=typeof snapshot.reasoning_text==='string'?snapshot.reasoning_text:'';
+    if(reasoning&&reasoning.length>reasoningText.length){
+      reasoningText=reasoning;
+      liveReasoningText=reasoning;
+      changed=true;
+    }
+    const tools=Array.isArray(snapshot.tool_calls)?snapshot.tool_calls:[];
+    if(tools.length){
+      const normalized=tools.map((tc,i)=>({
+        name:tc&&tc.name||'tool',
+        preview:tc&&tc.preview||'',
+        args:tc&&tc.args||{},
+        snippet:tc&&tc.snippet||'',
+        done:!!(tc&&tc.done),
+        duration:tc&&tc.duration,
+        is_error:!!(tc&&tc.is_error),
+        tid:tc&&tc.tid||`snapshot-${streamId}-${i}`,
+      }));
+      const inflight=INFLIGHT[activeSid]||(INFLIGHT[activeSid]={messages:[...S.messages],uploaded:[...uploaded],toolCalls:[]});
+      inflight.toolCalls=normalized;
+      if(S.session&&S.session.session_id===activeSid){
+        S.toolCalls=normalized;
+        clearLiveToolCards();
+        if(typeof placeLiveToolCardsHost==='function') placeLiveToolCardsHost();
+        for(const tc of normalized) appendLiveToolCard(tc);
+      }
+      changed=true;
+    }
+    if(!changed) return;
+    syncInflightAssistantMessage();
+    persistInflightState();
+    if(S.session&&S.session.session_id===activeSid){
+      const parsed=_parseStreamState();
+      if(String((parsed&&parsed.displayText)||'').trim()||assistantRow) ensureAssistantRow(true);
+      _scheduleRender();
+      scrollIfPinned();
+    }
+  }
   async function _attemptReconnect(){
     if(_terminalStateReached||_streamFinalized||_reconnectInProgress) return;
     _clearReconnectTimer();
@@ -520,6 +585,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       if(streamId){
         const st=await api(`/api/chat/stream/status?stream_id=${encodeURIComponent(streamId)}`);
         if(st&&st.active){
+          _applyStreamSnapshot(st);
           setComposerStatus('Reconnected');
           _wireSSE(new EventSource(new URL(`api/chat/stream?stream_id=${encodeURIComponent(streamId)}`,document.baseURI||location.href).href,{withCredentials:true}));
           return;
@@ -765,7 +831,22 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
     source.addEventListener('token',e=>{
       if(!S.session||S.session.session_id!==activeSid) return;
       const d=JSON.parse(e.data);
-      assistantText+=d.text;
+      let token=String(d.text||'');
+      if(_snapshotReplayText&&_snapshotReplayOffset<_snapshotReplayText.length){
+        const expected=_snapshotReplayText.slice(_snapshotReplayOffset,_snapshotReplayOffset+token.length);
+        if(expected===token||expected.startsWith(token)){
+          _snapshotReplayOffset+=token.length;
+          if(_snapshotReplayOffset>=_snapshotReplayText.length){_snapshotReplayText='';_snapshotReplayOffset=0;}
+          return;
+        }
+        if(token.startsWith(expected)&&expected){
+          token=token.slice(expected.length);
+        }
+        _snapshotReplayText='';
+        _snapshotReplayOffset=0;
+      }
+      if(!token) return;
+      assistantText+=token;
       syncInflightAssistantMessage();
       if(!S.session||S.session.session_id!==activeSid) return;
       const parsed=_parseStreamState();
@@ -1285,6 +1366,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       try{
         const st=await api(`/api/chat/stream/status?stream_id=${encodeURIComponent(streamId)}`);
         if(!st.active){
+          if(await _restoreSettledSession()) return;
           delete INFLIGHT[activeSid];
           clearInflight();
           clearInflightState(activeSid);
@@ -1303,6 +1385,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
           }
           return;
         }
+        _applyStreamSnapshot(st);
       }catch(_){}
     }
     _wireSSE(new EventSource(new URL(`api/chat/stream?stream_id=${encodeURIComponent(streamId)}`,document.baseURI||location.href).href,{withCredentials:true}));

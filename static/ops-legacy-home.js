@@ -1170,24 +1170,41 @@
     }
 
     async function loadDashboardHome(){
-      setBusy(true);
+      const token=(OPS.dashboardHomeLoadToken||0)+1;
+      OPS.dashboardHomeLoadToken=token;
+      const renderIfCurrent=()=>{
+        if(token===OPS.dashboardHomeLoadToken&&windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
+      };
+      // Opening the dashboard should not be gated by every diagnostics/feed request.
+      // Render cached/empty home immediately, then hydrate critical controls and
+      // finally fill secondary panels in the background.
+      setBusy(false);
+      renderIfCurrent();
       try{
         await Promise.all([
           loadProjects(),
-          loadNotifications(),
-          loadOpsRuns(),
           loadSessionActivity({render:false}),
-          loadNotificationDiagnostics({render:false}).catch(()=>null),
         ]);
+        if(token!==OPS.dashboardHomeLoadToken)return;
         normalizeQuickTaskProjectSelection();
+        renderIfCurrent();
       }catch(err){
+        if(token!==OPS.dashboardHomeLoadToken)return;
         OPS.quickTaskStatus=err&&err.message?err.message:'Unable to load dashboard data.';
         OPS.quickTaskStatusKind='error';
         showError(err);
-      }finally{
-        setBusy(false);
-        if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
+        renderIfCurrent();
+        return;
       }
+      Promise.allSettled([
+        loadNotifications(),
+        loadOpsRuns(),
+        loadNotificationDiagnostics({render:false}).catch(()=>null),
+      ]).then(()=>{
+        if(token!==OPS.dashboardHomeLoadToken)return;
+        setBusy(false);
+        renderIfCurrent();
+      });
     }
 
     async function handleHomeAction(action,btn){
