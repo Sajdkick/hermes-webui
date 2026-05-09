@@ -422,6 +422,9 @@ function _renderCronDetail(job){
   const schedule = job.schedule_display || (job.schedule && job.schedule.expression) || '';
   const skills = Array.isArray(job.skills) && job.skills.length ? job.skills.join(', ') : '—';
   const deliver = job.deliver || 'local';
+  const isNoAgent = !!job.no_agent;
+  const cronJobMode = isNoAgent ? 'no-agent' : 'agent';
+  const script = job.script || '';
   const profileLabel = _cronProfileLabel(job.profile);
   const profileTitle = _cronProfileTitle(job.profile);
   const lastError = job.last_error ? `<div class="detail-row"><div class="detail-row-label">${esc(t('error_prefix').replace(/:\s*$/,''))}</div><div class="detail-row-value" style="color:var(--accent-text)">${esc(job.last_error)}</div></div>` : '';
@@ -450,6 +453,8 @@ function _renderCronDetail(job){
         <div class="detail-row"><div class="detail-row-label">${esc(t('cron_next'))}</div><div class="detail-row-value">${esc(nextRun)}</div></div>
         <div class="detail-row"><div class="detail-row-label">${esc(t('cron_last'))}</div><div class="detail-row-value">${esc(lastRun)}</div></div>
         <div class="detail-row"><div class="detail-row-label">Deliver</div><div class="detail-row-value">${esc(deliver)}</div></div>
+        <div class="detail-row"><div class="detail-row-label">Mode</div><div class="detail-row-value"><span class="detail-badge" id="cronJobMode">${esc(cronJobMode)}</span></div></div>
+        ${isNoAgent ? `<div class="detail-row"><div class="detail-row-label">No-agent script</div><div class="detail-row-value"><code>${esc(script || '—')}</code></div></div>` : ''}
         <div class="detail-row"><div class="detail-row-label">${esc(t('cron_profile_label') || 'Profile')}</div><div class="detail-row-value"><span class="detail-badge active" title="${esc(profileTitle)}">${esc(profileLabel)}</span></div></div>
         <div class="detail-row"><div class="detail-row-label">Skills</div><div class="detail-row-value">${esc(skills)}</div></div>
         ${lastError}
@@ -685,6 +690,8 @@ function openCronEdit(job){
     prompt: job.prompt || '',
     deliver: job.deliver || 'local',
     profile: job.profile || '',
+    no_agent: !!job.no_agent,
+    script: job.script || '',
     isEdit: true,
   });
   if (!_cronSkillsCache) {
@@ -695,11 +702,12 @@ function openCronEdit(job){
   loadCronProfiles().then(()=>_refreshCronProfileSelect(job.profile || '')).catch(()=>{});
 }
 
-function _renderCronForm({ name, schedule, prompt, deliver, profile, isEdit }){
+function _renderCronForm({ name, schedule, prompt, deliver, profile, no_agent=false, script='', isEdit }){
   const title = $('taskDetailTitle');
   const body = $('taskDetailBody');
   const empty = $('taskDetailEmpty');
   if (!body || !title) return;
+  const isNoAgent = !!no_agent;
   title.textContent = isEdit ? (t('edit') + ' · ' + (name || schedule || t('scheduled_jobs'))) : t('new_job');
   const deliverOpt = (v,l) => `<option value="${v}"${deliver===v?' selected':''}>${esc(l)}</option>`;
   body.innerHTML = `
@@ -714,9 +722,10 @@ function _renderCronForm({ name, schedule, prompt, deliver, profile, isEdit }){
           <input type="text" id="cronFormSchedule" value="${esc(schedule || '')}" placeholder="0 9 * * *  —  every 1h  —  @daily" autocomplete="off" required>
           <div class="detail-form-hint">${esc(t('cron_schedule_hint') || "Cron expression or shorthand like 'every 1h'.")}</div>
         </div>
-        <div class="detail-form-row">
+        <div class="detail-form-row ${isNoAgent ? 'cron-no-agent-prompt-row' : ''}">
           <label for="cronFormPrompt">${esc(t('cron_prompt_label') || 'Prompt')}</label>
-          <textarea id="cronFormPrompt" rows="6" placeholder="${esc(t('cron_prompt_placeholder') || 'Must be self-contained')}" required>${esc(prompt || '')}</textarea>
+          <textarea id="cronFormPrompt" rows="6" placeholder="${esc(t('cron_prompt_placeholder') || 'Must be self-contained')}"${isNoAgent ? ' disabled' : ' required'}>${esc(prompt || '')}</textarea>
+          ${isNoAgent ? `<div class="detail-form-hint cron-no-agent-hint">No-agent mode runs the configured script directly; Prompt is unused. No-agent script: <code>${esc(script || '—')}</code></div>` : ''}
         </div>
         <div class="detail-form-row">
           <label for="cronFormDeliver">${esc(t('cron_deliver_label') || 'Deliver output to')}</label>
@@ -825,12 +834,14 @@ async function saveCronForm(){
   const prompt=promptEl.value.trim();
   const deliver=delivEl?delivEl.value:'local';
   const profile=profileEl?profileEl.value:'';
+  const isNoAgent = !!(_cronPreFormDetail && _cronPreFormDetail.no_agent);
   errEl.style.display='none';
   if(!schedule){errEl.textContent=t('cron_schedule_required_example');errEl.style.display='';return;}
-  if(!prompt){errEl.textContent=t('cron_prompt_required');errEl.style.display='';return;}
+  if(!isNoAgent && !prompt){errEl.textContent=t('cron_prompt_required');errEl.style.display='';return;}
   try{
     if (_editingCronId) {
-      const updates = {job_id: _editingCronId, schedule, prompt, profile: profile};
+      const updates = {job_id: _editingCronId, schedule, profile: profile};
+      if (!isNoAgent) updates.prompt = prompt;
       if (name) updates.name = name;
       await api('/api/crons/update', {method:'POST', body: JSON.stringify(updates)});
       const editedId = _editingCronId;
@@ -1085,10 +1096,9 @@ function _kanbanCardStalenessClass(task){
 function _kanbanCardQuickActions(task){
   const id = esc(task.id || '');
   const status = task.status || '';
-  const start = status !== 'running' && status !== 'done' && status !== 'archived' ? `<button type="button" class="kanban-card-action" onclick="quickKanbanCardAction(event,'${id}','running')">${esc(t('kanban_card_start'))}</button>` : '';
   const complete = status !== 'done' && status !== 'archived' ? `<button type="button" class="kanban-card-action" onclick="quickKanbanCardAction(event,'${id}','done')">${esc(t('kanban_card_complete'))}</button>` : '';
   const archive = status !== 'archived' ? `<button type="button" class="kanban-card-action danger" onclick="quickKanbanCardAction(event,'${id}','archived')">${esc(t('kanban_card_archive'))}</button>` : '';
-  return `<div class="kanban-card-actions" onclick="event.stopPropagation()">${start}${complete}${archive}</div>`;
+  return `<div class="kanban-card-actions" onclick="event.stopPropagation()">${complete}${archive}</div>`;
 }
 
 async function quickKanbanCardAction(event, taskId, status){
@@ -1157,17 +1167,25 @@ function _kanbanRenderProfileLanes(columns){
   }).join('')}</div>`;
 }
 
+function _kanbanEmptyBoardHtml(){
+  return `<div class="main-view-empty"><div class="main-view-empty-title">${esc(t('kanban_no_data'))}</div><div class="main-view-empty-sub">${esc(t('kanban_work_queue_hint'))}</div></div>`;
+}
+
 function _kanbanRenderBoard(){
   const board = $('kanbanBoard');
   if (!board) return;
   if (!_kanbanBoard || !_kanbanBoard.columns) {
-    board.innerHTML = `<div class="main-view-empty"><div class="main-view-empty-title">${esc(t('kanban_no_data'))}</div></div>`;
+    board.innerHTML = _kanbanEmptyBoardHtml();
     return;
   }
   const columns = _kanbanVisibleTasks();
   const total = columns.reduce((n, col) => n + (col.tasks || []).length, 0);
   if ($('kanbanSummary')) $('kanbanSummary').textContent = String(t('kanban_visible_tasks')).replace('{0}', total);
   _kanbanRenderSidebar(columns);
+  if (total === 0) {
+    board.innerHTML = _kanbanEmptyBoardHtml();
+    return;
+  }
   board.innerHTML = _kanbanLanesByProfile ? _kanbanRenderProfileLanes(columns) : columns.map(_kanbanRenderColumn).join('');
 }
 
@@ -1189,11 +1207,49 @@ function _kanbanCard(task, status){
   </article>`;
 }
 
+async function hardRefreshWebUIClient(){
+  try {
+    if (navigator.serviceWorker) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+  } catch(_) {}
+  try {
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+  } catch(_) {}
+  window.location.reload();
+}
+
+function _kanbanLooksLikeStaleClientError(err){
+  const msg = String((err && err.message) || err || '').toLowerCase();
+  return !!(err && err.status === 404 && (
+    msg === 'not found' ||
+    msg.includes('unknown kanban endpoint') ||
+    msg.includes('stale cached bundle')
+  ));
+}
+
+function _kanbanUnavailableHtml(err){
+  const raw = String((err && err.message) || err || '');
+  if (_kanbanLooksLikeStaleClientError(err)) {
+    return `<div class="main-view-empty"><div class="main-view-empty-title">Kanban needs a hard refresh</div><div class="main-view-empty-subtitle">The server rejected an obsolete Kanban endpoint. This usually means the browser or Mac app is still running a stale cached WebUI bundle after an update.</div><button class="btn primary" type="button" onclick="hardRefreshWebUIClient()">Hard refresh now</button><div class="main-view-empty-subtitle">Original error: ${esc(raw || 'not found')}</div></div>`;
+  }
+  const msg = `${esc(t('kanban_unavailable'))}: ${esc(raw)}`;
+  return `<div class="main-view-empty"><div class="main-view-empty-title">${msg}</div></div>`;
+}
+
 async function loadKanban(animate){
   const board = $('kanbanBoard');
   const list = $('kanbanList');
   try {
     if (animate && board) board.innerHTML = `<div style="padding:16px;color:var(--muted);font-size:13px">${esc(t('loading'))}</div>`;
+    // Resolve the active board before board-scoped requests. If another CLI or
+    // tab archived the previous board, /boards can fall back to default instead
+    // of leaving config/board pinned to a ghost slug.
+    await loadKanbanBoards();
     const config = await api('/api/kanban/config' + _kanbanBoardQuery());
     let assignees = null;
     try { assignees = await api('/api/kanban/assignees' + _kanbanBoardQuery()); } catch(e) { assignees = null; }
@@ -1223,16 +1279,19 @@ async function loadKanban(animate){
     _kanbanSetSelectOptions($('kanbanAssigneeFilter'), _kanbanBoard.assignees || (assignees && assignees.assignees) || (config && config.assignees), 'kanban_all_assignees');
     _kanbanSetSelectOptions($('kanbanTenantFilter'), _kanbanBoard.tenants, 'kanban_all_tenants');
     await loadKanbanStats();
-    // Refresh the multi-board switcher (and resolve which board to show
-    // from localStorage / server state). Best-effort — failures hide the
-    // switcher rather than blocking the panel from rendering.
-    await loadKanbanBoards();
+    // Note: PR #1828 (v0.51.20) moved the boards refresh to the start of
+    // loadKanban() so the active board is resolved BEFORE board-scoped
+    // requests fire. The previous tail-of-function refresh has been removed
+    // to avoid doubling /api/kanban/boards traffic during SSE-driven
+    // refreshes (debounced at 250ms via _scheduleKanbanRefresh). The
+    // 30-second poll started by _kanbanStartPolling() picks up any board
+    // state changes that arrive after this render.
     _kanbanStartPolling();
     _kanbanRenderBoard();
   } catch(e) {
-    const msg = `${esc(t('kanban_unavailable'))}: ${esc(e.message || e)}`;
-    if (board) board.innerHTML = `<div class="main-view-empty"><div class="main-view-empty-title">${msg}</div></div>`;
-    if (list) list.innerHTML = `<div class="kanban-empty">${msg}</div>`;
+    const html = _kanbanUnavailableHtml(e);
+    if (board) board.innerHTML = html;
+    if (list) list.innerHTML = html;
   }
 }
 
@@ -1687,6 +1746,8 @@ async function loadKanbanBoards(){
   let active = serverCurrent;
   if (saved && boards.some(b => b.slug === saved)) {
     active = saved;
+  } else if (saved) {
+    _kanbanSetSavedBoard('default');
   }
   _kanbanCurrentBoard = (active === 'default') ? null : active;
   // The switcher is visible whenever ≥1 non-default board exists OR the
@@ -4246,6 +4307,8 @@ function _appearancePayloadFromUi(){
     theme: ($('settingsTheme')||{}).value || localStorage.getItem('hermes-theme') || 'dark',
     skin: ($('settingsSkin')||{}).value || localStorage.getItem('hermes-skin') || 'default',
     font_size: ($('settingsFontSize')||{}).value || localStorage.getItem('hermes-font-size') || 'default',
+    session_jump_buttons: !!($('settingsSessionJumpButtons')||{}).checked,
+    session_endless_scroll: !!($('settingsSessionEndlessScroll')||{}).checked,
   };
 }
 
@@ -4293,6 +4356,11 @@ async function _autosaveAppearanceSettings(payload){
     if(saved&&saved.font_size){
       localStorage.setItem('hermes-font-size',saved.font_size);
     }
+    if(saved){
+      window._sessionJumpButtonsEnabled=!!saved.session_jump_buttons;
+      if(typeof _applySessionNavigationPrefs==='function') _applySessionNavigationPrefs();
+    }
+    window._sessionEndlessScrollEnabled=!!(saved&&saved.session_endless_scroll);
     _setAppearanceAutosaveStatus('saved');
   }catch(e){
     console.warn('[settings] appearance autosave failed', e);
@@ -4449,6 +4517,17 @@ async function loadSettingsPanel(){
     const fontSizeSel=$('settingsFontSize');
     if(fontSizeSel) fontSizeSel.value=fontSizeVal;
     if(typeof _syncFontSizePicker==='function') _syncFontSizePicker(fontSizeVal);
+    const jumpButtonsCb=$('settingsSessionJumpButtons');
+    if(jumpButtonsCb){
+      jumpButtonsCb.checked=!!settings.session_jump_buttons;
+      window._sessionJumpButtonsEnabled=jumpButtonsCb.checked;
+      jumpButtonsCb.onchange=function(){
+        window._sessionJumpButtonsEnabled=this.checked;
+        if(typeof _applySessionNavigationPrefs==='function') _applySessionNavigationPrefs();
+        _scheduleAppearanceAutosave();
+      };
+    }
+    if(typeof _applySessionNavigationPrefs==='function') _applySessionNavigationPrefs();
     // Workspace panel default-open toggle (localStorage-backed)
     // Uses a separate key (hermes-webui-workspace-panel-pref) so that
     // closing the panel via toolbar X does not clear the user's preference.
@@ -4463,6 +4542,15 @@ async function loadSettingsPanel(){
         document.documentElement.dataset.workspacePanel=open?'open':'closed';
         if(open&&_workspacePanelMode==='closed') openWorkspacePanel('browse');
         else if(!open&&_workspacePanelMode!=='closed') toggleWorkspacePanel(false);
+      };
+    }
+    const endlessScrollCb=$('settingsSessionEndlessScroll');
+    if(endlessScrollCb){
+      endlessScrollCb.checked=!!settings.session_endless_scroll;
+      window._sessionEndlessScrollEnabled=endlessScrollCb.checked;
+      endlessScrollCb.onchange=function(){
+        window._sessionEndlessScrollEnabled=this.checked;
+        _scheduleAppearanceAutosave();
       };
     }
     const resolvedLanguage=(typeof resolvePreferredLocale==='function')
@@ -5161,15 +5249,64 @@ function _formatProviderQuotaMoney(value){
   return '$'+n.toFixed(2);
 }
 
+function _formatProviderQuotaPercent(value){
+  if(value===null||value===undefined||value==='') return '—';
+  const n=Number(value);
+  if(!Number.isFinite(n)) return '—';
+  return Math.max(0,Math.min(100,Math.round(n)))+'%';
+}
+
+function _formatProviderQuotaReset(value){
+  if(!value) return '';
+  const d=new Date(value);
+  if(Number.isNaN(d.getTime())) return '';
+  try{return d.toLocaleString();}catch(e){return value;}
+}
+
+function _formatProviderQuotaWindowLabel(accountLimits,w){
+  const raw=((w&&w.label)||'Window').trim();
+  const provider=((accountLimits&&accountLimits.provider)||'').toLowerCase();
+  if(provider==='openai-codex'){
+    if(raw.toLowerCase()==='session') return '5-hour limit';
+    if(raw.toLowerCase()==='weekly') return 'Weekly limit';
+  }
+  return raw||'Window';
+}
+
 function _buildProviderQuotaCard(status){
   if(!status) return null;
   const card=document.createElement('div');
   const state=(status.status||'unavailable').replace(/[^a-z0-9_-]/gi,'').toLowerCase()||'unavailable';
   card.className='provider-quota-card provider-quota-card-'+state;
-  const provider=status.display_name||status.provider||'Active provider';
-  const quota=status.quota||{};
+  const accountLimits=status.account_limits||null;
+  const providerBase=status.display_name||status.provider||'Active provider';
+  const provider=(accountLimits&&accountLimits.plan)?`${providerBase} · ${accountLimits.plan}`:providerBase;
+  const quota=status.quota||null;
   let body='';
-  if(status.status==='available'&&quota){
+  if(status.status==='available'&&accountLimits){
+    const windows=Array.isArray(accountLimits.windows)?accountLimits.windows:[];
+    const details=Array.isArray(accountLimits.details)?accountLimits.details:[];
+    const windowHtml=windows.map(w=>{
+      const used=_formatProviderQuotaPercent(w&&w.used_percent);
+      const reset=_formatProviderQuotaReset(w&&w.reset_at);
+      const meta=[];
+      if(used!=='—') meta.push(`${used} used`);
+      if(reset) meta.push(`resets ${reset}`);
+      if(w&&w.detail) meta.push(w.detail);
+      return `
+        <div class="provider-quota-metric provider-quota-window">
+          <span>${esc(_formatProviderQuotaWindowLabel(accountLimits,w))}</span>
+          <strong>${esc(_formatProviderQuotaPercent(w&&w.remaining_percent))}</strong>
+          ${meta.length?`<small>${esc(meta.join(' · '))}</small>`:''}
+        </div>
+      `;
+    }).join('');
+    const detailHtml=details.length
+      ? `<div class="provider-quota-details">${details.map(d=>`<span>${esc(d)}</span>`).join('')}</div>`
+      : '';
+    body=windowHtml+detailHtml;
+    if(!body) body=`<div class="provider-quota-message">${esc(status.message||'Account limits loaded.')}</div>`;
+  }else if(status.status==='available'&&quota){
     body=`
       <div class="provider-quota-metric"><span>Remaining</span><strong>${esc(_formatProviderQuotaMoney(quota.limit_remaining))}</strong></div>
       <div class="provider-quota-metric"><span>Used</span><strong>${esc(_formatProviderQuotaMoney(quota.usage))}</strong></div>
@@ -5488,8 +5625,11 @@ function _applySavedSettingsUi(saved, body, opts){
   window._notificationsEnabled=body.notifications_enabled;
   window._showThinking=body.show_thinking!==false;
   window._simplifiedToolCalling=body.simplified_tool_calling!==false;
+  window._sessionJumpButtonsEnabled=!!body.session_jump_buttons;
+  if(typeof _applySessionNavigationPrefs==='function') _applySessionNavigationPrefs();
   window._sidebarDensity=sidebarDensity==='detailed'?'detailed':'compact';
   window._busyInputMode=body.busy_input_mode||'queue';
+  window._sessionEndlessScrollEnabled=!!body.session_endless_scroll;
   window._botName=body.bot_name||'Hermes';
   if(typeof applyBotName==='function') applyBotName();
   if(typeof setLocale==='function') setLocale(language);
@@ -5585,6 +5725,8 @@ async function saveSettings(andClose){
   body.theme=theme;
   body.skin=skin;
   body.font_size=fontSize;
+  body.session_jump_buttons=!!($('settingsSessionJumpButtons')||{}).checked;
+  body.session_endless_scroll=!!($('settingsSessionEndlessScroll')||{}).checked;
   body.language=language;
   body.show_token_usage=showTokenUsage;
   body.show_tps=showTps;
@@ -5887,6 +6029,10 @@ function loadGatewayStatus(){
   if(!card) return;
   api('/api/gateway/status').then(r=>{
     if(!r) return;
+    if(!r.configured){
+      card.innerHTML=`<div style="color:var(--muted);font-size:12px;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block"></span>Gateway not configured</div>`;
+      return;
+    }
     if(!r.running){
       card.innerHTML=`<div style="color:var(--muted);font-size:12px;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block"></span>Gateway not running</div>`;
       return;

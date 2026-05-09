@@ -332,6 +332,7 @@ class Session:
                  context_length=None, threshold_tokens=None,
                  last_prompt_tokens=None,
                  gateway_routing=None, gateway_routing_history=None,
+                 llm_title_generated: bool=False,
                 parent_session_id: str=None,
                 enabled_toolsets=None,
                 **kwargs):
@@ -364,6 +365,7 @@ class Session:
         self.last_prompt_tokens = last_prompt_tokens
         self.gateway_routing = gateway_routing if isinstance(gateway_routing, dict) else None
         self.gateway_routing_history = gateway_routing_history if isinstance(gateway_routing_history, list) else []
+        self.llm_title_generated = bool(llm_title_generated)
         self.parent_session_id = parent_session_id
         self.is_cli_session = bool(kwargs.get('is_cli_session', False))
         self.source_tag = kwargs.get('source_tag')
@@ -408,7 +410,7 @@ class Session:
             'pending_user_message', 'pending_attachments', 'pending_started_at',
             'compression_anchor_visible_idx', 'compression_anchor_message_key',
             'context_length', 'threshold_tokens', 'last_prompt_tokens',
-            'gateway_routing', 'gateway_routing_history',
+            'gateway_routing', 'gateway_routing_history', 'llm_title_generated',
             'parent_session_id',
             'is_cli_session', 'source_tag', 'raw_source', 'session_source', 'source_label',
             'enabled_toolsets',
@@ -964,12 +966,24 @@ def _enrich_sidebar_lineage_metadata(sessions: list[dict]) -> None:
             session.update(metadata[sid])
 
 
-def all_sessions():
+def _diag_stage(diag, name: str) -> None:
+    if diag is not None:
+        try:
+            diag.stage(name)
+        except Exception:
+            pass
+
+
+def all_sessions(diag=None):
+    _diag_stage(diag, "all_sessions.active_streams")
     active_stream_ids = _active_stream_ids()
     # Phase C: try index first for O(1) read; fall back to full scan
+    _diag_stage(diag, "all_sessions.index_exists")
     if SESSION_INDEX_FILE.exists():
         try:
+            _diag_stage(diag, "all_sessions.read_index")
             index = json.loads(SESSION_INDEX_FILE.read_text(encoding='utf-8'))
+            _diag_stage(diag, "all_sessions.prune_index")
             index = [
                 s for s in index
                 if _index_entry_exists(s.get('session_id'))
@@ -977,21 +991,25 @@ def all_sessions():
             backfilled = []
             for i, s in enumerate(index):
                 if 'last_message_at' not in s:
+                    _diag_stage(diag, "all_sessions.backfill_load")
                     full = Session.load(s.get('session_id'))
                     if full:
                         index[i] = full.compact()
                         backfilled.append(full)
             if backfilled:
                 try:
+                    _diag_stage(diag, "all_sessions.backfill_write")
                     _write_session_index(updates=backfilled)
                 except Exception:
                     logger.debug("Failed to persist last_message_at backfill")
+            _diag_stage(diag, "all_sessions.mark_streaming")
             for s in index:
                 s['is_streaming'] = _is_streaming_session(
                     s.get('active_stream_id'),
                     active_stream_ids,
                 )
             # Overlay any in-memory sessions that may be newer than the index
+            _diag_stage(diag, "all_sessions.overlay_lock")
             index_map = {s['session_id']: s for s in index}
             with LOCK:
                 for s in SESSIONS.values():
@@ -999,6 +1017,7 @@ def all_sessions():
                         include_runtime=True,
                         active_stream_ids=active_stream_ids,
                     )
+            _diag_stage(diag, "all_sessions.sort_filter")
             result = sorted(index_map.values(), key=lambda s: (s.get('pinned', False), _session_sort_timestamp(s)), reverse=True)
             # Hide empty Untitled sessions from the UI entirely — they are ephemeral
             # scratch pads that only become real once the first message is sent (#1171).
@@ -1023,11 +1042,13 @@ def all_sessions():
             for s in result:
                 if not s.get('profile'):
                     s['profile'] = 'default'
+            _diag_stage(diag, "all_sessions.lineage_metadata")
             _enrich_sidebar_lineage_metadata(result)
             return result
         except Exception:
             logger.debug("Failed to load session index, falling back to full scan")
     # Full scan fallback
+    _diag_stage(diag, "all_sessions.full_scan")
     out = []
     for p in SESSION_DIR.glob('*.json'):
         if p.name.startswith('_'): continue
@@ -1036,8 +1057,10 @@ def all_sessions():
             if s: out.append(s)
         except Exception:
             logger.debug("Failed to load session from %s", p)
+    _diag_stage(diag, "all_sessions.full_scan_overlay")
     for s in SESSIONS.values():
         if all(s.session_id != x.session_id for x in out): out.append(s)
+    _diag_stage(diag, "all_sessions.full_scan_sort_filter")
     out.sort(key=lambda s: (getattr(s, 'pinned', False), _session_sort_timestamp(s)), reverse=True)
     # Hide empty Untitled sessions from the UI entirely — kept consistent with the
     # index-path filter above. No grace window: a 0-message Untitled session is
@@ -1052,6 +1075,7 @@ def all_sessions():
     for s in result:
         if not s.get('profile'):
             s['profile'] = 'default'
+    _diag_stage(diag, "all_sessions.lineage_metadata")
     _enrich_sidebar_lineage_metadata(result)
     return result
 
@@ -1618,10 +1642,24 @@ def get_cli_sessions() -> list:
     return cli_sessions
 
 
+def _json_loads_if_string(value):
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except Exception:
+        return value
+
+
 def get_cli_session_messages(sid) -> list:
     """Read messages for a single CLI/external-agent session.
-    Returns a list of {role, content, timestamp} dicts.
-    Returns empty list on any error.
+
+    Preserve tool-call/result and reasoning metadata from the agent state.db so
+    CLI-origin transcripts render with the same tool cards as WebUI-native
+    sessions. Returns empty list on any error.
     """
     import os
     if str(sid or '').startswith(f'{CLAUDE_CODE_SOURCE}_'):
@@ -1644,19 +1682,47 @@ def get_cli_session_messages(sid) -> list:
         with closing(sqlite3.connect(str(db_path))) as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
-            cur.execute("""
-                SELECT role, content, timestamp
+            cur.execute("PRAGMA table_info(messages)")
+            available = {str(row['name']) for row in cur.fetchall()}
+            required = {'role', 'content', 'timestamp'}
+            if not required.issubset(available):
+                return []
+            optional = [
+                'tool_call_id',
+                'tool_calls',
+                'tool_name',
+                'reasoning',
+                'reasoning_details',
+                'codex_reasoning_items',
+                'reasoning_content',
+                'codex_message_items',
+            ]
+            selected = ['role', 'content', 'timestamp'] + [c for c in optional if c in available]
+            cur.execute(f"""
+                SELECT {', '.join(selected)}
                 FROM messages
                 WHERE session_id = ?
                 ORDER BY timestamp ASC
             """, (sid,))
             msgs = []
             for row in cur.fetchall():
-                msgs.append({
+                msg = {
                     'role': row['role'],
                     'content': row['content'],
                     'timestamp': row['timestamp'],
-                })
+                }
+                for col in optional:
+                    if col not in row.keys():
+                        continue
+                    value = row[col]
+                    if value in (None, ''):
+                        continue
+                    if col in {'tool_calls', 'reasoning_details', 'codex_reasoning_items', 'codex_message_items'}:
+                        value = _json_loads_if_string(value)
+                    msg[col] = value
+                if msg.get('role') == 'tool' and msg.get('tool_name') and not msg.get('name'):
+                    msg['name'] = msg['tool_name']
+                msgs.append(msg)
     except Exception:
         return []
     return msgs

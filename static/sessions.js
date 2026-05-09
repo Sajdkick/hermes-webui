@@ -9,6 +9,7 @@ const ICONS={
   dup:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="4.5" y="4.5" width="8.5" height="8.5" rx="1.5"/><path d="M3 11.5V3h8.5"/></svg>',
   trash:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3.5 4.5h9M6.5 4.5V3h3v1.5M4.5 4.5v8.5h7v-8.5"/><line x1="7" y1="7" x2="7" y2="11"/><line x1="9" y1="7" x2="9" y2="11"/></svg>',
   more:'<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" stroke="none"><circle cx="8" cy="3" r="1.25"/><circle cx="8" cy="8" r="1.25"/><circle cx="8" cy="13" r="1.25"/></svg>',
+  edit:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5l2 2L5 13H3v-2z"/><path d="M10 4l2 2"/></svg>',
 };
 
 // Tracks which session_id is currently being loaded. Used to discard stale
@@ -329,6 +330,11 @@ async function newSession(flash){
 }
 
 async function loadSession(sid){
+  const currentSid = S.session ? S.session.session_id : null;
+  // Clicking the already-open session in the sidebar is a no-op. Reloading it
+  // tears down active pane state and can reset the long-session scroll window
+  // to the top even though the user did not navigate anywhere.
+  if(currentSid===sid) return;
   // Mark this session as the in-flight load. Subsequent loadSession() calls
   // will overwrite this; stale awaits use the mismatch to bail out (#1060).
   _loadingSessionId = sid;
@@ -338,7 +344,6 @@ async function loadSession(sid){
   if(typeof hideClarifyCard==='function') hideClarifyCard();
   // Show loading indicator immediately for responsiveness.
   // Cleared by renderMessages() once full session data arrives.
-  const currentSid = S.session ? S.session.session_id : null;
   // Persist the current composer draft before switching away so it can be
   // restored when the user switches back (#1060).
   if (currentSid && currentSid !== sid) {
@@ -585,6 +590,7 @@ async function loadSession(sid){
       threshold_tokens:  _pick(u.threshold_tokens,  _s.threshold_tokens),
     });
   }
+  if(typeof _renderPendingPromptsForActiveSession==='function') _renderPendingPromptsForActiveSession();
   _resolveSessionModelForDisplaySoon(sid);
   // Clear the in-flight session marker now that this load has completed (#1060).
   if (_loadingSessionId === sid) _loadingSessionId = null;
@@ -1046,18 +1052,32 @@ async function _loadOlderMessages() {
     const container = $('messages');
     const prevScrollH = container ? container.scrollHeight : 0;
     S.messages = [...olderMsgs, ...S.messages];
+    // renderMessages() windows long transcripts from the end. If we do not
+    // expand that window before rendering, the newly prepended page stays
+    // hidden and the "hidden" counter rises while the viewport appears stuck.
+    // Count roughly by the same visible-message rules used by renderMessages().
+    const addedRenderable = olderMsgs.filter(m=>{
+      if(!m||!m.role||m.role==='tool') return false;
+      if(typeof _isContextCompactionMessage==='function'&&_isContextCompactionMessage(m)) return false;
+      if(typeof _isPreservedCompressionTaskListMessage==='function'&&_isPreservedCompressionTaskListMessage(m)) return false;
+      const hasTc=Array.isArray(m.tool_calls)&&m.tool_calls.length>0;
+      const hasTu=Array.isArray(m.content)&&m.content.some(p=>p&&p.type==='tool_use');
+      return !!(msgContent(m)||m._statusCard||m.attachments?.length||(m.role==='assistant'&&(hasTc||hasTu||(typeof _messageHasReasoningPayload==='function'&&_messageHasReasoningPayload(m)))));
+    }).length;
+    _messageRenderWindowSize=_currentMessageRenderWindowSize()+Math.max(addedRenderable, MESSAGE_RENDER_WINDOW_DEFAULT);
     _messagesTruncated = !!data.session._messages_truncated;
     _oldestIdx = data.session._messages_offset || 0;
-    renderMessages();
-    // Restore scroll position so the user stays at the same message.
-    // renderMessages() calls scrollToBottom() at the end, so we must
-    // counter-scroll to where the user was before loading older messages.
+    renderMessages({ preserveScroll: true });
     if (container) {
+      // Prepending older messages must not teleport the reader. Preserve the
+      // currently visible viewport by adding the inserted height to scrollTop.
+      const oldTop = container.scrollTop;
       const newScrollH = container.scrollHeight;
-      container.scrollTop = newScrollH - prevScrollH;
+      const addedHeight = Math.max(0, newScrollH - prevScrollH);
+      _programmaticScroll = true;
+      container.scrollTop = oldTop + addedHeight;
+      requestAnimationFrame(()=>{ _programmaticScroll = false; });
     }
-    // renderMessages() called scrollToBottom() which set _scrollPinned=true.
-    // We just restored the user's scroll position, so mark as not pinned.
     _scrollPinned = false;
   } catch(e) {
     console.warn('_loadOlderMessages failed:', e);
@@ -1349,6 +1369,33 @@ function _openSessionActionMenu(session, anchorEl){
   const isExternalSession = isMessagingSession || isCliSession;
   const menu=document.createElement('div');
   menu.className='session-action-menu open';
+  // Rename — first menu item by request (#1764). Double-click rename is
+  // timing-sensitive: the first click frequently registers as "open the
+  // chat" before the second click arrives, so users open the conversation
+  // when they meant to rename it. Putting Rename in the menu eliminates
+  // the timing entirely. Only shown for sessions that support rename
+  // (read-only imported sessions skip it; same gate as startRename's
+  // _isReadOnlySession check).
+  if(!_isReadOnlySession(session)){
+    menu.appendChild(_buildSessionAction(
+      t('session_rename'),
+      t('session_rename_desc'),
+      ICONS.edit,
+      ()=>{
+        closeSessionActionMenu();
+        // Find the row for this session and call its attached startRename.
+        // Falls back to a no-op toast if the row isn't currently rendered
+        // (e.g. archived-and-hidden) — extremely rare since the menu only
+        // opens from a visible row's three-dot button.
+        const row=document.querySelector('.session-item[data-sid="'+session.session_id+'"]');
+        if(row && typeof row._startRename === 'function'){
+          row._startRename();
+        } else if(typeof showToast==='function'){
+          showToast(t('session_rename_failed_no_row')||'Could not start rename — row not found.', 3000, 'error');
+        }
+      }
+    ));
+  }
   menu.appendChild(_buildSessionAction(
     session.pinned?t('session_unpin'):t('session_pin'),
     session.pinned?t('session_unpin_desc'):t('session_pin_desc'),
@@ -1450,6 +1497,53 @@ window.addEventListener('resize',()=>{
 // with stale data, causing sessions to vanish from the sidebar.
 let _renderSessionListGen = 0;
 
+function _isOptimisticFirstTurnSessionRow(s){
+  if(!s||!s.session_id||s.archived) return false;
+  const messageCount=Number(s.message_count||0);
+  if(messageCount<=0&&!s.pending_user_message) return false;
+  return Boolean(
+    s.is_streaming||
+    s.active_stream_id||
+    s.pending_user_message||
+    s.pending_started_at||
+    _isSessionLocallyStreaming(s)||
+    _sessionStreamingById.get(s.session_id)===true
+  );
+}
+
+function _mergeOptimisticFirstTurnSessions(fetchedSessions){
+  const merged=Array.isArray(fetchedSessions)?[...fetchedSessions]:[];
+  const bySid=new Map();
+  merged.forEach((s,idx)=>{if(s&&s.session_id) bySid.set(s.session_id,idx);});
+  for(const local of Array.isArray(_allSessions)?_allSessions:[]){
+    if(!_isOptimisticFirstTurnSessionRow(local)) continue;
+    const sid=local.session_id;
+    const idx=bySid.has(sid)?bySid.get(sid):-1;
+    if(idx>=0){
+      const fetched=merged[idx]||{};
+      const localCount=Number(local.message_count||0);
+      const fetchedCount=Number(fetched.message_count||0);
+      const localTs=Number(local.last_message_at||local.updated_at||0);
+      const fetchedTs=Number(fetched.last_message_at||fetched.updated_at||0);
+      merged[idx]={
+        ...local,
+        ...fetched,
+        message_count:Math.max(localCount,fetchedCount),
+        last_message_at:Math.max(localTs,fetchedTs),
+        updated_at:Math.max(Number(local.updated_at||0),Number(fetched.updated_at||0),localTs,fetchedTs),
+        active_stream_id:fetched.active_stream_id||local.active_stream_id||null,
+        pending_user_message:fetched.pending_user_message||local.pending_user_message||null,
+        pending_started_at:fetched.pending_started_at||local.pending_started_at||null,
+        is_streaming:Boolean(fetched.is_streaming||local.is_streaming||_isSessionLocallyStreaming(local)),
+      };
+    }else{
+      merged.push({...local,is_streaming:true});
+      bySid.set(sid,merged.length-1);
+    }
+  }
+  return merged;
+}
+
 async function renderSessionList(){
   const _gen = ++_renderSessionListGen;
   try{
@@ -1465,7 +1559,7 @@ async function renderSessionList(){
     // active profile so the "Show N from other profiles" toggle can render
     // without a second round-trip. Stashed on the module for renderSessionListFromCache.
     _otherProfileCount = sessData.other_profile_count || 0;
-    _allSessions = sessData.sessions||[];
+    _allSessions = _mergeOptimisticFirstTurnSessions(sessData.sessions||[]);
     _allProjects = projData.projects||[];
     // Capture server clock for clock-skew compensation (issue #1144).
     // server_time is epoch seconds from the server's time.time().
@@ -1771,12 +1865,17 @@ function _isChildSession(s){
 function _sessionLineageKey(s, sessionIdsInList){
   if(!s||!s.session_id) return null;
   if(_isChildSession(s)) return null;
+  const lineageKey=s._lineage_root_id||s.lineage_root_id||null;
+  if(lineageKey) return lineageKey;
   // If parent_session_id points to another session in the current list,
-  // this is a subagent child — don't collapse it into lineage (#494).
+  // this is a subagent/fork child without compression metadata — don't
+  // collapse it into lineage (#494). Compression continuations carry an
+  // explicit lineage root, even when stale optimistic rows leave parent
+  // segments in the browser cache during active compression.
   if(s.parent_session_id && sessionIdsInList && sessionIdsInList.has(s.parent_session_id)){
     return null;
   }
-  return s._lineage_root_id || s.lineage_root_id || s.parent_session_id || null;
+  return s.parent_session_id || null;
 }
 
 function _sessionLineageContainsSession(s, sid){
@@ -1785,6 +1884,16 @@ function _sessionLineageContainsSession(s, sid){
   if(Array.isArray(s._lineage_segments)&&s._lineage_segments.some(seg=>seg&&seg.session_id===sid)) return true;
   if(Array.isArray(s._child_sessions)&&s._child_sessions.some(child=>child&&child.session_id===sid)) return true;
   return false;
+}
+
+function _sessionSegmentCount(s){
+  if(!s) return 0;
+  const counts=[];
+  if(typeof s._lineage_collapsed_count==='number') counts.push(s._lineage_collapsed_count);
+  if(typeof s._compression_segment_count==='number') counts.push(s._compression_segment_count);
+  if(Array.isArray(s._lineage_segments)) counts.push(s._lineage_segments.length);
+  const count=Math.max(0,...counts.map(n=>Number.isFinite(n)?n:0));
+  return count>1?count:0;
 }
 
 function _sidebarLineageKeyForRow(s){
@@ -1823,6 +1932,10 @@ function _attachChildSessionsToSidebarRows(collapsedRows, rawSessions){
   const orphans=[];
   for(const child of rawSessions||[]){
     if(!_isChildSession(child)) continue;
+    if(child._cross_surface_child_session){
+      orphans.push({...child,_orphan_child_session:true});
+      continue;
+    }
     const parentSid=child.parent_session_id;
     let parentRow=visibleBySid.get(parentSid);
     let parentSegment=null;
@@ -2341,6 +2454,15 @@ function renderSessionListFromCache(){
     ts.className='session-time'+(hasAttentionState?' is-hidden':'');
     ts.textContent=hasAttentionState?'':_formatRelativeSessionTime(tsMs);
     titleRow.appendChild(title);
+    const segmentCount=_sessionSegmentCount(s);
+    if(segmentCount>0){
+      const segmentCountEl=document.createElement('span');
+      segmentCountEl.className='session-lineage-count';
+      const segmentLabel=t('session_meta_segments', segmentCount);
+      segmentCountEl.textContent=segmentLabel;
+      segmentCountEl.title=segmentLabel;
+      titleRow.appendChild(segmentCountEl);
+    }
     const childCount=typeof s._child_session_count==='number'?s._child_session_count:(Array.isArray(s._child_sessions)?s._child_sessions.length:0);
     if(childCount>0){
       const childCountEl=document.createElement('span');
@@ -2503,6 +2625,13 @@ function renderSessionListFromCache(){
       title.replaceWith(inp);
       setTimeout(()=>{inp.focus();inp.select();},10);
     };
+    // Expose the rename closure on the row so the three-dot action menu
+    // (`_openSessionActionMenu`, defined elsewhere) can trigger it without
+    // needing a separate DOM hunt or a duplicate copy of all this state
+    // (oldTitle / applyTitle / finish / _renamingSid bookkeeping). The
+    // double-click path on this element still calls startRename() directly.
+    el._startRename = startRename;
+    el.dataset.sid = s.session_id;
 
     // (Project dot is appended above, between title and timestamp, so it
     // sits outside the truncating title span and stays visible.)
@@ -2908,7 +3037,7 @@ function _showProjectContextMenu(e, proj, chip){
   const renameItem=document.createElement('div');
   renameItem.textContent='Rename';
   renameItem.style.cssText='padding:7px 14px;cursor:pointer;font-size:13px;color:var(--text);';
-  renameItem.onmouseenter=()=>renameItem.style.background='var(--hover)';
+  renameItem.onmouseenter=()=>renameItem.style.background='var(--hover-bg)';
   renameItem.onmouseleave=()=>renameItem.style.background='';
   renameItem.onclick=()=>{menu.remove();_startProjectRename(proj,chip);};
   menu.appendChild(renameItem);
@@ -2937,7 +3066,7 @@ function _showProjectContextMenu(e, proj, chip){
   const delItem=document.createElement('div');
   delItem.textContent='Delete';
   delItem.style.cssText='padding:7px 14px;cursor:pointer;font-size:13px;color:var(--error,#e94560);';
-  delItem.onmouseenter=()=>delItem.style.background='var(--hover)';
+  delItem.onmouseenter=()=>delItem.style.background='var(--hover-bg)';
   delItem.onmouseleave=()=>delItem.style.background='';
   delItem.onclick=()=>{menu.remove();_confirmDeleteProject(proj);};
   menu.appendChild(delItem);

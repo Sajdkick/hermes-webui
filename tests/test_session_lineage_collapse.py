@@ -126,6 +126,51 @@ console.log(JSON.stringify({{sid: collapsed[0].session_id, containsRoot: _sessio
     assert '"containsRoot":true' in result
 
 
+def test_stale_optimistic_compression_tips_collapse_even_when_parents_are_visible():
+    """Active compression can leave old streaming tips in browser memory.
+
+    The server/index already expose only the latest tip, but client-side
+    optimistic rows from previous tips may still include parent_session_id links.
+    Those rows carry explicit lineage metadata and must collapse as one sidebar
+    conversation instead of rendering 7/8/9/10 segment duplicates.
+    """
+    js = SESSIONS_JS_PATH.read_text(encoding="utf-8")
+    source = f"""
+const src = {js!r};
+function extractFunc(name) {{
+  const re = new RegExp('function\\\\s+' + name + '\\\\s*\\\\(');
+  const start = src.search(re);
+  if (start < 0) throw new Error(name + ' not found');
+  let i = src.indexOf('{{', start);
+  let depth = 1; i++;
+  while (depth > 0 && i < src.length) {{
+    if (src[i] === '{{') depth++;
+    else if (src[i] === '}}') depth--;
+    i++;
+  }}
+  return src.slice(start, i);
+}}
+eval(extractFunc('_sessionTimestampMs'));
+eval(extractFunc('_isChildSession'));
+eval(extractFunc('_sessionLineageKey'));
+eval(extractFunc('_collapseSessionLineageForSidebar'));
+const sessions = [
+  {{session_id:'seg7', title:'Graphify', parent_session_id:'seg6', message_count:1141, updated_at:70, last_message_at:70, _lineage_root_id:'root', _compression_segment_count:7}},
+  {{session_id:'seg8', title:'Graphify', parent_session_id:'seg7', message_count:1254, updated_at:80, last_message_at:80, _lineage_root_id:'root', _compression_segment_count:8, pending_user_message:'old'}},
+  {{session_id:'seg9', title:'Graphify', parent_session_id:'seg8', message_count:1404, updated_at:90, last_message_at:90, _lineage_root_id:'root', _compression_segment_count:9, active_stream_id:'old-stream'}},
+  {{session_id:'seg10', title:'Graphify', parent_session_id:'seg9', message_count:1490, updated_at:100, last_message_at:100, _lineage_root_id:'root', _compression_segment_count:10, active_stream_id:'current-stream'}},
+];
+const collapsed = _collapseSessionLineageForSidebar(sessions);
+console.log(JSON.stringify(collapsed));
+"""
+    collapsed = json.loads(_run_node(source))
+    assert [row["session_id"] for row in collapsed] == ["seg10"]
+    assert collapsed[0]["_lineage_collapsed_count"] == 4
+    assert collapsed[0]["_compression_segment_count"] == 10
+    assert [seg["session_id"] for seg in collapsed[0]["_lineage_segments"]] == ["seg10", "seg9", "seg8", "seg7"]
+
+
+
 def test_sidebar_attaches_child_sessions_to_collapsed_hidden_parent_lineage():
     js = SESSIONS_JS_PATH.read_text(encoding="utf-8")
     source = f"""
@@ -162,3 +207,94 @@ console.log(JSON.stringify(attached));
     assert [row["session_id"] for row in rows] == ["tip"]
     assert rows[0]["_child_session_count"] == 1
     assert rows[0]["_child_sessions"][0]["session_id"] == "child"
+
+
+def test_cross_surface_webui_child_session_remains_top_level_when_parent_is_messaging():
+    js = SESSIONS_JS_PATH.read_text(encoding="utf-8")
+    source = f"""
+const src = {js!r};
+function extractFunc(name) {{
+  const re = new RegExp('function\\\\s+' + name + '\\\\s*\\\\(');
+  const start = src.search(re);
+  if (start < 0) throw new Error(name + ' not found');
+  let i = src.indexOf('{{', start);
+  let depth = 1; i++;
+  while (depth > 0 && i < src.length) {{
+    if (src[i] === '{{') depth++;
+    else if (src[i] === '}}') depth--;
+    i++;
+  }}
+  return src.slice(start, i);
+}}
+eval(extractFunc('_isChildSession'));
+eval(extractFunc('_sidebarLineageKeyForRow'));
+eval(extractFunc('_attachChildSessionsToSidebarRows'));
+const collapsed = [{{session_id:'telegram_parent', title:'Telegram parent', source_label:'Telegram'}}];
+const raw = [
+  collapsed[0],
+  {{
+    session_id:'webui_tip',
+    title:'Current WebUI continuation',
+    parent_session_id:'telegram_parent',
+    relationship_type:'child_session',
+    parent_source:'telegram',
+    source_label:'Telegram',
+    session_source:'messaging',
+    raw_source:'telegram',
+    _cross_surface_child_session:true,
+  }},
+];
+const rows = _attachChildSessionsToSidebarRows(collapsed, raw);
+console.log(JSON.stringify(rows));
+"""
+    rows = json.loads(_run_node(source))
+    assert [row["session_id"] for row in rows] == ["telegram_parent", "webui_tip"]
+    assert rows[1].get("_orphan_child_session") is True
+    assert "_child_sessions" not in rows[0]
+
+
+def test_session_segment_count_prefers_visible_collapsed_backend_and_materialized_counts():
+    js = SESSIONS_JS_PATH.read_text(encoding="utf-8")
+    source = f"""
+const src = {js!r};
+function extractFunc(name) {{
+  const re = new RegExp('function\\\\s+' + name + '\\\\s*\\\\(');
+  const start = src.search(re);
+  if (start < 0) throw new Error(name + ' not found');
+  let i = src.indexOf('{{', start);
+  let depth = 1; i++;
+  while (depth > 0 && i < src.length) {{
+    if (src[i] === '{{') depth++;
+    else if (src[i] === '}}') depth--;
+    i++;
+  }}
+  return src.slice(start, i);
+}}
+eval(extractFunc('_sessionSegmentCount'));
+const cases = [
+  _sessionSegmentCount({{_lineage_collapsed_count:3, _compression_segment_count:2, _lineage_segments:[{{session_id:'a'}}, {{session_id:'b'}}]}}),
+  _sessionSegmentCount({{_compression_segment_count:25}}),
+  _sessionSegmentCount({{_lineage_segments:[{{session_id:'tip'}}, {{session_id:'root'}}, {{session_id:'older'}}]}}),
+  _sessionSegmentCount({{_lineage_collapsed_count:1, _compression_segment_count:1}}),
+  _sessionSegmentCount(null),
+];
+console.log(JSON.stringify(cases));
+"""
+    assert json.loads(_run_node(source)) == [3, 25, 3, 0, 0]
+
+
+def test_sidebar_lineage_segment_badge_is_passive_and_localized():
+    js = SESSIONS_JS_PATH.read_text(encoding="utf-8")
+    css = (REPO_ROOT / "static" / "style.css").read_text(encoding="utf-8")
+    assert "session-lineage-count" in js
+    assert "const segmentCount=_sessionSegmentCount(s);" in js
+    assert "t('session_meta_segments', segmentCount)" in js
+    assert "titleRow.appendChild(segmentCountEl);" in js
+    assert ".session-lineage-count{" in css
+    assert "cursor:default" in css
+    assert "session-lineage-count,.session-lineage-segments,.session-lineage-segment" not in js
+
+
+def test_session_meta_segments_locale_key_is_defined_for_sidebar_locales():
+    i18n = (REPO_ROOT / "static" / "i18n.js").read_text(encoding="utf-8")
+    assert i18n.count("session_meta_segments:") >= i18n.count("session_meta_messages:")

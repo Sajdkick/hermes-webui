@@ -93,6 +93,17 @@ def test_kanban_board_has_native_css_classes():
     assert "overflow-x:auto" in COMPACT_STYLE
 
 
+def test_kanban_main_view_scrolls_when_task_preview_is_tall():
+    """The app shell keeps body overflow hidden, so the Kanban main view
+    must own vertical scrolling. Otherwise a selected task with a long body
+    can push the board below the viewport with no way to reach it.
+    """
+    assert re.search(
+        r"main\.main\.showing-kanban\s*>\s*#mainKanban\s*\{[^}]*display:flex;[^}]*overflow-y:auto;",
+        COMPACT_STYLE,
+    ), "Kanban main view must expose a vertical scrollbar when detail content is taller than the viewport"
+
+
 def test_kanban_i18n_keys_exist_in_every_locale_block():
     locale_blocks = re.findall(r"\n\s*([a-z]{2}(?:-[A-Z]{2})?): \{(.*?)\n\s*\},", I18N, flags=re.S)
     assert len(locale_blocks) >= 8
@@ -164,6 +175,7 @@ def test_kanban_dashboard_parity_i18n_keys_exist():
         "kanban_only_mine",
         "kanban_bulk_action",
         "kanban_nudge_dispatcher",
+        "kanban_work_queue_hint",
         "kanban_stats",
         "kanban_worker_log",
         "kanban_block",
@@ -205,6 +217,17 @@ def test_kanban_ui_parity_polish_adds_card_metadata_quick_actions_and_swimlanes(
     assert "javascript:" not in PANELS.lower()
 
 
+def test_kanban_lifecycle_controls_do_not_offer_manual_running_start():
+    assert "quickKanbanCardAction(event,'${id}','running')" not in PANELS
+    assert "kanban_card_start" not in PANELS
+    assert "kanban_card_start" not in I18N
+    assert '<option value="running">Running</option>' not in INDEX
+    assert "Cannot set status to 'running' directly" not in PANELS
+    assert "kanban_work_queue_hint" in PANELS
+    assert "Preview dispatcher" in INDEX
+    assert "Nudge dispatcher" not in INDEX
+
+
 def test_kanban_ui_parity_polish_css_and_i18n_exist():
     for selector in (
         ".kanban-profile-lanes",
@@ -219,7 +242,7 @@ def test_kanban_ui_parity_polish_css_and_i18n_exist():
     ):
         assert selector in STYLE
     locale_blocks = re.findall(r"\n\s*([a-z]{2}(?:-[A-Z]{2})?): \{(.*?)\n\s*\},", I18N, flags=re.S)
-    required_keys = ["kanban_lanes_by_profile", "kanban_card_start", "kanban_card_complete", "kanban_card_archive", "kanban_unassigned"]
+    required_keys = ["kanban_lanes_by_profile", "kanban_card_complete", "kanban_card_archive", "kanban_unassigned", "kanban_work_queue_hint"]
     missing = [
         f"{locale}:{key}"
         for locale, body in locale_blocks

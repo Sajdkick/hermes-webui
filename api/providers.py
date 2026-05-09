@@ -10,14 +10,22 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
+import sys
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from api.config import (
     _PROVIDER_DISPLAY,
     _PROVIDER_MODELS,
+    _get_label_for_model,
+    _models_from_live_provider_ids,
+    _read_live_provider_model_ids,
+    _read_visible_codex_cache_model_ids,
     _save_yaml_config_file,
     get_config,
     invalidate_models_cache,
@@ -28,6 +36,53 @@ logger = logging.getLogger(__name__)
 
 _OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
 _PROVIDER_QUOTA_TIMEOUT_SECONDS = 3.0
+_ACCOUNT_USAGE_SUBPROCESS_TIMEOUT_SECONDS = 35.0
+_ACCOUNT_USAGE_PROVIDERS = frozenset({"openai-codex", "anthropic"})
+_ACCOUNT_USAGE_SUBPROCESS_CODE = r"""
+import json
+import sys
+
+from agent.account_usage import fetch_account_usage
+
+
+def _iso(value):
+    if value in (None, ""):
+        return None
+    if hasattr(value, "isoformat"):
+        text = value.isoformat()
+        return text.replace("+00:00", "Z")
+    text = str(value).strip()
+    return text or None
+
+
+def _snapshot_payload(snapshot):
+    if snapshot is None:
+        return None
+    windows = []
+    for window in getattr(snapshot, "windows", ()) or ():
+        windows.append({
+            "label": str(getattr(window, "label", "") or ""),
+            "used_percent": getattr(window, "used_percent", None),
+            "reset_at": _iso(getattr(window, "reset_at", None)),
+            "detail": getattr(window, "detail", None),
+        })
+    return {
+        "provider": str(getattr(snapshot, "provider", "") or ""),
+        "source": str(getattr(snapshot, "source", "") or ""),
+        "title": str(getattr(snapshot, "title", "") or ""),
+        "plan": getattr(snapshot, "plan", None),
+        "windows": windows,
+        "details": list(getattr(snapshot, "details", ()) or ()),
+        "available": bool(getattr(snapshot, "available", bool(windows))),
+        "unavailable_reason": getattr(snapshot, "unavailable_reason", None),
+        "fetched_at": _iso(getattr(snapshot, "fetched_at", None)),
+    }
+
+
+provider = sys.argv[1]
+api_key = sys.argv[2] or None
+print(json.dumps(_snapshot_payload(fetch_account_usage(provider, api_key=api_key))))
+"""
 
 # SECTION: Provider ↔ env var mapping
 
@@ -358,13 +413,205 @@ def _sanitize_openrouter_quota(payload: Any) -> dict[str, int | float | None]:
     }
 
 
+def _isoformat_utc(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    text = str(value).strip()
+    return text or None
+
+
+def _serialize_account_usage_snapshot(snapshot: Any) -> dict[str, Any] | None:
+    if snapshot is None:
+        return None
+    windows: list[dict[str, Any]] = []
+    for window in getattr(snapshot, "windows", ()) or ():
+        label = str(getattr(window, "label", "") or "").strip()
+        if not label:
+            continue
+        used_percent = _quota_number(getattr(window, "used_percent", None))
+        remaining_percent = None
+        if used_percent is not None:
+            remaining_percent = max(0.0, min(100.0, 100.0 - float(used_percent)))
+        windows.append({
+            "label": label,
+            "used_percent": used_percent,
+            "remaining_percent": remaining_percent,
+            "reset_at": _isoformat_utc(getattr(window, "reset_at", None)),
+            "detail": str(getattr(window, "detail", "") or "").strip() or None,
+        })
+
+    details = [
+        str(detail).strip()
+        for detail in (getattr(snapshot, "details", ()) or ())
+        if str(detail).strip()
+    ]
+    plan = str(getattr(snapshot, "plan", "") or "").strip() or None
+    unavailable_reason = str(getattr(snapshot, "unavailable_reason", "") or "").strip() or None
+    return {
+        "provider": str(getattr(snapshot, "provider", "") or "").strip() or None,
+        "source": str(getattr(snapshot, "source", "") or "").strip() or None,
+        "title": str(getattr(snapshot, "title", "") or "").strip() or "Account limits",
+        "plan": plan,
+        "windows": windows,
+        "details": details,
+        "available": bool(getattr(snapshot, "available", bool(windows or details))) and not unavailable_reason,
+        "unavailable_reason": unavailable_reason,
+        "fetched_at": _isoformat_utc(getattr(snapshot, "fetched_at", None)),
+    }
+
+
+def _agent_fetch_account_usage(provider: str, *, base_url: str | None = None, api_key: str | None = None) -> Any:
+    from agent.account_usage import fetch_account_usage
+
+    return fetch_account_usage(provider, base_url=base_url, api_key=api_key)
+
+
+def _account_usage_subprocess_env(home: Path, provider: str, api_key: str | None) -> dict[str, str]:
+    env = dict(os.environ)
+    env["HERMES_HOME"] = str(Path(home))
+
+    # Profile .env values should affect only the child quota probe, not the
+    # WebUI process-global environment. This is especially important for
+    # Anthropic account usage, where the agent resolver reads OAuth/API tokens
+    # from environment variables.
+    for key, value in _load_env_file(Path(home) / ".env").items():
+        if value:
+            env[key] = value
+
+    env_var = _PROVIDER_ENV_VAR.get((provider or "").strip().lower())
+    if env_var and api_key:
+        env[env_var] = api_key
+
+    try:
+        from api.config import _AGENT_DIR
+    except Exception:
+        _AGENT_DIR = None
+    pythonpath_parts: list[str] = []
+    if _AGENT_DIR:
+        pythonpath_parts.append(str(_AGENT_DIR))
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    if existing_pythonpath:
+        pythonpath_parts.append(existing_pythonpath)
+    if pythonpath_parts:
+        env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
+    return env
+
+
+def _account_usage_payload_to_snapshot(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return None
+    windows = tuple(
+        SimpleNamespace(
+            label=window.get("label"),
+            used_percent=window.get("used_percent"),
+            reset_at=window.get("reset_at"),
+            detail=window.get("detail"),
+        )
+        for window in (payload.get("windows") or ())
+        if isinstance(window, dict)
+    )
+    return SimpleNamespace(
+        provider=payload.get("provider"),
+        source=payload.get("source"),
+        title=payload.get("title"),
+        plan=payload.get("plan"),
+        windows=windows,
+        details=tuple(payload.get("details") or ()),
+        available=bool(payload.get("available")),
+        unavailable_reason=payload.get("unavailable_reason"),
+        fetched_at=payload.get("fetched_at"),
+    )
+
+
+def _agent_fetch_account_usage_for_home(provider: str, home: Path, *, api_key: str | None = None) -> Any:
+    try:
+        from api.config import PYTHON_EXE
+    except Exception:
+        PYTHON_EXE = sys.executable or "python3"
+
+    try:
+        proc = subprocess.run(
+            [PYTHON_EXE, "-c", _ACCOUNT_USAGE_SUBPROCESS_CODE, provider, api_key or ""],
+            env=_account_usage_subprocess_env(home, provider, api_key),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=_ACCOUNT_USAGE_SUBPROCESS_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        logger.debug("Account usage probe for %s timed out", provider)
+        return None
+    except Exception:
+        logger.debug("Account usage probe for %s failed to launch", provider, exc_info=True)
+        return None
+
+    if proc.returncode != 0:
+        logger.debug("Account usage probe for %s exited with status %s", provider, proc.returncode)
+        return None
+    try:
+        payload = json.loads((proc.stdout or "").strip() or "null")
+    except json.JSONDecodeError:
+        logger.debug("Account usage probe for %s returned invalid JSON", provider)
+        return None
+    return _account_usage_payload_to_snapshot(payload)
+
+
+def _fetch_account_usage_with_profile_context(provider: str) -> Any:
+    home = _get_hermes_home()
+    api_key = _get_provider_api_key(provider)
+    try:
+        return _agent_fetch_account_usage_for_home(provider, home, api_key=api_key)
+    except Exception:
+        logger.debug("Failed to fetch account usage for %s", provider, exc_info=True)
+        return None
+
+
+def _provider_account_usage_status(provider: str, display_name: str) -> dict[str, Any]:
+    snapshot = _fetch_account_usage_with_profile_context(provider)
+    account_limits = _serialize_account_usage_snapshot(snapshot)
+    if account_limits and account_limits.get("available"):
+        return {
+            "ok": True,
+            "provider": provider,
+            "display_name": display_name,
+            "supported": True,
+            "status": "available",
+            "label": account_limits.get("title") or "Account limits",
+            "quota": None,
+            "account_limits": account_limits,
+            "message": f"{display_name} account limits loaded.",
+        }
+
+    reason = ""
+    if account_limits:
+        reason = str(account_limits.get("unavailable_reason") or "").strip()
+    message = (
+        f"{display_name} account limits are unavailable. {reason}"
+        if reason
+        else f"{display_name} account limits are unavailable. Confirm provider authentication and try again."
+    )
+    return {
+        "ok": False,
+        "provider": provider,
+        "display_name": display_name,
+        "supported": True,
+        "status": "unavailable",
+        "quota": None,
+        "account_limits": account_limits,
+        "message": message,
+    }
+
+
 def get_provider_quota(provider_id: str | None = None) -> dict[str, Any]:
     """Return sanitized quota/rate-limit status for the active provider.
 
-    Issue #706 starts conservatively with OpenRouter's documented key endpoint.
-    OpenAI/Anthropic only expose per-call headers; until the WebUI captures those
-    response headers, report a clear unsupported/follow-up state rather than
-    inventing stale or guessed quota numbers.
+    OpenRouter keeps its documented key endpoint. OAuth-backed account usage
+    providers reuse Hermes Agent's /usage account-limits abstraction so WebUI
+    stays aligned with CLI/Gateway provider semantics.
     """
     provider = (provider_id or _active_provider_id() or "").strip().lower()
     if not provider:
@@ -379,6 +626,9 @@ def get_provider_quota(provider_id: str | None = None) -> dict[str, Any]:
         }
 
     display_name = _PROVIDER_DISPLAY.get(provider, provider.replace("-", " ").title())
+    if provider in _ACCOUNT_USAGE_PROVIDERS:
+        return _provider_account_usage_status(provider, display_name)
+
     if provider != "openrouter":
         detail = "OpenAI/Anthropic rate-limit headers are a follow-up once WebUI captures provider response metadata."
         return {
@@ -577,6 +827,24 @@ def get_providers() -> dict[str, Any]:
 
         models = list(_PROVIDER_MODELS.get(pid, []))
         models_total = len(models)
+        # OpenAI Codex account catalogs drift independently from WebUI releases.
+        # The model picker already prefers hermes_cli + Codex local cache for
+        # this provider (the agent's `provider_model_ids("openai-codex")` filters
+        # IDs with `supported_in_api: false`, but Codex CLI still surfaces some
+        # of those — notably `gpt-5.3-codex-spark` from #1680 — in its picker).
+        # Merge both sources here so the providers card matches the picker
+        # exactly. Static entries remain the offline fallback when live
+        # discovery and the local Codex cache are both unavailable. (#1807
+        # follow-up to v0.51.19 #1812.)
+        if pid == "openai-codex":
+            live_ids = _read_live_provider_model_ids("openai-codex")
+            for mid in _read_visible_codex_cache_model_ids():
+                if mid not in live_ids:
+                    live_ids.append(mid)
+            live_models = _models_from_live_provider_ids(pid, live_ids)
+            if live_models:
+                models = live_models
+                models_total = len(models)
         # Nous Portal: prefer the live catalog so the providers card matches
         # the dropdown picker (#1538). Same fallback shape as the static-only
         # case below — when hermes_cli is unavailable or its lookup raises,

@@ -130,3 +130,52 @@ def test_eager_checkpointed_user_is_not_duplicated_after_agent_result():
         msg_text="repeat me",
     )
     assert [m["role"] for m in merged] == ["user", "assistant"]
+
+
+def test_deferred_turn_is_materialized_when_agent_returns_assistant_only_delta():
+    merged = streaming._merge_display_messages_after_agent_result(
+        previous_display=[
+            {"role": "user", "content": "older prompt"},
+            {"role": "assistant", "content": "older answer"},
+        ],
+        previous_context=[
+            {"role": "user", "content": "older prompt"},
+            {"role": "assistant", "content": "older answer"},
+        ],
+        result_messages=[
+            {"role": "user", "content": "older prompt"},
+            {"role": "assistant", "content": "older answer"},
+            {"role": "assistant", "content": "current answer"},
+        ],
+        msg_text="latest prompt",
+    )
+
+    assert [m["role"] for m in merged] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert [m["content"] for m in merged[-2:]] == ["latest prompt", "current answer"]
+
+
+def test_llm_title_generated_survives_save_and_load(_isolate_state):
+    s = Session(
+        session_id="generated_title",
+        title="Useful generated title",
+        messages=[{"role": "user", "content": "first prompt"}],
+        llm_title_generated=True,
+    )
+    s.save()
+
+    loaded = Session.load("generated_title")
+
+    assert loaded.llm_title_generated is True
+    on_disk = json.loads(s.path.read_text(encoding="utf-8"))
+    assert on_disk["llm_title_generated"] is True
+
+
+def test_session_constructor_preserves_loaded_llm_title_generated_kwarg():
+    s = Session(session_id="loaded_generated_title", llm_title_generated=True)
+
+    assert s.llm_title_generated is True
