@@ -99,6 +99,8 @@
       const playStatus=String(source.playStatus||source.status||'ready').trim()||'ready';
       const playNeedsRepair=source.playNeedsRepair===true;
       const playFallbackError=String(source.playFallbackError||'').trim();
+      const playPrimaryAction=String(source.playPrimaryAction||'').trim();
+      const playRepairAvailable=source.playRepairAvailable===true;
       const terminalTarget=source.terminalTarget&&typeof source.terminalTarget==='object'
         ? cloneCompat(source.terminalTarget)
         : {
@@ -122,6 +124,8 @@
         playStatus:playStatus,
         playNeedsRepair:playNeedsRepair,
         playFallbackError:playFallbackError,
+        playPrimaryAction:playPrimaryAction,
+        playRepairAvailable:playRepairAvailable,
         terminalTarget:terminalTarget,
         payload:{
           projectId,

@@ -237,6 +237,7 @@ def test_legacy_bridge_merges_done_notifications_from_runs():
         const vm = require('vm');
 
         const bridgeSource = fs.readFileSync('static/ops-legacy-agent-bridge.js', 'utf8');
+        const recent = new Date().toISOString();
         const api = async (path) => {
           if (path === '/api/ops/notifications/pending'){
             return {
@@ -259,7 +260,7 @@ def test_legacy_bridge_merges_done_notifications_from_runs():
                 id: 'run-1',
                 status: 'succeeded',
                 summary: 'Task completed successfully.',
-                completedAt: '2026-05-05T10:00:00Z',
+                completedAt: recent,
                 sessionId: 'session-2',
                 projectId: 'project-1',
                 taskId: 'task-2',
@@ -342,6 +343,8 @@ def test_legacy_bridge_preserves_play_notifications_and_opens_them_locally():
                 playStatus: 'ready',
                 playNeedsRepair: false,
                 playFallbackError: '',
+                playRepairAvailable: true,
+                playPrimaryAction: 'open-inspect',
                 terminalTarget: { projectId: 'project-1', taskId: '', sessionId: '', runId: '' },
                 updatedAt: '2026-05-06T06:00:00Z'
               }]
@@ -383,6 +386,9 @@ def test_legacy_bridge_preserves_play_notifications_and_opens_them_locally():
         }
         if (play.inspectUrl !== '/play-project/project-1/app'){
           throw new Error('Play notification did not preserve the inspect URL.');
+        }
+        if (play.playRepairAvailable !== true || play.playPrimaryAction !== 'open-inspect'){
+          throw new Error('Play notification repair/action metadata was not preserved.');
         }
 
         vm.runInContext(playSource, context);
@@ -428,6 +434,139 @@ def test_legacy_bridge_preserves_play_notifications_and_opens_them_locally():
         await dashboard.openPlayNotification(play.id);
         if (assigned[0] !== '/play-project/project-1/app'){
           throw new Error('Play notification did not open using the local inspect URL.');
+        }
+        console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_play_notification_click_starts_build_and_opens_inspect_url():
+    script = textwrap.dedent(
+        """
+        (async () => {
+        const fs = require('fs');
+        const vm = require('vm');
+
+        const playSource = fs.readFileSync('static/ops-legacy-play.js', 'utf8');
+        const notificationsSource = fs.readFileSync('static/ops-legacy-notifications.js', 'utf8');
+        const assigned = [];
+        const toasts = [];
+        const startCalls = [];
+        let statusCalls = 0;
+        const note = {
+          id: 'play:project-1:run-1:stale:now',
+          kind: 'play',
+          message: 'Play handoff needs attention.',
+          project_id: 'project-1',
+          inspectUrl: '',
+          playStatus: 'stale',
+          playNeedsRepair: true,
+          playRepairAvailable: true,
+          playPrimaryAction: 'start-inspect',
+          terminalTarget: { projectId: 'project-1', runId: 'run-1', taskId: 'task-1', sessionId: 'session-1' },
+        };
+        const context = {
+          console,
+          URL,
+          setTimeout: (fn) => { fn(); return 1; },
+          window: {},
+        };
+        context.window = context;
+        context.location = { href: 'http://example.com/ops', assign: (url) => assigned.push(url) };
+        vm.createContext(context);
+        vm.runInContext(notificationsSource, context);
+        const notificationDashboard = context.window.HermesOpsModules.notifications.bindDashboard({
+          OPS: { notifications: [note], projects: [], sessions: [] },
+          AgentBridge: {
+            notifications: { list: async () => ({ notifications: [note] }), dismiss: async () => ({}) },
+            runs: { list: async () => ({ runs: [] }) },
+            sessions: { list: async () => ({ sessions: [] }) },
+          },
+          renderCurrentOpsView: () => {},
+          showToast: (message) => { toasts.push(message); },
+          esc: (value) => String(value ?? ''),
+          svg: {},
+          openProjectDetail: async () => { throw new Error('render should not open project'); },
+          openOpsSession: async () => { throw new Error('render should not open session'); },
+          openRunTarget: async () => { throw new Error('render should not open run'); },
+          loadRunDetail: async () => ({}),
+          loadOpsRuns: async () => [],
+          windowRef: context.window,
+          documentRef: { activeElement: null },
+        });
+        const rendered = notificationDashboard.renderNotification(note);
+        if (!rendered.includes('data-ops-action="open-play-notification"')){
+          throw new Error('Stale Play notification did not render with the Play open action.');
+        }
+        if (rendered.includes('data-ops-action="open-notification-target"')){
+          throw new Error('Stale Play notification still renders the chat/project target action.');
+        }
+        vm.runInContext(playSource, context);
+        const dashboard = context.window.HermesOpsModules.play.bindDashboard({
+          OPS: {
+            notifications: [note],
+            playStatusByProject: {},
+            playBusyByProject: {},
+            playConfigByProject: {},
+            playLogsByProject: {},
+            playSnapshotsByProject: {},
+            playScreenshotsByProject: {},
+          },
+          api: async () => ({}),
+          projectUrl: (projectId, suffix='') => '/api/ops/projects/' + projectId + suffix,
+          renderCurrentOpsView: () => {},
+          showToast: (message) => { toasts.push(message); },
+          esc: (value) => String(value ?? ''),
+          svg: {},
+          AgentBridge: {
+            play: {
+              status: async () => {
+                statusCalls += 1;
+                if (statusCalls === 1){
+                  return { projectId: 'project-1', configured: true, valid: true, configExists: true, status: 'idle', running: false, ready: false, inspectUrl: '' };
+                }
+                return { projectId: 'project-1', configured: true, valid: true, configExists: true, status: 'ready', running: true, ready: true, inspectUrl: '/play-project/project-1/app' };
+              },
+              config: async () => ({}),
+              logs: async () => ({ text: '' }),
+              start: async (projectId, payload) => {
+                startCalls.push({ projectId, payload });
+                return { status: { projectId, configured: true, valid: true, configExists: true, status: 'building', running: true, ready: false, inspectUrl: '' } };
+              },
+              restart: async () => ({}),
+              stop: async () => ({}),
+            },
+            runtime: {},
+          },
+          loadNotifications: async () => [],
+          playInspectOverlayUrl: (item) => item && item.inspectUrl ? item.inspectUrl : '',
+          openProjectDetail: async () => { throw new Error('should not open the project/chat target'); },
+          notificationById: (id) => id === note.id ? note : null,
+          notificationTarget: (item) => item && item.terminalTarget ? item.terminalTarget : {},
+          playNotificationFallbackError: (item) => item && item.playFallbackError || '',
+          windowRef: context.window,
+        });
+
+        await dashboard.openPlayNotification(note.id);
+        if (assigned[0] !== '/play-project/project-1/app'){
+          throw new Error('Play notification did not open the inspect URL after starting Play.');
+        }
+        if (startCalls.length !== 1 || startCalls[0].projectId !== 'project-1'){
+          throw new Error('Play notification did not start Play for the project.');
+        }
+        if (startCalls[0].payload.runId !== 'run-1' || startCalls[0].payload.taskId !== 'task-1' || startCalls[0].payload.sessionId !== 'session-1'){
+          throw new Error('Play notification did not preserve terminal target metadata when starting Play.');
         }
         console.log('ok');
         })().catch((error) => {

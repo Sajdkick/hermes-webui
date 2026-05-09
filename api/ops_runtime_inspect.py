@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -16,6 +18,40 @@ RUNTIME_INSPECT_DIR = ".hermes/ops/runtime-inspect"
 DEFAULT_TIMEOUT_MS = 10 * 60 * 1000
 COMMAND_TIMEOUT_SECONDS = 15 * 60
 VALID_RECORD_KINDS = {"snapshot", "screenshot", "action"}
+HERMES_RUNTIME_ENV = "HERMES_RUNTIME_BIN"
+
+
+def _default_hermes_runtime_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    repo_root = Path(__file__).resolve().parents[1]
+    candidates.append(repo_root / "bin" / "hermes-runtime")
+    home = os.environ.get("HOME", "").strip()
+    if home:
+        candidates.append(Path(home) / ".local" / "bin" / "hermes-runtime")
+    return candidates
+
+
+def _resolve_hermes_runtime_command() -> str:
+    override = os.environ.get(HERMES_RUNTIME_ENV, "").strip()
+    if override:
+        override_path = Path(override).expanduser()
+        if override_path.is_file() and os.access(override_path, os.X_OK):
+            return str(override_path)
+        raise OpsRuntimeInspectError(f"{HERMES_RUNTIME_ENV} does not point to an executable hermes-runtime binary.", 500)
+
+    path_match = shutil.which("hermes-runtime")
+    if path_match:
+        return path_match
+
+    for candidate in _default_hermes_runtime_candidates():
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+
+    raise OpsRuntimeInspectError(
+        "hermes-runtime is not installed on the server. Expected it on PATH or at one of: "
+        + ", ".join(str(candidate) for candidate in _default_hermes_runtime_candidates()),
+        500,
+    )
 
 
 class OpsRuntimeInspectError(Exception):
@@ -173,8 +209,8 @@ def _failure_status(message: str) -> int:
     return 500
 
 
-def _run_ct_runtime_json(project_path: Path, args: list[str]) -> dict:
-    command = ["ct-runtime", *args, "--json"]
+def _run_hermes_runtime_json(project_path: Path, args: list[str]) -> dict:
+    command = [_resolve_hermes_runtime_command(), *args, "--json"]
     try:
         completed = subprocess.run(
             command,
@@ -185,9 +221,9 @@ def _run_ct_runtime_json(project_path: Path, args: list[str]) -> dict:
             timeout=COMMAND_TIMEOUT_SECONDS,
         )
     except FileNotFoundError as exc:
-        raise OpsRuntimeInspectError("ct-runtime is not installed on the server.", 500) from exc
+        raise OpsRuntimeInspectError("Resolved hermes-runtime binary could not be executed.", 500) from exc
     except subprocess.TimeoutExpired as exc:
-        raise OpsRuntimeInspectError("ct-runtime inspect command timed out.", 504) from exc
+        raise OpsRuntimeInspectError("hermes-runtime inspect command timed out.", 504) from exc
     stdout = (completed.stdout or "").strip()
     stderr = (completed.stderr or "").strip()
     if completed.returncode != 0:
@@ -201,16 +237,16 @@ def _run_ct_runtime_json(project_path: Path, args: list[str]) -> dict:
         if not message:
             message = _text(stderr or stdout, limit=4000)
         if not message:
-            message = "ct-runtime inspect command failed."
+            message = "hermes-runtime inspect command failed."
         raise OpsRuntimeInspectError(message, _failure_status(message))
     if not stdout:
-        raise OpsRuntimeInspectError("ct-runtime inspect command returned no JSON payload.", 500)
+        raise OpsRuntimeInspectError("hermes-runtime inspect command returned no JSON payload.", 500)
     try:
         payload = json.loads(stdout)
     except json.JSONDecodeError as exc:
-        raise OpsRuntimeInspectError("ct-runtime inspect command returned invalid JSON.", 500) from exc
+        raise OpsRuntimeInspectError("hermes-runtime inspect command returned invalid JSON.", 500) from exc
     if not isinstance(payload, dict):
-        raise OpsRuntimeInspectError("ct-runtime inspect command returned an unexpected payload.", 500)
+        raise OpsRuntimeInspectError("hermes-runtime inspect command returned an unexpected payload.", 500)
     return payload
 
 
@@ -316,7 +352,7 @@ def capture_snapshot(project_id: str, body: dict | None) -> dict:
     args = ["inspect", "reset-state" if reset_state else "url"]
     if reset_state:
         _append_flag(args, "--timeout", _format_duration_ms(timeout_ms or DEFAULT_TIMEOUT_MS))
-    result = _run_ct_runtime_json(project_path, args)
+    result = _run_hermes_runtime_json(project_path, args)
     path = _record_path(project_path, "snapshot")
     record = _normalize_snapshot_record(project_id, result, reset_state=reset_state, record_path=path)
     _write_record(path, record)
@@ -343,7 +379,7 @@ def capture_screenshot(project_id: str, body: dict | None) -> dict:
     timeout_ms = _positive_int(payload.get("timeoutMs"), label="timeoutMs")
     _append_flag(args, "--timeout", _format_duration_ms(timeout_ms))
     _append_flag(args, "--file-name", _text(payload.get("fileName"), limit=256))
-    result = _run_ct_runtime_json(project_path, args)
+    result = _run_hermes_runtime_json(project_path, args)
     path = _record_path(project_path, "screenshot")
     record = _normalize_screenshot_record(project_id, result, path)
     _write_record(path, record)
@@ -385,7 +421,7 @@ def run_action(project_id: str, body: dict | None) -> dict:
             json.dump({"actions": script.get("actions") or []}, handle, ensure_ascii=False, indent=2)
             script_path = Path(handle.name)
         _append_flag(args, "--script-file", str(script_path))
-        result = _run_ct_runtime_json(project_path, args)
+        result = _run_hermes_runtime_json(project_path, args)
     finally:
         if script_path and script_path.exists():
             script_path.unlink(missing_ok=True)

@@ -242,6 +242,10 @@ def read_body(handler) -> dict:
         raise ValueError(f'Request body too large ({length} bytes, max {MAX_BODY_BYTES})')
     raw = handler.rfile.read(length) if length else b'{}'
     try:
+        setattr(handler, "_raw_body", raw)
+    except Exception:
+        pass
+    try:
         return _json.loads(raw)
     except Exception:
         return {}

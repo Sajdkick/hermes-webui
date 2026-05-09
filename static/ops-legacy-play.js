@@ -373,24 +373,126 @@
       windowRef.location.assign(url);
     }
 
+    function playOpenDelay(ms){
+      return new Promise(resolve=>{
+        const timer=(windowRef&&windowRef.setTimeout)||setTimeout;
+        timer(resolve,ms);
+      });
+    }
+
+    function playStatusReadyUrl(status){
+      const url=typeof playInspectOverlayUrl==='function'?playInspectOverlayUrl({inspectUrl:status&&status.inspectUrl}):'';
+      const state=String(status&&status.status||'').toLowerCase();
+      return url&&(status&&status.ready===true||state==='ready')?url:'';
+    }
+
+    function playStatusCanBuild(status){
+      if(!status)return false;
+      const configured=status.configured===true||status.configExists===true||status.configAvailable===true;
+      const valid=status.valid===true||status.configValid===true;
+      return configured&&valid;
+    }
+
+    function playNotificationStartPayload(note,target){
+      const cleanTarget={
+        projectId:String(target&&target.projectId||''),
+        runId:String(target&&target.runId||''),
+        taskId:String(target&&target.taskId||''),
+        sessionId:String(target&&target.sessionId||''),
+      };
+      return {
+        runId:cleanTarget.runId,
+        taskId:cleanTarget.taskId,
+        sessionId:cleanTarget.sessionId,
+        terminalTarget:cleanTarget,
+        notificationId:String(note&&note.id||''),
+      };
+    }
+
+    async function waitForPlayReadyUrl(projectId,initialStatus){
+      let status=initialStatus||null;
+      for(let attempt=0;attempt<90;attempt+=1){
+        const url=playStatusReadyUrl(status);
+        if(url)return url;
+        const state=String(status&&status.status||'').toLowerCase();
+        if(status&&(state==='failed'||state==='stopped'))return '';
+        if(attempt>0)await playOpenDelay(2000);
+        status=await refreshProjectPlayStatus(projectId,{render:true});
+      }
+      return '';
+    }
+
+    async function showPlayOpenFailure(projectId,status){
+      const state=String(status&&status.status||'').toLowerCase();
+      if(state==='failed'){
+        await showProjectPlayLogs(projectId).catch(()=>null);
+        showToast('Play build failed. Opened logs for details.',3600);
+      }else{
+        showToast('Play is still building. Open it from the project when it is ready.',3600);
+      }
+    }
+
+    async function openPlayNotification(notificationId){
+      const id=String(notificationId||'').trim();
+      const note=typeof notificationById==='function'?notificationById(id):null;
+      const directUrl=typeof playInspectOverlayUrl==='function'?playInspectOverlayUrl(note||{}):'';
+      if(directUrl){
+        windowRef.location.assign(directUrl);
+        return;
+      }
+      const target=typeof notificationTarget==='function'?notificationTarget(note):{};
+      const projectId=String(target&&target.projectId||note&&note.project_id||'').trim();
+      if(!projectId){
+        showToast('Project metadata is missing for this Play notification.',3200);
+        return;
+      }
+      let status=await refreshProjectPlayStatus(projectId,{render:true});
+      let url=playStatusReadyUrl(status);
+      if(url){
+        windowRef.location.assign(url);
+        return;
+      }
+      if(!playStatusCanBuild(status)){
+        if(typeof openProjectDetail==='function')await openProjectDetail(projectId);
+        await showProjectPlayConfig(projectId).catch(()=>null);
+        showToast('Play is not configured correctly for this project.',3600);
+        return;
+      }
+      const state=String(status&&status.status||'').toLowerCase();
+      const running=!!(status&&(status.running||['queued','building','starting'].includes(state)));
+      if(!running){
+        OPS.playBusyByProject[projectId]='start';
+        renderCurrentOpsView();
+        try{
+          const res=await AgentBridgeRef.play.start(projectId,playNotificationStartPayload(note,target));
+          if(res&&res.status){
+            status=res.status;
+            OPS.playStatusByProject[projectId]=status;
+          }
+          delete OPS.playLogsByProject[projectId];
+          showToast('Play pipeline started. Opening when ready…',2600);
+        }finally{
+          delete OPS.playBusyByProject[projectId];
+          renderCurrentOpsView();
+        }
+      }else{
+        showToast('Play is building. Opening when ready…',2600);
+      }
+      url=await waitForPlayReadyUrl(projectId,status);
+      if(url){
+        windowRef.location.assign(url);
+        return;
+      }
+      const latest=await refreshProjectPlayStatus(projectId,{render:true}).catch(()=>status);
+      await showPlayOpenFailure(projectId,latest||status);
+    }
+
     async function showProjectPlayLogs(projectId){
       const id=String(projectId||'').trim();
       if(!id)return;
       const data=await AgentBridgeRef.play.logs(id,1200);
       OPS.playLogsByProject[id]=data||{text:''};
       renderCurrentOpsView();
-    }
-
-    function openPlayNotification(notificationId){
-      const id=String(notificationId||'').trim();
-      const note=typeof notificationById==='function'?notificationById(id):null;
-      const url=typeof playInspectOverlayUrl==='function'?playInspectOverlayUrl(note||{}):'';
-      if(!url){
-        showToast('No Play inspect URL found for this notification.',3000);
-        return Promise.resolve();
-      }
-      windowRef.location.assign(url);
-      return Promise.resolve();
     }
 
     async function repairPlayNotification(notificationId){

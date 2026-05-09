@@ -448,7 +448,8 @@
       if(!id)return null;
       if(note&&note.kind==='play'){
         const action=String(note&&note.playPrimaryAction||'').trim();
-        if(action==='open-inspect'&&playNotificationInspectUrl(note)){
+        const inspectUrl=playNotificationInspectUrl(note);
+        if(inspectUrl||action==='open-inspect'||action==='start-inspect'||action==='restart-inspect'||playNotificationNeedsRepair(note)){
           return {action:'open-play-notification',label:'Play'};
         }
         if(action==='open-project'&&notificationHasProjectTarget(note)){

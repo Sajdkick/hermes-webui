@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 from api.config import STATE_DIR
@@ -238,6 +239,31 @@ def _clarify_notification(linkage: dict, task_context: dict, pending: dict, pend
     }
 
 
+def _notification_epoch(value: Any) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    raw = _text(value, limit=128)
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _recent_notification_time(value: Any, *, max_age_seconds: int = 24 * 60 * 60) -> bool:
+    stamp = _notification_epoch(value)
+    if stamp is None:
+        return False
+    return stamp >= time.time() - max_age_seconds
+
+
 def _play_notification(project: dict, status: dict) -> dict | None:
     if not isinstance(status, dict):
         return None
@@ -315,6 +341,94 @@ def _play_notification(project: dict, status: dict) -> dict | None:
     }
 
 
+def _play_handoff_fallback_notification(project: dict, run: dict) -> dict | None:
+    if not isinstance(run, dict):
+        return None
+    metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    triggered_at = _text(metadata.get("playPipelineTriggeredAt"), limit=128)
+    attempted_at = _text(metadata.get("playPipelineAttemptedAt"), limit=128)
+    status_at = triggered_at or attempted_at
+    if not status_at or not _recent_notification_time(status_at):
+        return None
+    project_id = _text(project.get("id") or run.get("projectId") or run.get("project_id"), limit=256)
+    run_project_id = _text(run.get("projectId") or run.get("project_id"), limit=256)
+    if not project_id or run_project_id != project_id:
+        return None
+    run_id = _text(run.get("id"), limit=256)
+    if not run_id:
+        return None
+    project_name = _text(project.get("name") or project.get("fullName") or run_project_id, limit=256) or project_id
+    task_id = _text(run.get("taskId") or run.get("task_id"), limit=256)
+    session_id = _text(run.get("sessionId") or run.get("session_id"), limit=256)
+    task = {"id": task_id, "text": _text(metadata.get("taskText"), limit=512), "grade": "green", "done": False}
+    if task_id:
+        try:
+            resolved = ops_projects.get_ops_project_task(project_id, task_id)
+            resolved_task = resolved.get("task") if isinstance(resolved, dict) else None
+            if isinstance(resolved_task, dict):
+                task = {
+                    "id": _text(resolved_task.get("id"), limit=256),
+                    "text": _text(resolved_task.get("text"), limit=512),
+                    "grade": _text(resolved_task.get("grade"), limit=64) or "green",
+                    "done": resolved_task.get("done") is True,
+                }
+        except Exception:
+            pass
+    play_pipeline_status = _text(metadata.get("playPipelineStatus"), limit=64) or "unknown"
+    play_pipeline_error = _text(metadata.get("playPipelineError"), limit=512)
+    if play_pipeline_error:
+        play_status = "failed"
+        fallback_error = play_pipeline_error
+        message = "Play handoff failed. Open the project to repair the Play configuration."
+    else:
+        play_status = "stale"
+        fallback_error = (
+            "Play was triggered for this completed run, but there is no active Play pipeline state. "
+            f"Last recorded status: {play_pipeline_status}."
+        )
+        message = "Play handoff needs attention. Open the project to restart or inspect Play."
+    return {
+        "notificationKey": ":".join(["play", project_id, run_id, play_status, status_at]),
+        "kind": "play",
+        "message": message,
+        "project": {"id": project_id, "name": project_name},
+        "task": task,
+        "sessionId": session_id,
+        "terminalTarget": {
+            "projectId": project_id,
+            "taskId": task_id,
+            "sessionId": session_id,
+            "runId": run_id,
+        },
+        "inspectUrl": "",
+        "playStatus": play_status,
+        "playNeedsRepair": True,
+        "playRepairAvailable": True,
+        "playPrimaryAction": "start-inspect",
+        "playFallbackError": fallback_error,
+        "createdAt": status_at,
+        "updatedAt": status_at,
+    }
+
+
+def _play_handoff_fallback_notifications(project: dict, status: dict) -> list[dict]:
+    state = _text((status or {}).get("status"), limit=64).lower()
+    if (status or {}).get("ready") is True or state in {"queued", "building", "starting", "ready", "failed"}:
+        return []
+    try:
+        from api import ops_runs
+
+        runs = ops_runs._read_runs()
+    except Exception:
+        return []
+    notifications = []
+    for run in runs:
+        item = _play_handoff_fallback_notification(project, run)
+        if item:
+            notifications.append(item)
+    return notifications
+
+
 def list_pending_notifications(project_id: str | None = None) -> dict:
     if project_id:
         projects = [ops_projects.get_ops_project(project_id)]
@@ -342,11 +456,15 @@ def list_pending_notifications(project_id: str | None = None) -> dict:
         try:
             from api import play_pipeline
 
-            play_notification = _play_notification(project, play_pipeline.build_project_play_status(project["id"]))
+            play_status = play_pipeline.build_project_play_status(project["id"])
+            play_notification = _play_notification(project, play_status)
         except Exception:
+            play_status = {}
             play_notification = None
         if play_notification:
             notifications.append(play_notification)
+        else:
+            notifications.extend(_play_handoff_fallback_notifications(project, play_status))
 
     notifications.sort(
         key=lambda item: (

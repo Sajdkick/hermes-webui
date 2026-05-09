@@ -292,6 +292,55 @@ def test_phase7_play_proxy_dispatch_rewrites_html_and_locations(monkeypatch, tmp
     assert calls[-1][1] == "POST"
 
 
+def test_phase7_play_proxy_forwards_body_already_consumed_by_main_post_route(monkeypatch):
+    from api import play_pipeline
+    from api.routes_ops_play import handle_post
+
+    project_id = "project-1"
+    state = play_pipeline.PlayPipelineState(project_id=project_id)
+    state.running = True
+    state.ready = True
+    state.allocated_port = 4321
+    state.allocated_port_host = "127.0.0.1"
+    monkeypatch.setitem(play_pipeline._PIPELINES, project_id, state)
+
+    raw_body = b'{"0":{"json":{"username":"","password":""}}}'
+    calls = []
+
+    class FakeResponse:
+        status = 200
+        headers = _Headers({"Content-Type": "application/json"})
+
+        def read(self):
+            return b'{"ok":true}'
+
+    def fake_urlopen(request, timeout=30):
+        calls.append((request.full_url, request.get_method(), request.data))
+        return FakeResponse()
+
+    monkeypatch.setattr(play_pipeline.urlrequest, "urlopen", fake_urlopen)
+
+    handler = _FakeHandler(command="POST")
+    handler._raw_body = raw_body
+    handler.rfile = io.BytesIO(b"")
+    handler.headers["Content-Length"] = str(len(raw_body))
+
+    assert handle_post(
+        handler,
+        urlparse(f"http://example.com/play-project/{project_id}/api/trpc/auth.login?batch=1"),
+        {},
+    ) is True
+
+    assert handler.status == 200
+    assert calls == [
+        (
+            "http://127.0.0.1:4321/api/trpc/auth.login?batch=1",
+            "POST",
+            raw_body,
+        )
+    ]
+
+
 def test_phase7_ops_ui_renders_play_panel_and_actions():
     script = textwrap.dedent(
         """

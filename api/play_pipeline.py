@@ -1094,8 +1094,12 @@ def handle_play_proxy_request(handler, project_id: str, target_path: str, parsed
 
     body = None
     if method.upper() not in {"GET", "HEAD"}:
-        length = int(handler.headers.get("Content-Length", 0) or 0)
-        body = handler.rfile.read(length) if length else b""
+        raw_body = getattr(handler, "_raw_body", None)
+        if isinstance(raw_body, bytes):
+            body = raw_body
+        else:
+            length = int(handler.headers.get("Content-Length", 0) or 0)
+            body = handler.rfile.read(length) if length else b""
     headers = {}
     for key, value in handler.headers.items():
         lowered = key.lower()

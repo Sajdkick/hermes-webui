@@ -1,0 +1,2137 @@
+#!/usr/bin/env node
+
+const fs = require('node:fs');
+const path = require('node:path');
+
+const DEFAULT_PLAY_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
+
+const GENERAL_HELP_TEXT = `hermes-runtime
+
+Usage:
+  hermes-runtime doctor [--json]
+  hermes-runtime status [--json]
+  hermes-runtime play status [--json]
+  hermes-runtime play start [--wait] [--restart] [--timeout <duration>] [--json]
+  hermes-runtime play stop [--json]
+  hermes-runtime play logs [--limit <n>] [--json]
+  hermes-runtime inspect url [--json]
+  hermes-runtime inspect reset-state [--timeout <duration>] [--json]
+  hermes-runtime inspect request-review [message] [--url <url>] [--timeout <duration>] [--json]
+  hermes-runtime inspect request-image-review <image-path> [message] [--json]
+  hermes-runtime inspect guide request [message] [--url <url>] [--timeout <duration>] [--json]
+  hermes-runtime inspect guide list [--query <text>] [--limit <n>] [--json]
+  hermes-runtime inspect guide show <guide-id> [--json]
+  hermes-runtime inspect guide update <guide-id> (--content <text> | --content-file <path>) [--json]
+  hermes-runtime inspect guide delete <guide-id> [--json]
+  hermes-runtime inspect screenshot [--url <url>] [--session <id>] [--keep-session] [--selector <css-or-text>] [--nth <index>] [--width <px>] [--height <px>] [--delay <duration>] [--timeout <duration>] [--file-name <name>] [--out <path>] [--json]
+  hermes-runtime inspect action [--url <url>] [--session <id>] [--keep-session] [--capture-screenshot] [--width <px>] [--height <px>] [--delay <duration>] [--timeout <duration>] [--file-name <name>] [--out <path>] [--gather <report-id>] [--compare <previous-or-bundle-path>] (--script <json> | --script-file <path>) [--json]
+  hermes-runtime inspect run-script <path> [--url <url>] [--session <id>] [--keep-session] [--width <px>] [--height <px>] [--delay <duration>] [--timeout <duration>] [--gather <report-id>] [--compare <previous-or-bundle-path>] [--adapter <path>] [--json]
+  hermes-runtime inspect scenario list [--json]
+  hermes-runtime inspect scenario run <scenario-id> [--url <url>] [--session <id>] [--keep-session] [--width <px>] [--height <px>] [--delay <duration>] [--timeout <duration>] [--gather <report-id>] [--compare <previous-or-bundle-path>] [--adapter <path>] [--json]
+  hermes-runtime inspect session close <session-id> [--json]
+  hermes-runtime gather create [--title <text>] [--json]
+  hermes-runtime gather show [report-id] [--json]
+
+\`hermes-runtime doctor --json\` is the first command to run when Play/inspect notifications or runtime access look broken.
+Durations accept ms, s, or m suffixes. Examples: 1500ms, 20s, 4m.
+If Play status is \`queued\`, another project build is ahead of you in the global build queue.
+Treat \`queued\` as in progress: keep waiting, re-check \`hermes-runtime play status\`, or use a longer \`hermes-runtime play start --wait --timeout <duration>\`.
+If Play config enables inspect auth (for example \`inspect.auth.strategy=debug-login\` or \`AUTH_DEBUG_LOGIN=true\`),
+\`hermes-runtime inspect screenshot\` primes a temporary authenticated browser session before capture.
+\`hermes-runtime inspect action\` uses the same inspect browser to run scripted wait/click/drag/evaluate/assert/media/frame steps, including canvas-relative pointer input and inline video/canvas capture.
+\`hermes-runtime inspect action\` selectors accept CSS and Playwright-style \`text=\` queries with normalized whitespace matching.
+\`hermes-runtime inspect action --capture-screenshot\` captures the mutated page before that browser session is torn down.
+\`hermes-runtime inspect screenshot --selector <query>\` scrolls a matched element into view before capturing just that region.
+\`hermes-runtime inspect reset-state\` ensures Play is ready, resolves the active inspect/browser URLs, and runs the optional project-local \`inspect.reset\` hook for clearing seeded debug state.
+\`hermes-runtime inspect request-image-review <image-path> "..."\` sends a saved screenshot or frame to the user in an inline image-review modal so they can answer without opening the live session.
+\`hermes-runtime inspect request-review "..."\` is better when the user needs to inspect the live Play session, click around, or review motion instead of a single still image.
+\`hermes-runtime inspect request-image-review\` is usually the fastest follow-up after \`inspect screenshot\` or \`inspect action --capture-screenshot\` when you want human confirmation of a visual change.
+\`hermes-runtime inspect action --help\` prints the action schema plus valid JSON examples for common flows.
+\`hermes-runtime inspect run-script\` executes a project-local Node automation script with helper methods that reuse the managed inspect session instead of launching a separate browser.
+\`hermes-runtime inspect scenario list\` discovers project-local scenarios under \`.hermes/inspect-scenarios\`, \`.hermes/inspect/scenarios\`, and \`inspect-scenarios\`.
+\`hermes-runtime inspect scenario run\` executes a named scenario with the same managed inspect helpers plus optional adapter loading, gather snapshots, and previous-run bundle comparison.
+\`--keep-session\` returns a persistent inspect session id that later \`inspect action\` / \`inspect screenshot\` commands can reuse.
+\`hermes-runtime inspect guide request\` asks the user to demonstrate a flow in Play and saves a reusable project-scoped guide recording.
+\`hermes-runtime inspect guide list\`, \`hermes-runtime inspect guide show\`, and \`hermes-runtime inspect guide delete\` let the agent review and clean up project-scoped guide recordings.
+\`hermes-runtime inspect guide update\` saves a clearer maintained guide next to the raw recording so future agents can follow written steps and pitfalls before consulting the event log.
+`;
+
+const INSPECT_SCREENSHOT_HELP_TEXT = `hermes-runtime inspect screenshot
+
+Usage:
+  hermes-runtime inspect screenshot [--url <url>] [--session <id>] [--keep-session] [--selector <css-or-text>] [--nth <index>] [--width <px>] [--height <px>] [--delay <duration>] [--timeout <duration>] [--file-name <name>] [--out <path>] [--json]
+
+Behavior:
+  Captures either the full page or a targeted element from the managed inspect browser.
+  When \`--selector\` is set, hermes-runtime scrolls the matched element into view and captures only that region.
+  Selectors accept CSS and Playwright-style \`text=\` queries with normalized whitespace matching.
+  Use \`--session <id>\` to reuse an existing inspect session instead of launching a new browser.
+
+Examples:
+  hermes-runtime inspect screenshot --url /app/video-generation
+  hermes-runtime inspect screenshot --url /app/video-generation --selector 'figure.preview'
+  hermes-runtime inspect screenshot --session inspect-session-123 --selector 'text=Latest Generated Frame' --out latest-frame.png
+  hermes-runtime inspect screenshot --url /app/scenarios --selector 'canvas' --nth 1 --file-name scenario-canvas
+`;
+
+const INSPECT_ACTION_HELP_TEXT = `hermes-runtime inspect action
+
+Usage:
+  hermes-runtime inspect action [--url <url>] [--session <id>] [--keep-session] [--capture-screenshot] [--width <px>] [--height <px>] [--delay <duration>] [--timeout <duration>] [--file-name <name>] [--out <path>] [--gather <report-id>] [--compare <previous-or-bundle-path>] (--script <json> | --script-file <path>) [--json]
+
+Action schema:
+  Each step must be a JSON object with a \`type\`.
+  Common fields:
+    - \`selector\`: CSS selector or \`text=...\` query
+    - \`nth\`: zero-based match index
+    - \`delayMs\`: extra delay after a step
+    - \`timeoutMs\`: polling timeout for wait steps
+
+Supported action types:
+  - \`wait\`
+  - \`waitForSelector\`
+  - \`waitForSelectorVisible\`
+  - \`scrollIntoView\`
+  - \`waitForMediaReady\`
+  - \`setMediaTime\`
+  - \`click\`
+  - \`drag\`
+  - \`evaluate\`
+  - \`assert\`
+  - \`captureElementScreenshot\`
+  - \`captureVideoFrame\`
+  - \`captureCanvasFrame\`
+  - \`captureFrames\`
+
+Compact schema examples:
+  1. Wait for visible UI, scroll to it, then capture the element:
+     [
+       { "type": "waitForSelectorVisible", "selector": "figure.preview" },
+       { "type": "scrollIntoView", "selector": "figure.preview" },
+       { "type": "captureElementScreenshot", "selector": "figure.preview", "label": "latest-frame" }
+     ]
+
+  2. Click a button and assert app state:
+     [
+       { "type": "click", "selector": "text=Generate Video" },
+       { "type": "assert", "expression": "window.__videoStarted === true", "message": "video generation should start" }
+     ]
+
+  3. Capture a canvas-relative drag workflow:
+     [
+       { "type": "waitForSelector", "selector": "canvas" },
+       { "type": "drag", "selector": "canvas", "fromX": 20, "fromY": 20, "toX": 180, "toY": 120 }
+     ]
+
+  4. Capture a specific video frame:
+     [
+       { "type": "waitForMediaReady", "selector": "video.preview", "readyState": 4 },
+       { "type": "setMediaTime", "selector": "video.preview", "timeSeconds": 2.5 },
+       { "type": "captureVideoFrame", "selector": "video.preview", "label": "poster" }
+     ]
+
+  5. Capture progress snapshots over time:
+     [
+       { "type": "captureFrames", "selector": "video.preview", "times": [1, 2, 3], "label": "sequence" }
+     ]
+
+Notes:
+  \`waitForSelector\` defaults to visible state. Use \`waitForSelectorVisible\` when you want the intent to be explicit in logs and scripts.
+  \`evaluate\` and \`assert\` require \`expression\`, not \`value\` or \`code\`.
+  \`--gather latest\` snapshots the latest gather report into the action bundle after the run finishes.
+  \`--compare previous\` compares the emitted inspect bundle against the last bundle for the same action script.
+  Use \`--keep-session\` to keep the browser open and reuse it with later \`inspect action\` or \`inspect screenshot\` commands.
+  If you need human eyes on the final still image, follow up with \`hermes-runtime inspect request-image-review <saved-image-path> "What should the user verify?"\`.
+`;
+
+const INSPECT_REQUEST_REVIEW_HELP_TEXT = `hermes-runtime inspect request-review
+
+Usage:
+  hermes-runtime inspect request-review [message] [--url <url>] [--timeout <duration>] [--json]
+
+Behavior:
+  Sends a review notification that opens the live Play session for manual inspection.
+  Use this when the user needs to click around, inspect motion, or verify behavior that a single screenshot would miss.
+
+Examples:
+  hermes-runtime inspect request-review "Please verify that the export flow still works from start to finish."
+  hermes-runtime inspect request-review "Please inspect the running app and tell me what still looks off." --url /app/editor
+`;
+
+const INSPECT_REQUEST_IMAGE_REVIEW_HELP_TEXT = `hermes-runtime inspect request-image-review
+
+Usage:
+  hermes-runtime inspect request-image-review <image-path> [message] [--json]
+
+Behavior:
+  Sends a saved screenshot or frame to the user in an inline image-review modal with your review question.
+  Prefer this right after \`hermes-runtime inspect screenshot\` or \`hermes-runtime inspect action --capture-screenshot\` when you want focused visual feedback without making the user open the full session.
+
+Examples:
+  hermes-runtime inspect screenshot --url /app/editor --file-name joint-alignment
+  hermes-runtime inspect request-image-review /tmp/joint-alignment.png "Does the joint alignment still look off?"
+  hermes-runtime inspect action --url /app/video-generation --capture-screenshot --file-name frame-check --script-file inspect-actions.json
+  hermes-runtime inspect request-image-review /tmp/frame-check.png "Is this generated frame acceptable now?"
+`;
+
+const INSPECT_RESET_STATE_HELP_TEXT = `hermes-runtime inspect reset-state
+
+Usage:
+  hermes-runtime inspect reset-state [--timeout <duration>] [--json]
+
+Behavior:
+  Ensures Play is ready, resolves the active inspect/public URL plus the browser-direct URL, then runs the optional project-local \`inspect.reset.command\` hook.
+  The hook receives environment such as \`HERMES_PLAY_PUBLIC_URL\`, \`HERMES_PLAY_BROWSER_URL\`, \`HERMES_PLAY_RUN_ID\`, and \`HERMES_PLAY_STAGE=inspect-reset\`.
+
+Examples:
+  hermes-runtime inspect reset-state
+  hermes-runtime inspect reset-state --timeout 45s
+`;
+
+const INSPECT_RUN_SCRIPT_HELP_TEXT = `hermes-runtime inspect run-script
+
+Usage:
+  hermes-runtime inspect run-script <path> [--url <url>] [--session <id>] [--keep-session] [--width <px>] [--height <px>] [--delay <duration>] [--timeout <duration>] [--gather <report-id>] [--compare <previous-or-bundle-path>] [--adapter <path>] [--json]
+
+Behavior:
+  Executes a project-local Node module inside the managed inspect session context.
+  The module receives helpers for \`inspectAction\`, \`inspectScreenshot\`, \`gatherShow\`, \`checkpoint\`, and \`closeInspectSession\`.
+  When a project-local inspect adapter exists, the module also receives \`adapter\` methods for semantic app actions.
+
+Adapter discovery:
+  hermes-runtime looks for adapters in:
+    - .hermes/inspect-adapter.(js|cjs|mjs)
+    - .hermes/inspect/adapter.(js|cjs|mjs)
+    - inspect-adapter.(js|cjs|mjs)
+    - inspect/adapter.(js|cjs|mjs)
+  Use \`--adapter <path>\` to override the default lookup.
+
+Examples:
+  hermes-runtime inspect run-script scripts/export-review.js --url /app/export-review
+  hermes-runtime inspect run-script scripts/graft-check.js --session inspect-session-123 --keep-session
+  hermes-runtime inspect run-script scripts/graft-check.js --gather latest --compare previous
+  hermes-runtime inspect run-script scripts/graft-check.js --adapter .hermes/inspect-adapter.js
+`;
+
+const INSPECT_SCENARIO_HELP_TEXT = `hermes-runtime inspect scenario
+
+Usage:
+  hermes-runtime inspect scenario list [--json]
+  hermes-runtime inspect scenario run <scenario-id> [--url <url>] [--session <id>] [--keep-session] [--width <px>] [--height <px>] [--delay <duration>] [--timeout <duration>] [--gather <report-id>] [--compare <previous-or-bundle-path>] [--adapter <path>] [--json]
+
+Behavior:
+  Lists and runs project-local scenario modules from:
+    - .hermes/inspect-scenarios
+    - .hermes/inspect/scenarios
+    - inspect-scenarios
+  Scenario modules receive the same helper context as \`inspect run-script\`.
+
+Examples:
+  hermes-runtime inspect scenario list
+  hermes-runtime inspect scenario run graft-host-bridge-check --url /app/editor
+  hermes-runtime inspect scenario run graft-host-bridge-check --gather latest --compare previous
+  hermes-runtime inspect scenario run graft-host-bridge-check --adapter .hermes/inspect-adapter.js
+`;
+
+function getHelpText(positionals = []) {
+  const [command, subcommand] = Array.isArray(positionals) ? positionals : [];
+  if (command === 'inspect' && subcommand === 'action') {
+    return INSPECT_ACTION_HELP_TEXT;
+  }
+  if (command === 'inspect' && subcommand === 'reset-state') {
+    return INSPECT_RESET_STATE_HELP_TEXT;
+  }
+  if (command === 'inspect' && subcommand === 'run-script') {
+    return INSPECT_RUN_SCRIPT_HELP_TEXT;
+  }
+  if (command === 'inspect' && subcommand === 'scenario') {
+    return INSPECT_SCENARIO_HELP_TEXT;
+  }
+  if (command === 'inspect' && subcommand === 'screenshot') {
+    return INSPECT_SCREENSHOT_HELP_TEXT;
+  }
+  if (command === 'inspect' && subcommand === 'request-review') {
+    return INSPECT_REQUEST_REVIEW_HELP_TEXT;
+  }
+  if (command === 'inspect' && subcommand === 'request-image-review') {
+    return INSPECT_REQUEST_IMAGE_REVIEW_HELP_TEXT;
+  }
+  return GENERAL_HELP_TEXT;
+}
+
+function fail(message, exitCode = 1) {
+  if (message) {
+    process.stderr.write(`${message}\n`);
+  }
+  process.exit(exitCode);
+}
+
+function parseDurationMs(value, label) {
+  if (value == null || value === '') return undefined;
+  const trimmed = String(value).trim();
+  const match = trimmed.match(/^(\d+)(ms|s|m)?$/i);
+  if (!match) {
+    fail(`${label} must be a number or a duration like 1500ms, 20s, or 4m.`);
+  }
+  const amount = Number.parseInt(match[1], 10);
+  const unit = (match[2] || 'ms').toLowerCase();
+  if (unit === 'm') return amount * 60_000;
+  if (unit === 's') return amount * 1000;
+  return amount;
+}
+
+function parseInteger(value, label) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) {
+    fail(`${label} must be an integer.`);
+  }
+  return parsed;
+}
+
+function parseArgs(argv) {
+  const flags = {};
+  const positionals = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--help' || arg === '-h') {
+      flags.help = true;
+      continue;
+    }
+    if (arg === '--json') {
+      flags.json = true;
+      continue;
+    }
+    if (arg === '--wait') {
+      flags.wait = true;
+      continue;
+    }
+    if (arg === '--restart') {
+      flags.restart = true;
+      continue;
+    }
+    if (arg === '--keep-session') {
+      flags.keepSession = true;
+      continue;
+    }
+    if (arg === '--capture-screenshot') {
+      flags.captureScreenshot = true;
+      continue;
+    }
+    const valueFlags = new Set([
+      '--timeout',
+      '--limit',
+      '--query',
+      '--url',
+      '--session',
+      '--width',
+      '--height',
+      '--delay',
+      '--file-name',
+      '--out',
+      '--selector',
+      '--nth',
+      '--gather',
+      '--compare',
+      '--adapter',
+      '--title',
+      '--content',
+      '--content-file',
+      '--script',
+      '--script-file',
+    ]);
+    if (valueFlags.has(arg)) {
+      const next = argv[index + 1];
+      if (next == null) {
+        fail(`${arg} requires a value.`);
+      }
+      flags[arg.slice(2).replace(/-([a-z])/g, (_match, char) => char.toUpperCase())] = next;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('--')) {
+      fail(`Unknown option: ${arg}`);
+    }
+    positionals.push(arg);
+  }
+  return { flags, positionals };
+}
+
+const RUNTIME_API_BASE_URL_ENV_NAMES = [
+  'HERMES_WEBUI_RUNTIME_API_BASE_URL',
+  'HERMES_RUNTIME_API_BASE_URL',
+];
+const REQUEST_INPUT_URL_ENV_NAMES = [
+  'HERMES_WEBUI_REQUEST_INPUT_URL',
+  'HERMES_REQUEST_INPUT_URL',
+];
+const REQUEST_INPUT_TOKEN_ENV_NAMES = [
+  'HERMES_WEBUI_REQUEST_INPUT_TOKEN',
+  'HERMES_REQUEST_INPUT_TOKEN',
+];
+
+function firstRuntimeEnvValue(names, env = process.env) {
+  for (const name of names) {
+    const value = String(env[name] || '').trim();
+    if (value) {
+      return { name, value };
+    }
+  }
+  return { name: '', value: '' };
+}
+
+function normalizeBaseUrl(value = '') {
+  const trimmed = String(value || '').trim();
+  return trimmed ? trimmed.replace(/\/+$/g, '') : '';
+}
+
+function deriveRuntimeApiBaseUrl(env = process.env) {
+  const direct = firstRuntimeEnvValue(RUNTIME_API_BASE_URL_ENV_NAMES, env);
+  if (direct.value) return normalizeBaseUrl(direct.value);
+
+  const requestInputUrl = firstRuntimeEnvValue(REQUEST_INPUT_URL_ENV_NAMES, env);
+  if (!requestInputUrl.value) return '';
+  try {
+    const parsed = new URL(requestInputUrl.value);
+    parsed.pathname = parsed.pathname.replace(/\/request-input$/, '/runtime');
+    return normalizeBaseUrl(parsed.toString());
+  } catch (error) {
+    return '';
+  }
+}
+
+function buildRuntimeContextDiagnostics(env = process.env) {
+  const directApi = firstRuntimeEnvValue(RUNTIME_API_BASE_URL_ENV_NAMES, env);
+  const requestInputUrl = firstRuntimeEnvValue(REQUEST_INPUT_URL_ENV_NAMES, env);
+  const requestToken = firstRuntimeEnvValue(REQUEST_INPUT_TOKEN_ENV_NAMES, env);
+  const apiBaseUrl = deriveRuntimeApiBaseUrl(env);
+  const missing = [];
+  if (!apiBaseUrl) missing.push('runtime API base URL');
+  if (!requestToken.value) missing.push('request-input token');
+  const recommendations = [];
+  if (!apiBaseUrl) {
+    recommendations.push(`Set ${RUNTIME_API_BASE_URL_ENV_NAMES[0]} or ${REQUEST_INPUT_URL_ENV_NAMES[0]} inside the launched Hermes WebUI agent/session.`);
+  }
+  if (!requestToken.value) {
+    recommendations.push(`Set ${REQUEST_INPUT_TOKEN_ENV_NAMES[0]} inside the launched Hermes WebUI agent/session.`);
+  }
+  if (directApi.name === 'HERMES_RUNTIME_API_BASE_URL' || requestInputUrl.name === 'HERMES_REQUEST_INPUT_URL' || requestToken.name === 'HERMES_REQUEST_INPUT_TOKEN') {
+    recommendations.push('This session uses backward-compatible HERMES_* env names; prefer HERMES_WEBUI_* names for WebUI runtime sessions to avoid future Hermes Agent namespace collisions.');
+  }
+  if (missing.length === 0) {
+    recommendations.push('Runtime session env is present. If commands still fail, check the transport/http error details from the failing command.');
+  }
+  return {
+    ok: missing.length === 0,
+    tool: 'hermes-runtime',
+    cwd: process.cwd(),
+    node: process.version,
+    executable: process.argv[1] || '',
+    runtimeApiBaseUrl: {
+      present: Boolean(apiBaseUrl),
+      source: directApi.name || (requestInputUrl.name ? `${requestInputUrl.name} (derived)` : ''),
+      value: apiBaseUrl,
+    },
+    requestInputUrl: {
+      present: Boolean(requestInputUrl.value),
+      source: requestInputUrl.name,
+      value: requestInputUrl.value,
+    },
+    requestInputToken: {
+      present: Boolean(requestToken.value),
+      source: requestToken.name,
+      value: requestToken.value ? '<set>' : '',
+    },
+    acceptedEnv: {
+      runtimeApiBaseUrl: RUNTIME_API_BASE_URL_ENV_NAMES,
+      requestInputUrl: REQUEST_INPUT_URL_ENV_NAMES,
+      requestInputToken: REQUEST_INPUT_TOKEN_ENV_NAMES,
+    },
+    missing,
+    recommendations,
+  };
+}
+
+function formatRuntimeContextDiagnostics(diagnostics) {
+  const lines = [];
+  lines.push(`hermes-runtime doctor: ${diagnostics.ok ? 'ready' : 'not ready'}`);
+  lines.push(`Cwd: ${diagnostics.cwd}`);
+  lines.push(`Node: ${diagnostics.node}`);
+  lines.push(`Runtime API: ${diagnostics.runtimeApiBaseUrl.present ? diagnostics.runtimeApiBaseUrl.value : 'missing'}${diagnostics.runtimeApiBaseUrl.source ? ` (${diagnostics.runtimeApiBaseUrl.source})` : ''}`);
+  lines.push(`Request input URL: ${diagnostics.requestInputUrl.present ? diagnostics.requestInputUrl.value : 'missing'}${diagnostics.requestInputUrl.source ? ` (${diagnostics.requestInputUrl.source})` : ''}`);
+  lines.push(`Request token: ${diagnostics.requestInputToken.present ? '<set>' : 'missing'}${diagnostics.requestInputToken.source ? ` (${diagnostics.requestInputToken.source})` : ''}`);
+  if (diagnostics.missing.length > 0) {
+    lines.push(`Missing: ${diagnostics.missing.join(', ')}`);
+  }
+  if (diagnostics.recommendations.length > 0) {
+    lines.push('Recommendations:');
+    for (const recommendation of diagnostics.recommendations) {
+      lines.push(`- ${recommendation}`);
+    }
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+function runtimeContextMissingMessage(diagnostics) {
+  const missing = Array.isArray(diagnostics?.missing) && diagnostics.missing.length > 0
+    ? diagnostics.missing.join(', ')
+    : 'runtime session env';
+  return `hermes-runtime only works inside a Hermes WebUI runtime session. Run \`hermes-runtime doctor --json\` for diagnostics. Missing: ${missing}.`;
+}
+
+function runtimeContextFromDiagnostics(diagnostics, env = process.env) {
+  return {
+    apiBaseUrl: diagnostics.runtimeApiBaseUrl.value,
+    requestToken: firstRuntimeEnvValue(REQUEST_INPUT_TOKEN_ENV_NAMES, env).value,
+  };
+}
+
+function resolveRuntimeContext() {
+  const diagnostics = buildRuntimeContextDiagnostics();
+  if (!diagnostics.ok) {
+    fail(runtimeContextMissingMessage(diagnostics));
+  }
+  return runtimeContextFromDiagnostics(diagnostics);
+}
+
+function renderMissingRuntimeContext(diagnostics, flags = {}) {
+  const message = runtimeContextMissingMessage(diagnostics);
+  if (flags.json) {
+    printJson({
+      ok: false,
+      kind: 'missing_runtime_context',
+      error: message,
+      message,
+      diagnostics,
+    });
+  } else {
+    process.stderr.write(`${message}\n`);
+  }
+}
+
+function handleDoctor(flags = {}) {
+  const diagnostics = buildRuntimeContextDiagnostics();
+  if (flags.json) {
+    printJson(diagnostics);
+    return;
+  }
+  process.stdout.write(formatRuntimeContextDiagnostics(diagnostics));
+}
+
+async function parseResponse(response) {
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch (error) {
+    payload = { raw: text };
+  }
+  return { ok: response.ok, status: response.status, payload, text };
+}
+
+function isLoopbackHostname(hostname = '') {
+  const normalized = typeof hostname === 'string' ? hostname.trim().toLowerCase() : '';
+  return normalized === '127.0.0.1' || normalized === 'localhost' || normalized === '::1';
+}
+
+function extractErrorMessage(result) {
+  const payload = result?.payload;
+  if (payload && typeof payload === 'object') {
+    if (typeof payload.error === 'string' && payload.error.trim()) {
+      return payload.error.trim();
+    }
+    if (typeof payload.message === 'string' && payload.message.trim()) {
+      return payload.message.trim();
+    }
+  }
+  const text = typeof result?.text === 'string' ? result.text.trim() : '';
+  if (text) return text;
+  return `Request failed with status ${result?.status || 500}.`;
+}
+
+function createRuntimeCliRequestError(failure) {
+  const message = failure?.message || failure?.error || 'Runtime request failed.';
+  const error = new Error(message);
+  error.name = 'RuntimeCliRequestError';
+  error.runtimeCliFailure = failure && typeof failure === 'object'
+    ? failure
+    : { error: message, message };
+  return error;
+}
+
+function buildRuntimeTransportFailure(error, { method = 'GET', url = '' } = {}) {
+  const parsedUrl = (() => {
+    try {
+      return new URL(url);
+    } catch {
+      return null;
+    }
+  })();
+  const cause = error?.cause && typeof error.cause === 'object' ? error.cause : null;
+  const causeMessage = typeof cause?.message === 'string' && cause.message.trim()
+    ? cause.message.trim()
+    : '';
+  const errorMessage = typeof error?.message === 'string' && error.message.trim()
+    ? error.message.trim()
+    : '';
+  const code = typeof cause?.code === 'string' && cause.code.trim()
+    ? cause.code.trim()
+    : (typeof error?.code === 'string' && error.code.trim() ? error.code.trim() : '');
+  const hostname = parsedUrl?.hostname || '';
+  const isLoopback = isLoopbackHostname(hostname);
+  const parsedPort = parsedUrl?.port ? Number.parseInt(parsedUrl.port, 10) : NaN;
+  let classification = 'transport_failure';
+  let assessment = isLoopback
+    ? 'Could not reach the local Hermes runtime API.'
+    : 'Could not reach the Hermes runtime API.';
+  let nextStep = isLoopback
+    ? 'If this is a sandboxed Codex session, rerun the command with escalated permissions. Otherwise verify that the runtime API is listening at the URL and retry.'
+    : 'Verify that the runtime API host is reachable and retry.';
+
+  if (code === 'EPERM' || code === 'EACCES') {
+    classification = 'local_permission_denied';
+    assessment = isLoopback
+      ? 'Local permission or sandbox restrictions blocked access to the runtime API.'
+      : 'Local permissions blocked access to the runtime API.';
+    nextStep = isLoopback
+      ? 'Rerun the command with escalated permissions or from an unsandboxed shell.'
+      : 'Check local network permissions and retry.';
+  } else if (code === 'ECONNREFUSED') {
+    classification = 'connection_refused';
+    assessment = 'The runtime API refused the connection.';
+    nextStep = 'Verify that the Hermes runtime is running and listening at the URL, then retry.';
+  } else if (code === 'ETIMEDOUT' || code === 'UND_ERR_CONNECT_TIMEOUT') {
+    classification = 'connection_timeout';
+    assessment = 'Timed out while connecting to the runtime API.';
+    nextStep = 'Verify that the runtime API is reachable and retry.';
+  } else if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
+    classification = 'dns_failure';
+    assessment = 'The runtime API host could not be resolved.';
+    nextStep = 'Check the runtime API host configuration and retry.';
+  }
+
+  return {
+    kind: 'transport_error',
+    error: 'Failed to reach the Hermes runtime API.',
+    message: `Failed to reach the Hermes runtime API at ${url}.`,
+    request: {
+      method,
+      url,
+    },
+    transport: {
+      classification,
+      code: code || null,
+      syscall: typeof cause?.syscall === 'string' && cause.syscall.trim() ? cause.syscall.trim() : null,
+      address: typeof cause?.address === 'string' && cause.address.trim()
+        ? cause.address.trim()
+        : (hostname || null),
+      port: Number.isFinite(Number(cause?.port))
+        ? Number(cause.port)
+        : (Number.isFinite(parsedPort) ? parsedPort : null),
+      isLoopback,
+      looksLikeSandboxRestriction: isLoopback && (code === 'EPERM' || code === 'EACCES'),
+      assessment,
+      nextStep,
+      detail: causeMessage || errorMessage || 'fetch failed',
+    },
+  };
+}
+
+function buildRuntimeHttpFailure(result, { method = 'GET', url = '' } = {}) {
+  const logs = typeof result?.payload?.logs === 'string' && result.payload.logs.trim()
+    ? result.payload.logs.trim()
+    : '';
+  return {
+    kind: 'http_error',
+    error: extractErrorMessage(result),
+    message: `Hermes runtime API returned status ${result?.status || 500} for ${method} ${url}.`,
+    request: {
+      method,
+      url,
+    },
+    response: {
+      status: result?.status || 500,
+      logs: logs || null,
+      payload: result?.payload && typeof result.payload === 'object' ? result.payload : null,
+    },
+  };
+}
+
+function formatRuntimeRequestFailure(failure) {
+  const lines = [];
+  if (failure?.message) {
+    lines.push(failure.message);
+  } else if (failure?.error) {
+    lines.push(failure.error);
+  }
+  if (failure?.request?.method && failure?.request?.url) {
+    lines.push(`Request: ${failure.request.method} ${failure.request.url}`);
+  }
+  if (failure?.kind === 'transport_error') {
+    const transport = failure.transport || {};
+    if (transport.assessment) {
+      lines.push(`Assessment: ${transport.assessment}`);
+    }
+    if (transport.code) {
+      lines.push(`Transport code: ${transport.code}`);
+    }
+    if (transport.detail && transport.detail !== 'fetch failed') {
+      lines.push(`Cause: ${transport.detail}`);
+    }
+    if (transport.nextStep) {
+      lines.push(`Next step: ${transport.nextStep}`);
+    }
+  } else {
+    if (failure?.error && failure.error !== failure.message) {
+      lines.push(`Error: ${failure.error}`);
+    }
+    const logs = typeof failure?.response?.logs === 'string' ? failure.response.logs.trim() : '';
+    if (logs) {
+      lines.push('');
+      lines.push(logs);
+    }
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+function renderRuntimeRequestFailure(failure, {
+  json = false,
+  stdout = process.stdout,
+  stderr = process.stderr,
+} = {}) {
+  if (json) {
+    printJson({
+      ok: false,
+      ...failure,
+    }, stdout);
+    return;
+  }
+  stderr.write(formatRuntimeRequestFailure(failure));
+}
+
+async function apiRequest(context, method, route = '', body = null, options = {}) {
+  const headers = {
+    Authorization: `Bearer ${context.requestToken}`,
+  };
+  const requestUrl = `${context.apiBaseUrl}${route}`;
+  let encodedBody;
+  if (body != null) {
+    headers['Content-Type'] = 'application/json';
+    encodedBody = JSON.stringify(body);
+  }
+  const fetchImpl = typeof options.fetchImpl === 'function' ? options.fetchImpl : fetch;
+  let response;
+  try {
+    response = await fetchImpl(requestUrl, {
+      method,
+      headers,
+      body: encodedBody,
+    });
+  } catch (error) {
+    throw createRuntimeCliRequestError(buildRuntimeTransportFailure(error, {
+      method,
+      url: requestUrl,
+    }));
+  }
+  const result = await parseResponse(response);
+  if (!result.ok) {
+    throw createRuntimeCliRequestError(buildRuntimeHttpFailure(result, {
+      method,
+      url: requestUrl,
+    }));
+  }
+  return result.payload;
+}
+
+function printJson(payload, stream = process.stdout) {
+  stream.write(`${JSON.stringify(payload, null, 2)}\n`);
+}
+
+function printPlayStatus(status, stream = process.stdout) {
+  const currentStatus = status && typeof status === 'object' ? status : null;
+  const normalizedStatus = typeof currentStatus?.status === 'string'
+    ? currentStatus.status.trim().toLowerCase()
+    : '';
+  stream.write(`Play: ${currentStatus?.status || 'idle'}\n`);
+  stream.write(`Running: ${currentStatus?.running === true ? 'yes' : 'no'}\n`);
+  stream.write(`Ready: ${currentStatus?.ready === true ? 'yes' : 'no'}\n`);
+  if (normalizedStatus === 'queued') {
+    stream.write('Queue: waiting for another project build to finish; Play is still in progress.\n');
+  }
+  if (currentStatus?.inspectUrl) {
+    stream.write(`Inspect URL: ${currentStatus.inspectUrl}\n`);
+  }
+  if (currentStatus?.error) {
+    stream.write(`Error: ${currentStatus.error}\n`);
+  }
+}
+
+function printRuntimeStatus(payload) {
+  const session = payload?.session || {};
+  const project = payload?.project || null;
+  const play = payload?.play || null;
+  const screenshot = payload?.inspect?.screenshot || {};
+  const inspectAuth = payload?.inspect?.auth || null;
+  const inspectAutomation = payload?.inspect?.automation || null;
+
+  process.stdout.write(`Session: ${session.id || '-'}\n`);
+  process.stdout.write(`Project: ${project?.name || 'Not attached'}\n`);
+  if (project?.path) {
+    process.stdout.write(`Project path: ${project.path}\n`);
+  }
+  printPlayStatus(play);
+  if (screenshot?.available) {
+    process.stdout.write(`Screenshot browser: ${screenshot.label || screenshot.command}\n`);
+  } else if (screenshot?.reason) {
+    process.stdout.write(`Screenshot browser: unavailable (${screenshot.reason})\n`);
+  }
+  if (inspectAuth?.enabled === true && inspectAuth?.strategy) {
+    process.stdout.write(`Inspect auth: ${inspectAuth.strategy}\n`);
+  }
+  if (inspectAutomation?.available === true) {
+    process.stdout.write('Inspect automation: pointer + scripted actions available\n');
+    if (Number.isFinite(Number(inspectAutomation.activeSessionCount))) {
+      process.stdout.write(`Inspect sessions: ${Number(inspectAutomation.activeSessionCount)} active\n`);
+    }
+  } else if (inspectAutomation?.reason) {
+    process.stdout.write(`Inspect automation: unavailable (${inspectAutomation.reason})\n`);
+  }
+  const errors = Array.isArray(payload?.errors) ? payload.errors.filter(Boolean) : [];
+  if (errors.length > 0) {
+    process.stdout.write(`Errors: ${errors.join(' | ')}\n`);
+  }
+}
+
+async function handleStatus(context, flags) {
+  const payload = await apiRequest(context, 'GET', '/status');
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  printRuntimeStatus(payload);
+}
+
+async function handlePlayStatus(context, flags) {
+  const payload = await apiRequest(context, 'GET', '/play/status');
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  printPlayStatus(payload?.status || null);
+}
+
+function buildPlayStartPayload(flags) {
+  const timeoutMs = parseDurationMs(flags?.timeout, '--timeout');
+  return {
+    waitUntilReady: flags?.wait === true,
+    restart: flags?.restart === true,
+    timeoutMs: timeoutMs !== undefined
+      ? timeoutMs
+      : (flags?.wait === true ? DEFAULT_PLAY_WAIT_TIMEOUT_MS : undefined),
+  };
+}
+
+async function handlePlayStart(context, flags) {
+  const payload = await apiRequest(context, 'POST', '/play/start', buildPlayStartPayload(flags));
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  process.stdout.write(payload.started ? 'Play start requested.\n' : 'Play already running.\n');
+  if (payload.restarted) {
+    process.stdout.write('Play was restarted.\n');
+  }
+  printPlayStatus(payload?.status || null);
+}
+
+async function handlePlayStop(context, flags) {
+  const payload = await apiRequest(context, 'POST', '/play/stop', {});
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  process.stdout.write('Play stopped.\n');
+  printPlayStatus(payload?.status || null);
+}
+
+async function handlePlayLogs(context, flags) {
+  const limit = flags.limit != null ? parseInteger(flags.limit, '--limit') : undefined;
+  const query = limit != null ? `?limit=${encodeURIComponent(limit)}` : '';
+  const payload = await apiRequest(context, 'GET', `/play/logs${query}`);
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  const text = typeof payload?.text === 'string' ? payload.text : '';
+  if (text) {
+    process.stdout.write(`${text}\n`);
+    return;
+  }
+  process.stdout.write('No Play logs are available.\n');
+}
+
+async function handleInspectUrl(context, flags) {
+  const payload = await apiRequest(context, 'GET', '/status');
+  const inspectUrl = payload?.inspect?.url || payload?.play?.inspectUrl || '';
+  if (!inspectUrl) {
+    fail('No inspect URL is available. Run `hermes-runtime play start --wait` first.');
+  }
+  if (flags.json) {
+    printJson({ inspectUrl });
+    return;
+  }
+  process.stdout.write(`${inspectUrl}\n`);
+}
+
+function buildInspectRequestReviewPayload(flags, messageParts = []) {
+  return {
+    message: Array.isArray(messageParts) ? messageParts.join(' ').trim() : '',
+    url: flags?.url || '',
+    timeoutMs: parseDurationMs(flags?.timeout, '--timeout'),
+  };
+}
+
+function buildInspectImageReviewPayload(imagePath, messageParts = []) {
+  const normalizedImagePath = typeof imagePath === 'string' ? imagePath.trim() : '';
+  if (!normalizedImagePath) {
+    fail('inspect request-image-review requires an image path.');
+  }
+  return {
+    imagePath: normalizedImagePath,
+    message: Array.isArray(messageParts) ? messageParts.join(' ').trim() : '',
+  };
+}
+
+function buildInspectGuideRequestPayload(flags, messageParts = []) {
+  return {
+    message: Array.isArray(messageParts) ? messageParts.join(' ').trim() : '',
+    url: flags?.url || '',
+    timeoutMs: parseDurationMs(flags?.timeout, '--timeout'),
+  };
+}
+
+function buildInspectResetStatePayload(flags) {
+  return {
+    timeoutMs: parseDurationMs(flags?.timeout, '--timeout'),
+  };
+}
+
+function buildInspectGuideUpdatePayload(flags) {
+  const hasInlineContent = typeof flags?.content === 'string';
+  const hasFileContent = typeof flags?.contentFile === 'string';
+  if (hasInlineContent && hasFileContent) {
+    fail('Use either --content or --content-file when updating a guide, not both.');
+  }
+
+  let content = '';
+  if (hasFileContent) {
+    const sourcePath = path.resolve(String(flags.contentFile || '').trim());
+    if (!sourcePath) {
+      fail('--content-file requires a path.');
+    }
+    try {
+      content = fs.readFileSync(sourcePath, 'utf8');
+    } catch (error) {
+      fail(`Unable to read guide content from ${sourcePath}: ${error?.message || 'Unknown error'}`);
+    }
+  } else if (hasInlineContent) {
+    content = String(flags.content || '');
+  }
+
+  const normalizedContent = content.replace(/\r\n/g, '\n').trim();
+  if (!normalizedContent) {
+    fail('inspect guide update requires guide content via --content or --content-file.');
+  }
+
+  return {
+    content: normalizedContent,
+    format: 'markdown',
+  };
+}
+
+function buildInspectScreenshotPayload(flags) {
+  const selector = typeof flags?.selector === 'string' ? flags.selector.trim() : '';
+  if (flags?.nth != null && !selector) {
+    fail('--nth requires --selector.');
+  }
+  const payload = {
+    url: flags?.url || '',
+    sessionId: flags?.session || '',
+    keepSession: flags?.keepSession === true,
+    width: flags?.width != null ? parseInteger(flags.width, '--width') : undefined,
+    height: flags?.height != null ? parseInteger(flags.height, '--height') : undefined,
+    delayMs: parseDurationMs(flags?.delay, '--delay'),
+    timeoutMs: parseDurationMs(flags?.timeout, '--timeout'),
+    fileName: flags?.fileName || '',
+  };
+  if (selector) {
+    payload.selector = selector;
+    payload.nth = parseOptionalInteger(flags?.nth != null ? flags.nth : 0, '--nth');
+  }
+  return payload;
+}
+
+async function handleInspectRequestReview(context, flags, messageParts) {
+  const payload = await apiRequest(
+    context,
+    'POST',
+    '/inspect/request-review',
+    buildInspectRequestReviewPayload(flags, messageParts)
+  );
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  process.stdout.write('Review request sent.\n');
+  if (payload?.notification?.id) {
+    process.stdout.write(`Notification: ${payload.notification.id}\n`);
+  }
+  if (payload?.status?.inspectUrl) {
+    process.stdout.write(`Inspect URL: ${payload.status.inspectUrl}\n`);
+  }
+}
+
+async function handleInspectImageReview(context, imagePath, flags, messageParts) {
+  const payload = await apiRequest(
+    context,
+    'POST',
+    '/inspect/request-image-review',
+    buildInspectImageReviewPayload(imagePath, messageParts)
+  );
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  process.stdout.write('Image review request sent.\n');
+  if (payload?.notification?.id) {
+    process.stdout.write(`Notification: ${payload.notification.id}\n`);
+  }
+  if (payload?.reviewImage?.path) {
+    process.stdout.write(`Image: ${payload.reviewImage.path}\n`);
+  }
+}
+
+async function handleInspectGuideRequest(context, flags, messageParts) {
+  const payload = await apiRequest(
+    context,
+    'POST',
+    '/inspect/guide/request',
+    buildInspectGuideRequestPayload(flags, messageParts)
+  );
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  process.stdout.write('Guide recording request sent.\n');
+  if (payload?.notification?.id) {
+    process.stdout.write(`Notification: ${payload.notification.id}\n`);
+  }
+  if (payload?.status?.inspectUrl) {
+    process.stdout.write(`Inspect URL: ${payload.status.inspectUrl}\n`);
+  }
+}
+
+function printInspectResetStateResult(payload, options = {}) {
+  const stdout = options.stdout || process.stdout;
+  stdout.write('Inspect reset completed.\n');
+  if (payload?.inspectUrl) {
+    stdout.write(`Inspect URL: ${payload.inspectUrl}\n`);
+  }
+  if (payload?.captureUrl) {
+    stdout.write(`Browser URL: ${payload.captureUrl}\n`);
+  }
+  if (payload?.reset?.command) {
+    stdout.write(`Command: ${payload.reset.command}\n`);
+  }
+  if (payload?.result?.cwd) {
+    stdout.write(`Cwd: ${payload.result.cwd}\n`);
+  }
+  if (Number.isFinite(Number(payload?.result?.durationMs))) {
+    stdout.write(`Duration: ${Math.round(Number(payload.result.durationMs))}ms\n`);
+  }
+  const stdoutText = typeof payload?.result?.stdout === 'string' ? payload.result.stdout.trim() : '';
+  if (stdoutText) {
+    stdout.write(`Stdout: ${stdoutText}\n`);
+  }
+  const stderrText = typeof payload?.result?.stderr === 'string' ? payload.result.stderr.trim() : '';
+  if (stderrText) {
+    stdout.write(`Stderr: ${stderrText}\n`);
+  }
+}
+
+async function handleInspectResetState(context, flags) {
+  const payload = await apiRequest(
+    context,
+    'POST',
+    '/inspect/reset-state',
+    buildInspectResetStatePayload(flags)
+  );
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  printInspectResetStateResult(payload);
+}
+
+function maybeCopyScreenshot(sourcePath, outPath) {
+  if (!outPath) return sourcePath;
+  const resolved = path.resolve(outPath);
+  fs.mkdirSync(path.dirname(resolved), { recursive: true });
+  fs.copyFileSync(sourcePath, resolved);
+  return resolved;
+}
+
+function formatInspectCaptureKind(capture) {
+  const kind = typeof capture?.kind === 'string' ? capture.kind.trim() : '';
+  if (kind === 'element-screenshot') {
+    return 'element screenshot';
+  }
+  if (kind === 'full-page-screenshot') {
+    return 'full-page screenshot';
+  }
+  return '';
+}
+
+function formatInspectCaptureSessionMode(capture) {
+  const sessionMode = typeof capture?.sessionMode === 'string' ? capture.sessionMode.trim() : '';
+  if (sessionMode === 'reused') {
+    return 'reused inspect session';
+  }
+  if (sessionMode === 'kept') {
+    return 'persistent inspect session';
+  }
+  if (sessionMode === 'ephemeral') {
+    return 'ephemeral browser session';
+  }
+  return '';
+}
+
+function printInspectScreenshotResult(payload, outputPath, options = {}) {
+  const stdout = options.stdout || process.stdout;
+  stdout.write(`Saved screenshot to ${outputPath}\n`);
+  stdout.write('Tip: Need human visual feedback? Reuse the saved image path with hermes-runtime inspect request-image-review <saved-image-path> "What should the user verify?"\n');
+  if (payload?.inspectUrl) {
+    stdout.write(`Inspect URL: ${payload.inspectUrl}\n`);
+  }
+  if (payload?.screenshot?.label || payload?.screenshot?.command) {
+    stdout.write(`Browser: ${payload.screenshot.label || payload.screenshot.command}\n`);
+  }
+  const capture = payload?.capture && typeof payload.capture === 'object'
+    ? payload.capture
+    : payload;
+  const captureKind = formatInspectCaptureKind(capture);
+  if (captureKind) {
+    const target = typeof capture?.target === 'string' && capture.target.trim() && capture.target !== 'viewport'
+      ? ` (${capture.target.trim()})`
+      : '';
+    stdout.write(`Capture: ${captureKind}${target}\n`);
+  }
+  const captureSessionMode = formatInspectCaptureSessionMode(capture);
+  if (captureSessionMode) {
+    stdout.write(`Capture session: ${captureSessionMode}\n`);
+  }
+  const page = payload?.page && typeof payload.page === 'object'
+    ? payload.page
+    : null;
+  if (!page) {
+    return;
+  }
+  if (page.summary) {
+    const status = typeof page.status === 'string' && page.status.trim()
+      ? `${page.status.trim()}: `
+      : '';
+    stdout.write(`Page: ${status}${page.summary}\n`);
+  }
+  if (page.requestedUrl) {
+    stdout.write(`Requested URL: ${page.requestedUrl}\n`);
+  }
+  if (page.finalUrl) {
+    stdout.write(`Final URL: ${page.finalUrl}\n`);
+  }
+  if (page.pageTitle) {
+    stdout.write(`Page title: ${page.pageTitle}\n`);
+  }
+  if (!Array.isArray(page.warnings)) {
+    return;
+  }
+  for (const warning of page.warnings) {
+    if (!warning) continue;
+    const code = typeof warning.code === 'string' && warning.code.trim()
+      ? ` [${warning.code.trim()}]`
+      : '';
+    const message = typeof warning.message === 'string'
+      ? warning.message.trim()
+      : '';
+    if (!message) continue;
+    stdout.write(`Warning${code}: ${message}\n`);
+  }
+}
+
+function printInspectSessionSummary(payload, options = {}) {
+  const stdout = options.stdout || process.stdout;
+  const inspectSession = payload?.inspectSession && typeof payload.inspectSession === 'object'
+    ? payload.inspectSession
+    : null;
+  if (!inspectSession?.id) return;
+  stdout.write(`Inspect session: ${inspectSession.id}\n`);
+  if (inspectSession.status) {
+    stdout.write(`Inspect session status: ${inspectSession.status}\n`);
+  }
+  if (inspectSession.currentPublicUrl) {
+    stdout.write(`Inspect session URL: ${inspectSession.currentPublicUrl}\n`);
+  } else if (inspectSession.currentUrl) {
+    stdout.write(`Inspect session URL: ${inspectSession.currentUrl}\n`);
+  }
+}
+
+function parseOptionalInteger(value, label) {
+  if (value == null || value === '') return undefined;
+  return parseInteger(value, label);
+}
+
+function parseOptionalDuration(value, label) {
+  if (value == null || value === '') return undefined;
+  return parseDurationMs(value, label);
+}
+
+function parseInspectActionScriptValue(rawValue, label) {
+  try {
+    return JSON.parse(String(rawValue));
+  } catch (error) {
+    fail(`${label} must be valid JSON (${error?.message || error}).`);
+  }
+}
+
+function loadInspectActionScript(flags) {
+  const rawScript = typeof flags?.script === 'string' ? flags.script.trim() : '';
+  const rawScriptFile = typeof flags?.scriptFile === 'string' ? flags.scriptFile.trim() : '';
+  if (rawScript && rawScriptFile) {
+    fail('Use only one of --script or --script-file.');
+  }
+  if (!rawScript && !rawScriptFile) {
+    fail('Inspect actions require --script or --script-file.');
+  }
+  let parsed = null;
+  if (rawScript) {
+    parsed = parseInspectActionScriptValue(rawScript, '--script');
+  } else {
+    const scriptPath = path.resolve(rawScriptFile);
+    let fileContents = '';
+    try {
+      fileContents = fs.readFileSync(scriptPath, 'utf8');
+    } catch (error) {
+      fail(`Could not read --script-file ${scriptPath}: ${error?.message || error}`);
+    }
+    parsed = parseInspectActionScriptValue(fileContents, '--script-file');
+  }
+  if (Array.isArray(parsed)) {
+    return {
+      actions: parsed,
+    };
+  }
+  if (parsed && typeof parsed === 'object' && Array.isArray(parsed.actions)) {
+    return parsed;
+  }
+  fail('Inspect action scripts must be a JSON array or an object with an actions array.');
+}
+
+function buildInspectActionPayload(flags) {
+  const script = loadInspectActionScript(flags);
+  const captureScreenshot = flags?.captureScreenshot === true
+    || Boolean(flags?.fileName)
+    || Boolean(script?.captureScreenshot)
+    || Boolean(script?.fileName);
+  return {
+    url: flags?.url || script?.url || '',
+    sessionId: flags?.session || script?.sessionId || '',
+    keepSession: flags?.keepSession === true || script?.keepSession === true,
+    captureScreenshot,
+    fileName: flags?.fileName || script?.fileName || '',
+    width: parseOptionalInteger(
+      flags?.width != null ? flags.width : script?.width,
+      '--width'
+    ),
+    height: parseOptionalInteger(
+      flags?.height != null ? flags.height : script?.height,
+      '--height'
+    ),
+    delayMs: parseOptionalDuration(
+      flags?.delay != null ? flags.delay : script?.delayMs,
+      '--delay'
+    ),
+    timeoutMs: parseOptionalDuration(
+      flags?.timeout != null ? flags.timeout : script?.timeoutMs,
+      '--timeout'
+    ),
+    gatherReportId: flags?.gather || script?.gatherReportId || '',
+    compare: flags?.compare || script?.compare || '',
+    actions: script.actions,
+  };
+}
+
+function buildInspectRunScriptPayload(flags, scriptPath) {
+  const normalizedScriptPath = typeof scriptPath === 'string' ? scriptPath.trim() : '';
+  if (!normalizedScriptPath) {
+    fail('inspect run-script requires a script path.');
+  }
+  return {
+    url: flags?.url || '',
+    sessionId: flags?.session || '',
+    keepSession: flags?.keepSession === true,
+    width: parseOptionalInteger(flags?.width, '--width'),
+    height: parseOptionalInteger(flags?.height, '--height'),
+    delayMs: parseOptionalDuration(flags?.delay, '--delay'),
+    timeoutMs: parseOptionalDuration(flags?.timeout, '--timeout'),
+    gatherReportId: flags?.gather || '',
+    compare: flags?.compare || '',
+    adapterPath: flags?.adapter || '',
+    scriptPath: normalizedScriptPath,
+  };
+}
+
+function buildInspectScenarioRunPayload(flags, scenarioId) {
+  const normalizedScenarioId = typeof scenarioId === 'string' ? scenarioId.trim() : '';
+  if (!normalizedScenarioId) {
+    fail('inspect scenario run requires a scenario id.');
+  }
+  return {
+    url: flags?.url || '',
+    sessionId: flags?.session || '',
+    keepSession: flags?.keepSession === true,
+    width: parseOptionalInteger(flags?.width, '--width'),
+    height: parseOptionalInteger(flags?.height, '--height'),
+    delayMs: parseOptionalDuration(flags?.delay, '--delay'),
+    timeoutMs: parseOptionalDuration(flags?.timeout, '--timeout'),
+    gatherReportId: flags?.gather || '',
+    compare: flags?.compare || '',
+    adapterPath: flags?.adapter || '',
+    scenarioId: normalizedScenarioId,
+  };
+}
+
+function printInspectGatherSnapshot(gather, options = {}) {
+  const stdout = options.stdout || process.stdout;
+  if (!gather?.report) return;
+  stdout.write(`Gather report: ${gather.report.id || '-'} (${gather.report.eventCount || 0} events)\n`);
+  if (gather.report.path) {
+    stdout.write(`Gather file: ${gather.report.path}\n`);
+  }
+}
+
+function printInspectBundleSummary(bundle, options = {}) {
+  const stdout = options.stdout || process.stdout;
+  if (!bundle?.manifest?.absolutePath) return;
+  stdout.write(`Inspect bundle: ${bundle.manifest.absolutePath}\n`);
+  if (bundle.comparison?.summary) {
+    stdout.write(`Bundle compare: ${bundle.comparison.summary}\n`);
+  }
+}
+
+function printInspectAdapterSummary(adapter, options = {}) {
+  const stdout = options.stdout || process.stdout;
+  if (!adapter?.path && !adapter?.methods) return;
+  if (adapter.path) {
+    stdout.write(`Inspect adapter: ${adapter.path}\n`);
+  }
+  if (Array.isArray(adapter.methods) && adapter.methods.length > 0) {
+    stdout.write(`Adapter methods: ${adapter.methods.join(', ')}\n`);
+  }
+}
+
+function printInspectActionResult(payload, options = {}) {
+  const stdout = options.stdout || process.stdout;
+  stdout.write('Inspect actions completed.\n');
+  if (payload?.inspectUrl) {
+    stdout.write(`Inspect URL: ${payload.inspectUrl}\n`);
+  }
+  if (payload?.browser?.label || payload?.browser?.command) {
+    stdout.write(`Browser: ${payload.browser.label || payload.browser.command}\n`);
+  }
+  const actionSummary = payload?.actions && typeof payload.actions === 'object'
+    ? payload.actions
+    : null;
+  if (actionSummary) {
+    stdout.write(`Actions: ${actionSummary.executedCount || 0}/${actionSummary.requestedCount || 0} executed\n`);
+  }
+  if (payload?.page?.requestedUrl) {
+    stdout.write(`Requested URL: ${payload.page.requestedUrl}\n`);
+  }
+  if (payload?.page?.finalUrl) {
+    stdout.write(`Final URL: ${payload.page.finalUrl}\n`);
+  }
+  if (payload?.page?.pageTitle) {
+    stdout.write(`Page title: ${payload.page.pageTitle}\n`);
+  }
+  if (payload?.capture?.absolutePath) {
+    stdout.write(`Saved screenshot to ${payload.capture.absolutePath}\n`);
+    stdout.write('Tip: Need human visual feedback? Reuse the saved image path with hermes-runtime inspect request-image-review <saved-image-path> "What should the user verify?"\n');
+  }
+  const captureKind = formatInspectCaptureKind(payload?.capture);
+  if (captureKind) {
+    stdout.write(`Capture: ${captureKind}\n`);
+  }
+  const captureSessionMode = formatInspectCaptureSessionMode(payload?.capture);
+  if (captureSessionMode) {
+    stdout.write(`Capture session: ${captureSessionMode}\n`);
+  }
+  if (payload?.artifacts?.manifest?.absolutePath) {
+    const artifactCount = Number.isFinite(Number(payload?.artifacts?.count))
+      ? Number(payload.artifacts.count)
+      : 0;
+    stdout.write(`Saved ${artifactCount} inspect artifact${artifactCount === 1 ? '' : 's'} to ${payload.artifacts.manifest.absolutePath}\n`);
+  }
+  printInspectGatherSnapshot(payload?.gather, { stdout });
+  printInspectBundleSummary(payload?.bundle, { stdout });
+  const results = Array.isArray(actionSummary?.results) ? actionSummary.results : [];
+  for (const result of results) {
+    const index = Number.isFinite(Number(result?.index)) ? Number(result.index) + 1 : null;
+    const description = typeof result?.description === 'string' ? result.description.trim() : '';
+    if (!description) continue;
+    stdout.write(`${index != null ? `${index}. ` : ''}${description}\n`);
+  }
+  printInspectSessionSummary(payload, { stdout });
+}
+
+function printInspectRunScriptResult(payload, options = {}) {
+  const stdout = options.stdout || process.stdout;
+  stdout.write('Inspect run-script completed.\n');
+  if (payload?.inspectUrl) {
+    stdout.write(`Inspect URL: ${payload.inspectUrl}\n`);
+  }
+  if (payload?.browser?.label || payload?.browser?.command) {
+    stdout.write(`Browser: ${payload.browser.label || payload.browser.command}\n`);
+  }
+  if (payload?.page?.requestedUrl) {
+    stdout.write(`Requested URL: ${payload.page.requestedUrl}\n`);
+  }
+  if (payload?.page?.finalUrl) {
+    stdout.write(`Final URL: ${payload.page.finalUrl}\n`);
+  }
+  if (payload?.page?.pageTitle) {
+    stdout.write(`Page title: ${payload.page.pageTitle}\n`);
+  }
+  if (payload?.script?.path) {
+    stdout.write(`Script: ${payload.script.path}\n`);
+  }
+  if (payload?.script?.result !== undefined) {
+    stdout.write(`Result: ${JSON.stringify(payload.script.result)}\n`);
+  }
+  if (payload?.script?.stdout) {
+    stdout.write(`Stdout: ${payload.script.stdout}\n`);
+  }
+  if (payload?.script?.stderr) {
+    stdout.write(`Stderr: ${payload.script.stderr}\n`);
+  }
+  printInspectAdapterSummary(payload?.adapter || payload?.script?.execution?.adapter, { stdout });
+  printInspectGatherSnapshot(payload?.gather, { stdout });
+  printInspectBundleSummary(payload?.bundle, { stdout });
+  printInspectSessionSummary(payload, { stdout });
+}
+
+function printInspectScenarioList(payload, options = {}) {
+  const stdout = options.stdout || process.stdout;
+  const scenarios = Array.isArray(payload?.scenarios) ? payload.scenarios : [];
+  if (scenarios.length === 0) {
+    stdout.write('No inspect scenarios were found.\n');
+    return;
+  }
+  stdout.write(`Inspect scenarios: ${scenarios.length}\n`);
+  scenarios.forEach((scenario) => {
+    stdout.write(`- ${scenario.id}`);
+    if (scenario.path) {
+      stdout.write(` (${scenario.path})`);
+    }
+    stdout.write('\n');
+  });
+  printInspectAdapterSummary(payload?.adapter, { stdout });
+}
+
+function printInspectScenarioResult(payload, options = {}) {
+  const stdout = options.stdout || process.stdout;
+  stdout.write('Inspect scenario completed.\n');
+  if (payload?.inspectUrl) {
+    stdout.write(`Inspect URL: ${payload.inspectUrl}\n`);
+  }
+  if (payload?.browser?.label || payload?.browser?.command) {
+    stdout.write(`Browser: ${payload.browser.label || payload.browser.command}\n`);
+  }
+  if (payload?.page?.requestedUrl) {
+    stdout.write(`Requested URL: ${payload.page.requestedUrl}\n`);
+  }
+  if (payload?.page?.finalUrl) {
+    stdout.write(`Final URL: ${payload.page.finalUrl}\n`);
+  }
+  if (payload?.page?.pageTitle) {
+    stdout.write(`Page title: ${payload.page.pageTitle}\n`);
+  }
+  if (payload?.scenario?.id) {
+    stdout.write(`Scenario: ${payload.scenario.id}\n`);
+  }
+  if (payload?.scenario?.path) {
+    stdout.write(`Module: ${payload.scenario.path}\n`);
+  }
+  if (payload?.scenario?.result !== undefined) {
+    stdout.write(`Result: ${JSON.stringify(payload.scenario.result)}\n`);
+  }
+  if (payload?.scenario?.stdout) {
+    stdout.write(`Stdout: ${payload.scenario.stdout}\n`);
+  }
+  if (payload?.scenario?.stderr) {
+    stdout.write(`Stderr: ${payload.scenario.stderr}\n`);
+  }
+  printInspectAdapterSummary(payload?.adapter || payload?.scenario?.execution?.adapter, { stdout });
+  printInspectGatherSnapshot(payload?.gather, { stdout });
+  printInspectBundleSummary(payload?.bundle, { stdout });
+  printInspectSessionSummary(payload, { stdout });
+}
+
+function printGatherReportSummary(report, events = null) {
+  const currentReport = report && typeof report === 'object' ? report : null;
+  if (!currentReport) {
+    process.stdout.write('No gather report data is available.\n');
+    return;
+  }
+  process.stdout.write(`Gather report: ${currentReport.id || '-'}\n`);
+  if (currentReport.title) {
+    process.stdout.write(`Title: ${currentReport.title}\n`);
+  }
+  process.stdout.write(`Status: ${currentReport.status || 'collecting'}\n`);
+  process.stdout.write(`Events: ${currentReport.eventCount || 0} stored`);
+  if (typeof currentReport.totalEventCount === 'number') {
+    process.stdout.write(` / ${currentReport.totalEventCount} total`);
+  }
+  if (currentReport.droppedEventCount) {
+    process.stdout.write(` (${currentReport.droppedEventCount} dropped)`);
+  }
+  process.stdout.write('\n');
+  if (currentReport.updatedAt) {
+    process.stdout.write(`Updated: ${currentReport.updatedAt}\n`);
+  }
+  if (currentReport.path) {
+    process.stdout.write(`File: ${currentReport.path}\n`);
+  }
+  const latestEvent = currentReport.latestEvent || null;
+  if (latestEvent) {
+    process.stdout.write(
+      `Latest: [${latestEvent.level || 'info'}] ${latestEvent.label || latestEvent.type || 'event'}\n`
+    );
+    if (latestEvent.message) {
+      process.stdout.write(`  ${latestEvent.message}\n`);
+    }
+  }
+  if (Array.isArray(events) && events.length > 0) {
+    process.stdout.write('\nEvents:\n');
+    events.forEach((event) => {
+      const header = [
+        event?.recordedAt || '-',
+        event?.level || 'info',
+        event?.label || event?.type || 'event',
+      ].join(' | ');
+      process.stdout.write(`- ${header}\n`);
+      if (event?.message) {
+        process.stdout.write(`  ${event.message}\n`);
+      }
+      if (event?.data != null) {
+        process.stdout.write(`  data: ${JSON.stringify(event.data)}\n`);
+      }
+      if (event?.meta != null) {
+        process.stdout.write(`  meta: ${JSON.stringify(event.meta)}\n`);
+      }
+    });
+  }
+}
+
+function printInspectGuideSummary(guide, options = {}) {
+  const stdout = options.stdout || process.stdout;
+  const summary = guide && typeof guide === 'object' ? guide : null;
+  if (!summary) {
+    stdout.write('No guide recording data is available.\n');
+    return;
+  }
+  stdout.write(`Guide: ${summary.id || '-'}\n`);
+  if (summary.title) {
+    stdout.write(`Title: ${summary.title}\n`);
+  }
+  if (summary.description) {
+    stdout.write(`Description: ${summary.description}\n`);
+  }
+  if (Number.isFinite(Number(summary.eventCount))) {
+    stdout.write(`Events: ${Number(summary.eventCount)}\n`);
+  }
+  if (Number.isFinite(Number(summary.canvasEventCount)) && Number(summary.canvasEventCount) > 0) {
+    stdout.write(`Canvas events: ${Number(summary.canvasEventCount)}\n`);
+  }
+  if (Number.isFinite(Number(summary.durationMs)) && Number(summary.durationMs) > 0) {
+    stdout.write(`Duration: ${Number(summary.durationMs)} ms\n`);
+  }
+  if (summary.completedPage?.path) {
+    stdout.write(`Final page: ${summary.completedPage.path}\n`);
+  } else if (summary.inspectUrl) {
+    stdout.write(`Inspect URL: ${summary.inspectUrl}\n`);
+  }
+  if (summary.learnedGuideAvailable === true) {
+    const versionSuffix = Number.isFinite(Number(summary.learnedGuideVersion)) && Number(summary.learnedGuideVersion) > 0
+      ? ` v${Number(summary.learnedGuideVersion)}`
+      : '';
+    const updatedSuffix = summary.learnedGuideUpdatedAt
+      ? ` (updated ${summary.learnedGuideUpdatedAt})`
+      : '';
+    stdout.write(`Detailed guide: available${versionSuffix}${updatedSuffix}\n`);
+  } else {
+    stdout.write('Detailed guide: not written yet\n');
+  }
+  if (summary.path) {
+    stdout.write(`File: ${summary.path}\n`);
+  }
+}
+
+function printInspectGuideList(guides = [], options = {}) {
+  const stdout = options.stdout || process.stdout;
+  const entries = Array.isArray(guides) ? guides : [];
+  if (!entries.length) {
+    stdout.write('No guide recordings were found for this project.\n');
+    return;
+  }
+  entries.forEach((guide) => {
+    const title = guide?.title || guide?.description || guide?.id || 'Guide';
+    const detailParts = [];
+    if (Number.isFinite(Number(guide?.eventCount))) {
+      detailParts.push(`${Number(guide.eventCount)} events`);
+    }
+    if (guide?.learnedGuideAvailable === true) {
+      const version = Number.isFinite(Number(guide?.learnedGuideVersion)) && Number(guide.learnedGuideVersion) > 0
+        ? ` v${Number(guide.learnedGuideVersion)}`
+        : '';
+      detailParts.push(`detailed guide${version}`);
+    }
+    if (guide?.completedPage?.path) {
+      detailParts.push(guide.completedPage.path);
+    }
+    stdout.write(`- ${guide?.id || '-'} | ${title}\n`);
+    if (detailParts.length) {
+      stdout.write(`  ${detailParts.join(' | ')}\n`);
+    }
+  });
+}
+
+function formatGuideEventNumber(value, fractionDigits = 0) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  const precision = Math.max(0, Number(fractionDigits) || 0);
+  return precision > 0 ? numeric.toFixed(precision) : String(Math.round(numeric));
+}
+
+function printInspectGuideCanvasDetails(event, stdout) {
+  const canvas = event?.meta?.canvas;
+  if (!canvas || typeof canvas !== 'object') return;
+  const position = canvas.position && typeof canvas.position === 'object'
+    ? canvas.position
+    : null;
+  const bounds = canvas.bounds && typeof canvas.bounds === 'object'
+    ? canvas.bounds
+    : null;
+  const snapshot = canvas.snapshot && typeof canvas.snapshot === 'object'
+    ? canvas.snapshot
+    : null;
+
+  const detailParts = [];
+  const x = formatGuideEventNumber(position?.x, 0);
+  const y = formatGuideEventNumber(position?.y, 0);
+  if (x != null && y != null) {
+    detailParts.push(`coords=(${x}, ${y})`);
+  }
+  const normalizedX = formatGuideEventNumber(position?.normalizedX, 4);
+  const normalizedY = formatGuideEventNumber(position?.normalizedY, 4);
+  if (normalizedX != null && normalizedY != null) {
+    detailParts.push(`normalized=(${normalizedX}, ${normalizedY})`);
+  }
+  const width = formatGuideEventNumber(bounds?.width, 0);
+  const height = formatGuideEventNumber(bounds?.height, 0);
+  if (width != null && height != null) {
+    detailParts.push(`css=${width}x${height}`);
+  }
+  const pixelWidth = formatGuideEventNumber(bounds?.pixelWidth, 0);
+  const pixelHeight = formatGuideEventNumber(bounds?.pixelHeight, 0);
+  if (pixelWidth != null && pixelHeight != null && (pixelWidth !== '0' || pixelHeight !== '0')) {
+    detailParts.push(`pixels=${pixelWidth}x${pixelHeight}`);
+  }
+  if (detailParts.length > 0) {
+    stdout.write(`  canvas: ${detailParts.join(' | ')}\n`);
+  }
+  if (snapshot) {
+    const snapshotParts = [];
+    if (typeof snapshot.kind === 'string' && snapshot.kind.trim()) {
+      snapshotParts.push(snapshot.kind.trim());
+    }
+    const snapshotWidth = formatGuideEventNumber(snapshot.width, 0);
+    const snapshotHeight = formatGuideEventNumber(snapshot.height, 0);
+    if (snapshotWidth != null && snapshotHeight != null) {
+      snapshotParts.push(`${snapshotWidth}x${snapshotHeight}`);
+    }
+    if (typeof snapshot.mimeType === 'string' && snapshot.mimeType.trim()) {
+      snapshotParts.push(snapshot.mimeType.trim());
+    }
+    if (snapshotParts.length > 0) {
+      stdout.write(`  snapshot: ${snapshotParts.join(' | ')}\n`);
+    }
+  }
+}
+
+function printInspectGuideRecording(payload, options = {}) {
+  const stdout = options.stdout || process.stdout;
+  printInspectGuideSummary(payload?.guide || payload?.recording || null, { stdout });
+  const learnedGuide = payload?.recording?.learnedGuide;
+  const learnedGuideContent = typeof learnedGuide?.content === 'string'
+    ? learnedGuide.content.replace(/\r\n/g, '\n').trim()
+    : '';
+  if (learnedGuideContent) {
+    stdout.write('\nDetailed guide:\n');
+    stdout.write(`${learnedGuideContent}\n`);
+  } else {
+    stdout.write('\nDetailed guide:\n');
+    stdout.write('No maintained guide has been written yet. Follow the raw recording below, then save a clearer guide with `hermes-runtime inspect guide update <guide-id> --content-file <path>`.\n');
+  }
+  const events = Array.isArray(payload?.recording?.events) ? payload.recording.events : [];
+  if (!events.length) {
+    return;
+  }
+  stdout.write('\nRaw recording:\n');
+  events.forEach((event) => {
+    const prefix = Number.isFinite(Number(event?.index)) ? `${Number(event.index) + 1}. ` : '- ';
+    const type = typeof event?.type === 'string' && event.type.trim()
+      ? `[${event.type.trim()}] `
+      : '';
+    const description = typeof event?.description === 'string' && event.description.trim()
+      ? event.description.trim()
+      : '';
+    const pagePath = typeof event?.page?.path === 'string' && event.page.path.trim()
+      ? ` (${event.page.path.trim()})`
+      : '';
+    stdout.write(`${prefix}${type}${description || 'Recorded event'}${pagePath}\n`);
+    printInspectGuideCanvasDetails(event, stdout);
+  });
+}
+
+function printInspectGuideDeleteResult(payload, options = {}) {
+  const stdout = options.stdout || process.stdout;
+  const guide = payload?.guide || null;
+  if (!guide?.id) {
+    stdout.write('Guide recording deleted.\n');
+    return;
+  }
+  stdout.write(`Deleted guide recording ${guide.id}.\n`);
+  if (guide.title) {
+    stdout.write(`Title: ${guide.title}\n`);
+  }
+  if (guide.projectName) {
+    stdout.write(`Project: ${guide.projectName}\n`);
+  }
+}
+
+function printInspectGuideUpdateResult(payload, options = {}) {
+  const stdout = options.stdout || process.stdout;
+  const guide = payload?.guide || null;
+  if (!guide?.id) {
+    stdout.write('Guide updated.\n');
+    return;
+  }
+  stdout.write(`Updated guide ${guide.id}.\n`);
+  if (guide.title) {
+    stdout.write(`Title: ${guide.title}\n`);
+  }
+  if (guide.learnedGuideVersion) {
+    stdout.write(`Detailed guide version: ${guide.learnedGuideVersion}\n`);
+  }
+  if (guide.learnedGuideUpdatedAt) {
+    stdout.write(`Detailed guide updated: ${guide.learnedGuideUpdatedAt}\n`);
+  }
+}
+
+async function handleInspectScreenshot(context, flags) {
+  const payload = await apiRequest(context, 'POST', '/inspect/screenshot', buildInspectScreenshotPayload(flags));
+  let outputPath = payload?.absolutePath || '';
+  if (!outputPath) {
+    fail('Screenshot capture succeeded but no file path was returned.');
+  }
+  if (flags.out) {
+    outputPath = maybeCopyScreenshot(outputPath, flags.out);
+  }
+  if (flags.json) {
+    const finalPayload = {
+      ...payload,
+      outputPath,
+    };
+    printJson(finalPayload);
+    return;
+  }
+  printInspectScreenshotResult(payload, outputPath);
+  printInspectSessionSummary(payload);
+}
+
+async function handleInspectAction(context, flags) {
+  const payload = await apiRequest(
+    context,
+    'POST',
+    '/inspect/action',
+    buildInspectActionPayload(flags)
+  );
+  const capturePath = payload?.capture?.absolutePath || '';
+  if (capturePath && flags.out) {
+    payload.capture = {
+      ...(payload.capture || {}),
+      outputPath: maybeCopyScreenshot(capturePath, flags.out),
+    };
+  }
+  if (flags.json) {
+    if (payload?.capture?.absolutePath && !payload.capture.outputPath) {
+      payload.capture.outputPath = payload.capture.absolutePath;
+    }
+    printJson(payload);
+    return;
+  }
+  if (payload?.capture?.outputPath && payload.capture.absolutePath) {
+    payload.capture.absolutePath = payload.capture.outputPath;
+  }
+  printInspectActionResult(payload);
+}
+
+async function handleInspectRunScript(context, flags, scriptPath) {
+  const payload = await apiRequest(
+    context,
+    'POST',
+    '/inspect/run-script',
+    buildInspectRunScriptPayload(flags, scriptPath)
+  );
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  printInspectRunScriptResult(payload);
+}
+
+async function handleInspectScenarioList(context, flags) {
+  const payload = await apiRequest(context, 'GET', '/inspect/scenarios');
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  printInspectScenarioList(payload);
+}
+
+async function handleInspectScenarioRun(context, flags, scenarioId) {
+  const payload = await apiRequest(
+    context,
+    'POST',
+    '/inspect/scenarios/run',
+    buildInspectScenarioRunPayload(flags, scenarioId)
+  );
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  printInspectScenarioResult(payload);
+}
+
+async function handleInspectSessionClose(context, inspectSessionId, flags) {
+  const payload = await apiRequest(
+    context,
+    'DELETE',
+    `/inspect/sessions/${encodeURIComponent(inspectSessionId)}`,
+    null
+  );
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  process.stdout.write('Inspect session closed.\n');
+  printInspectSessionSummary(payload);
+}
+
+async function handleInspectGuideList(context, flags) {
+  const searchParams = new URLSearchParams();
+  if (flags?.query) {
+    searchParams.set('query', String(flags.query));
+  }
+  if (flags?.limit != null) {
+    searchParams.set('limit', String(parseInteger(flags.limit, '--limit')));
+  }
+  const route = searchParams.size > 0
+    ? `/inspect/guides?${searchParams.toString()}`
+    : '/inspect/guides';
+  const payload = await apiRequest(context, 'GET', route);
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  printInspectGuideList(payload?.guides || []);
+}
+
+async function handleInspectGuideShow(context, flags, guideId) {
+  const normalizedGuideId = String(guideId || '').trim();
+  if (!normalizedGuideId) {
+    fail('inspect guide show requires a guide id.');
+  }
+  const payload = await apiRequest(
+    context,
+    'GET',
+    `/inspect/guides/${encodeURIComponent(normalizedGuideId)}`
+  );
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  printInspectGuideRecording(payload);
+}
+
+async function handleInspectGuideUpdate(context, flags, guideId) {
+  const normalizedGuideId = String(guideId || '').trim();
+  if (!normalizedGuideId) {
+    fail('inspect guide update requires a guide id.');
+  }
+  const payload = await apiRequest(
+    context,
+    'PATCH',
+    `/inspect/guides/${encodeURIComponent(normalizedGuideId)}`,
+    buildInspectGuideUpdatePayload(flags)
+  );
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  printInspectGuideUpdateResult(payload);
+}
+
+async function handleInspectGuideDelete(context, flags, guideId) {
+  const normalizedGuideId = String(guideId || '').trim();
+  if (!normalizedGuideId) {
+    fail('inspect guide delete requires a guide id.');
+  }
+  const payload = await apiRequest(
+    context,
+    'DELETE',
+    `/inspect/guides/${encodeURIComponent(normalizedGuideId)}`
+  );
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  printInspectGuideDeleteResult(payload);
+}
+
+async function handleGatherCreate(context, flags) {
+  const payload = await apiRequest(context, 'POST', '/gather/reports', {
+    title: flags.title || '',
+  });
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  process.stdout.write('Gather report created.\n');
+  printGatherReportSummary(payload?.report || null);
+  if (payload?.ingest?.path) {
+    process.stdout.write(`Ingest path: ${payload.ingest.path}\n`);
+  }
+  if (payload?.ingest?.url) {
+    process.stdout.write(`Ingest URL: ${payload.ingest.url}\n`);
+  }
+  if (payload?.ingest?.tokenHeader) {
+    process.stdout.write(`Token header: ${payload.ingest.tokenHeader}\n`);
+  }
+  if (payload?.ingest?.token) {
+    process.stdout.write(`Token: ${payload.ingest.token}\n`);
+  }
+}
+
+async function handleGatherShow(context, flags, reportId) {
+  const route = reportId
+    ? `/gather/reports/${encodeURIComponent(reportId)}`
+    : '/gather/reports/latest';
+  const payload = await apiRequest(context, 'GET', route);
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+  printGatherReportSummary(payload?.report || null, payload?.events || []);
+}
+
+async function main() {
+  const { flags, positionals } = parseArgs(process.argv.slice(2));
+  if (flags.help || positionals.length === 0) {
+    process.stdout.write(getHelpText(positionals));
+    return;
+  }
+
+  const [command, subcommand, ...rest] = positionals;
+  if (command === 'doctor') {
+    handleDoctor(flags);
+    return;
+  }
+
+  const diagnostics = buildRuntimeContextDiagnostics();
+  if (!diagnostics.ok) {
+    renderMissingRuntimeContext(diagnostics, flags);
+    process.exit(1);
+  }
+  const context = runtimeContextFromDiagnostics(diagnostics);
+  try {
+    if (command === 'status') {
+      await handleStatus(context, flags);
+      return;
+    }
+
+    if (command === 'play' && subcommand === 'status') {
+      await handlePlayStatus(context, flags);
+      return;
+    }
+    if (command === 'play' && subcommand === 'start') {
+      await handlePlayStart(context, flags);
+      return;
+    }
+    if (command === 'play' && subcommand === 'stop') {
+      await handlePlayStop(context, flags);
+      return;
+    }
+    if (command === 'play' && subcommand === 'logs') {
+      await handlePlayLogs(context, flags);
+      return;
+    }
+
+    if (command === 'inspect' && subcommand === 'url') {
+      await handleInspectUrl(context, flags);
+      return;
+    }
+    if (command === 'inspect' && subcommand === 'reset-state') {
+      await handleInspectResetState(context, flags);
+      return;
+    }
+    if (command === 'inspect' && subcommand === 'request-review') {
+      await handleInspectRequestReview(context, flags, rest);
+      return;
+    }
+    if (command === 'inspect' && subcommand === 'request-image-review') {
+      const [imagePath, ...messageParts] = rest;
+      await handleInspectImageReview(context, imagePath || '', flags, messageParts);
+      return;
+    }
+    if (command === 'inspect' && subcommand === 'guide' && rest[0] === 'request') {
+      await handleInspectGuideRequest(context, flags, rest.slice(1));
+      return;
+    }
+    if (command === 'inspect' && subcommand === 'guide' && rest[0] === 'list') {
+      await handleInspectGuideList(context, flags);
+      return;
+    }
+    if (command === 'inspect' && subcommand === 'guide' && rest[0] === 'show') {
+      await handleInspectGuideShow(context, flags, rest[1] || '');
+      return;
+    }
+    if (command === 'inspect' && subcommand === 'guide' && rest[0] === 'update') {
+      await handleInspectGuideUpdate(context, flags, rest[1] || '');
+      return;
+    }
+    if (command === 'inspect' && subcommand === 'guide' && rest[0] === 'delete') {
+      await handleInspectGuideDelete(context, flags, rest[1] || '');
+      return;
+    }
+    if (command === 'inspect' && subcommand === 'screenshot') {
+      await handleInspectScreenshot(context, flags);
+      return;
+    }
+    if (command === 'inspect' && subcommand === 'action') {
+      await handleInspectAction(context, flags);
+      return;
+    }
+    if (command === 'inspect' && subcommand === 'run-script') {
+      await handleInspectRunScript(context, flags, rest[0] || '');
+      return;
+    }
+    if (command === 'inspect' && subcommand === 'scenario' && rest[0] === 'list') {
+      await handleInspectScenarioList(context, flags);
+      return;
+    }
+    if (command === 'inspect' && subcommand === 'scenario' && rest[0] === 'run') {
+      await handleInspectScenarioRun(context, flags, rest[1] || '');
+      return;
+    }
+    if (command === 'inspect' && subcommand === 'session' && rest[0] === 'close') {
+      const inspectSessionId = rest[1] || '';
+      if (!inspectSessionId) {
+        fail('inspect session close requires a session id.');
+      }
+      await handleInspectSessionClose(context, inspectSessionId, flags);
+      return;
+    }
+
+    if (command === 'gather' && subcommand === 'create') {
+      await handleGatherCreate(context, flags);
+      return;
+    }
+    if (command === 'gather' && subcommand === 'show') {
+      await handleGatherShow(context, flags, rest[0] || '');
+      return;
+    }
+
+    fail(`Unknown command: ${positionals.join(' ')}`);
+  } catch (error) {
+    if (error?.runtimeCliFailure) {
+      renderRuntimeRequestFailure(error.runtimeCliFailure, { json: flags.json });
+      process.exit(1);
+    }
+    throw error;
+  }
+}
+
+if (require.main === module) {
+  main().catch((error) => {
+    fail(error?.message || String(error));
+  });
+}
+
+module.exports = {
+  parseArgs,
+  parseDurationMs,
+  parseInteger,
+  deriveRuntimeApiBaseUrl,
+  buildRuntimeContextDiagnostics,
+  formatRuntimeContextDiagnostics,
+  runtimeContextMissingMessage,
+  runtimeContextFromDiagnostics,
+  renderMissingRuntimeContext,
+  resolveRuntimeContext,
+  handleDoctor,
+  parseResponse,
+  extractErrorMessage,
+  isLoopbackHostname,
+  createRuntimeCliRequestError,
+  buildRuntimeTransportFailure,
+  buildRuntimeHttpFailure,
+  formatRuntimeRequestFailure,
+  renderRuntimeRequestFailure,
+  apiRequest,
+  printJson,
+  printPlayStatus,
+  printInspectScreenshotResult,
+  printInspectSessionSummary,
+  printInspectActionResult,
+  printInspectRunScriptResult,
+  printInspectScenarioList,
+  printInspectScenarioResult,
+  printInspectResetStateResult,
+  buildInspectRequestReviewPayload,
+  buildInspectImageReviewPayload,
+  buildInspectGuideRequestPayload,
+  buildInspectResetStatePayload,
+  buildInspectGuideUpdatePayload,
+  buildInspectScreenshotPayload,
+  buildInspectActionPayload,
+  buildInspectRunScriptPayload,
+  buildInspectScenarioRunPayload,
+  printInspectGuideSummary,
+  printInspectGuideList,
+  printInspectGuideRecording,
+  printInspectGuideUpdateResult,
+  printInspectGuideDeleteResult,
+  buildPlayStartPayload,
+  loadInspectActionScript,
+  getHelpText,
+  main,
+};

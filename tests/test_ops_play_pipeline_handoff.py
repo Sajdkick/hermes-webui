@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 
 from api import ops_notifications, ops_runs, play_pipeline
 
@@ -167,3 +168,68 @@ def test_play_notification_includes_task_and_terminal_target(monkeypatch):
         "sessionId": "session-1",
     }
     assert "run-1" in notification["notificationKey"]
+
+
+def test_stale_play_handoff_emits_repairable_play_notification(monkeypatch, tmp_path):
+    runs_file = _patch_run_context(monkeypatch, tmp_path)
+    triggered_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    runs_file.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "run-1",
+                    "projectId": "project-1",
+                    "taskId": "task-1",
+                    "sessionId": "session-1",
+                    "title": "Run Play",
+                    "summary": "Task completed from the ops dashboard.",
+                    "status": "running",
+                    "createdAt": triggered_at,
+                    "updatedAt": triggered_at,
+                    "metadata": {
+                        "taskText": "Run Play",
+                        "playPipelineTriggeredAt": triggered_at,
+                        "playPipelineId": "pipe-1",
+                        "playPipelineStatus": "building",
+                    },
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        ops_notifications.ops_projects,
+        "get_ops_project",
+        lambda project_id: {"id": project_id, "name": "Demo", "path": "/tmp/demo", "coreBranch": "main"},
+    )
+    monkeypatch.setattr(ops_notifications.session_sidecars, "list_project_linkages", lambda _project_id: [])
+    monkeypatch.setattr(
+        ops_notifications.ops_projects,
+        "get_ops_project_task",
+        lambda project_id, task_id: {
+            "task": {"id": task_id, "text": "Run Play", "grade": "green", "done": False}
+        },
+    )
+    monkeypatch.setattr(
+        play_pipeline,
+        "get_project_play_config_file_info",
+        lambda project_id: {"configured": True, "valid": True, "exists": True, "path": "/tmp/play.json", "branch": "main"},
+    )
+    with play_pipeline._LOCK:
+        play_pipeline._PIPELINES.pop("project-1", None)
+
+    payload = ops_notifications.list_pending_notifications("project-1")
+
+    play_note = next(item for item in payload["notifications"] if item["kind"] == "play")
+    assert play_note["notificationKey"].startswith("play:project-1:run-1:stale:")
+    assert play_note["playStatus"] == "stale"
+    assert play_note["playNeedsRepair"] is True
+    assert play_note["playRepairAvailable"] is True
+    assert play_note["playPrimaryAction"] == "start-inspect"
+    assert "no active Play pipeline state" in play_note["playFallbackError"]
+    assert play_note["terminalTarget"] == {
+        "projectId": "project-1",
+        "taskId": "task-1",
+        "sessionId": "session-1",
+        "runId": "run-1",
+    }

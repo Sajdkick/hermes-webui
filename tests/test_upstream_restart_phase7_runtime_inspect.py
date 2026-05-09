@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import shutil
 import subprocess
 import textwrap
@@ -66,7 +67,7 @@ def init_project_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def test_phase7_runtime_inspect_routes_wrap_ct_runtime(monkeypatch, tmp_path, git_available):
+def test_phase7_runtime_inspect_routes_wrap_hermes_runtime(monkeypatch, tmp_path, git_available):
     monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
 
     repo = init_project_repo(tmp_path)
@@ -88,27 +89,27 @@ def test_phase7_runtime_inspect_routes_wrap_ct_runtime(monkeypatch, tmp_path, gi
 
     commands = []
 
-    def fake_ct_runtime(project_path, args):
-        entry = {"command": ["ct-runtime", *args], "cwd": str(project_path)}
+    def fake_hermes_runtime(project_path, args):
+        entry = {"command": ["hermes-runtime", *args], "cwd": str(project_path)}
         if "--script-file" in args:
             script_path = Path(args[args.index("--script-file") + 1])
             entry["script"] = json.loads(script_path.read_text(encoding="utf-8"))
         commands.append(entry)
         command = entry["command"]
-        if command[:3] == ["ct-runtime", "inspect", "url"]:
+        if command[:3] == ["hermes-runtime", "inspect", "url"]:
             payload = {
                 "inspectUrl": f"/play-project/{project_id}/app/runtime-preview",
                 "browserUrl": "http://127.0.0.1:25123/app/runtime-preview",
                 "inspectSession": {"id": "inspect-session-1", "currentPublicUrl": f"/play-project/{project_id}/app/runtime-preview"},
             }
-        elif command[:3] == ["ct-runtime", "inspect", "reset-state"]:
+        elif command[:3] == ["hermes-runtime", "inspect", "reset-state"]:
             payload = {
                 "summary": "Reset debug state and primed the inspect session.",
                 "inspectUrl": f"/play-project/{project_id}/app/editor",
                 "browserUrl": "http://127.0.0.1:25123/app/editor",
                 "inspectSession": {"id": "inspect-session-1", "currentPublicUrl": f"/play-project/{project_id}/app/editor"},
             }
-        elif command[:3] == ["ct-runtime", "inspect", "screenshot"]:
+        elif command[:3] == ["hermes-runtime", "inspect", "screenshot"]:
             payload = {
                 "absolutePath": str(screenshot_path),
                 "inspectUrl": f"/play-project/{project_id}/app/editor",
@@ -116,7 +117,7 @@ def test_phase7_runtime_inspect_routes_wrap_ct_runtime(monkeypatch, tmp_path, gi
                 "page": {"summary": 'Captured /app/editor. Title: "Editor".', "pageTitle": "Editor", "finalPath": "/app/editor"},
                 "inspectSession": {"id": "inspect-session-2"},
             }
-        elif command[:3] == ["ct-runtime", "inspect", "action"]:
+        elif command[:3] == ["hermes-runtime", "inspect", "action"]:
             payload = {
                 "success": True,
                 "inspectUrl": f"/play-project/{project_id}/app/editor",
@@ -137,7 +138,7 @@ def test_phase7_runtime_inspect_routes_wrap_ct_runtime(monkeypatch, tmp_path, gi
             raise AssertionError(f"Unexpected command: {command}")
         return payload
 
-    monkeypatch.setattr(ops_runtime_inspect, "_run_ct_runtime_json", fake_ct_runtime)
+    monkeypatch.setattr(ops_runtime_inspect, "_run_hermes_runtime_json", fake_hermes_runtime)
 
     snapshot = _FakeHandler({})
     assert handle_post(snapshot, urlparse(f"http://example.com/api/ops/projects/{project_id}/runtime/inspect/snapshot")) is True
@@ -205,10 +206,10 @@ def test_phase7_runtime_inspect_routes_wrap_ct_runtime(monkeypatch, tmp_path, gi
     assert (inspect_dir / "screenshot.json").exists()
     assert (inspect_dir / "action.json").exists()
 
-    assert commands[0]["command"] == ["ct-runtime", "inspect", "url"]
-    assert commands[1]["command"] == ["ct-runtime", "inspect", "reset-state", "--timeout", "45000ms"]
+    assert commands[0]["command"] == ["hermes-runtime", "inspect", "url"]
+    assert commands[1]["command"] == ["hermes-runtime", "inspect", "reset-state", "--timeout", "45000ms"]
     assert commands[2]["command"] == [
-        "ct-runtime",
+        "hermes-runtime",
         "inspect",
         "screenshot",
         "--url",
@@ -218,10 +219,126 @@ def test_phase7_runtime_inspect_routes_wrap_ct_runtime(monkeypatch, tmp_path, gi
         "--file-name",
         "frame-check",
     ]
-    assert commands[3]["command"][:3] == ["ct-runtime", "inspect", "action"]
+    assert commands[3]["command"][:3] == ["hermes-runtime", "inspect", "action"]
     assert "--capture-screenshot" in commands[3]["command"]
     assert commands[3]["script"]["actions"][1]["type"] == "click"
     assert all(Path(entry["cwd"]).resolve() == repo.resolve() for entry in commands)
+
+
+def test_hermes_runtime_runner_resolves_repo_binary_when_path_missing(monkeypatch, tmp_path):
+    from api import ops_runtime_inspect
+
+    fake_home = tmp_path / "home"
+    repo_bin = Path(ops_runtime_inspect.__file__).resolve().parents[1] / "bin"
+    fake_runtime = repo_bin / "hermes-runtime"
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
+    monkeypatch.delenv("HERMES_RUNTIME_BIN", raising=False)
+
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["cwd"] = kwargs.get("cwd")
+        return subprocess.CompletedProcess(command, 0, stdout='{"ok":true}\n', stderr="")
+
+    monkeypatch.setattr(ops_runtime_inspect.subprocess, "run", fake_run)
+
+    payload = ops_runtime_inspect._run_hermes_runtime_json(tmp_path, ["inspect", "url"])
+
+    assert payload == {"ok": True}
+    assert captured["command"] == [str(fake_runtime), "inspect", "url", "--json"]
+    assert captured["cwd"] == str(tmp_path)
+
+
+def test_hermes_runtime_runner_reports_missing_binary(monkeypatch, tmp_path):
+    from api import ops_runtime_inspect
+
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
+    monkeypatch.delenv("HERMES_RUNTIME_BIN", raising=False)
+    monkeypatch.setattr(ops_runtime_inspect, "_default_hermes_runtime_candidates", lambda: [fake_home / ".local" / "bin" / "hermes-runtime"])
+
+    with pytest.raises(ops_runtime_inspect.OpsRuntimeInspectError) as exc_info:
+        ops_runtime_inspect._run_hermes_runtime_json(tmp_path, ["inspect", "url"])
+
+    assert exc_info.value.status == 500
+    assert "Expected it on PATH" in str(exc_info.value)
+
+
+def test_hermes_runtime_cli_prefers_webui_env_and_help_names():
+    script = r"""
+    const runtime = require('./bin/hermes-runtime');
+    process.env.HERMES_WEBUI_RUNTIME_API_BASE_URL = 'http://127.0.0.1:4321/runtime/';
+    process.env.HERMES_WEBUI_REQUEST_INPUT_TOKEN = 'token';
+    process.env.HERMES_RUNTIME_API_BASE_URL = 'http://127.0.0.1:9999/runtime/';
+    process.env.HERMES_REQUEST_INPUT_TOKEN = 'legacy-token';
+    delete process.env.CLOUD_TERMINAL_RUNTIME_API_BASE_URL;
+    delete process.env.CLOUD_TERMINAL_REQUEST_INPUT_TOKEN;
+    const context = runtime.resolveRuntimeContext();
+    if (context.apiBaseUrl !== 'http://127.0.0.1:4321/runtime') {
+      throw new Error('unexpected api base: ' + context.apiBaseUrl);
+    }
+    if (context.requestToken !== 'token') {
+      throw new Error('unexpected token');
+    }
+    const diagnostics = runtime.buildRuntimeContextDiagnostics();
+    if (!diagnostics.ok || diagnostics.runtimeApiBaseUrl.source !== 'HERMES_WEBUI_RUNTIME_API_BASE_URL') {
+      throw new Error('unexpected diagnostics: ' + JSON.stringify(diagnostics));
+    }
+    const help = runtime.getHelpText();
+    if (!help.includes('hermes-runtime doctor') || !help.includes('hermes-runtime status')) {
+      throw new Error('Hermes runtime command name missing from help');
+    }
+    if (help.includes('ct-runtime') || help.includes('Cloud Terminal') || help.includes('CLOUD_TERMINAL')) {
+      throw new Error('Cloud Terminal naming leaked into Hermes runtime help');
+    }
+    console.log('ok');
+    """
+    completed = subprocess.run(
+        ["node", "-e", script],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_hermes_runtime_doctor_reports_missing_session_env_without_secrets():
+    completed = subprocess.run(
+        ["node", "bin/hermes-runtime", "doctor", "--json"],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={"PATH": os.environ.get("PATH", "")},
+    )
+    payload = json.loads(completed.stdout)
+    assert payload["ok"] is False
+    assert "runtime API base URL" in payload["missing"]
+    assert "request-input token" in payload["missing"]
+    assert payload["requestInputToken"]["value"] == ""
+    assert "HERMES_WEBUI_RUNTIME_API_BASE_URL" in payload["acceptedEnv"]["runtimeApiBaseUrl"]
+
+
+def test_hermes_runtime_json_commands_report_missing_context_as_json():
+    completed = subprocess.run(
+        ["node", "bin/hermes-runtime", "status", "--json"],
+        cwd=Path(__file__).resolve().parents[1],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={"PATH": os.environ.get("PATH", "")},
+    )
+    assert completed.returncode == 1
+    assert completed.stderr == ""
+    payload = json.loads(completed.stdout)
+    assert payload["ok"] is False
+    assert payload["kind"] == "missing_runtime_context"
+    assert payload["diagnostics"]["requestInputToken"]["value"] == ""
 
 
 def test_phase7_ops_ui_renders_runtime_inspect_controls():

@@ -199,7 +199,7 @@
       '</div>',
       '</form>',
       '<div class="ops-runtime-tool-output">',
-      '<p>'+escapeHtml(String(screenshot.summary||'Capture a full-page or element-targeted screenshot through ct-runtime.'))+'</p>',
+      '<p>'+escapeHtml(String(screenshot.summary||'Capture a full-page or element-targeted screenshot through Hermes runtime.'))+'</p>',
       inspectRecordMeta([
         screenshot.absolutePath ? 'File: '+String(screenshot.absolutePath) : '',
         screenshot.inspectUrl ? 'Inspect: '+String(screenshot.inspectUrl) : '',
@@ -233,7 +233,7 @@
       '</div>',
       '</form>',
       '<div class="ops-runtime-tool-output">',
-      '<p>'+escapeHtml(String(action.summary||'Run scripted wait, click, drag, evaluate, assert, and capture steps through ct-runtime.'))+'</p>',
+      '<p>'+escapeHtml(String(action.summary||'Run scripted wait, click, drag, evaluate, assert, and capture steps through Hermes runtime.'))+'</p>',
       inspectRecordMeta([
         action.capture && action.capture.absolutePath ? 'Capture: '+String(action.capture.absolutePath) : '',
         action.artifacts && action.artifacts.manifest && action.artifacts.manifest.absolutePath ? 'Artifacts: '+String(action.artifacts.manifest.absolutePath) : '',
@@ -247,7 +247,7 @@
   function inspectToolkitSection(summary,state){
     return [
       '<section class="ops-runtime-inspect-panel">',
-      '<div class="ops-epic-header"><h3>Inspect toolkit</h3><span>ct-runtime</span></div>',
+      '<div class="ops-epic-header"><h3>Inspect toolkit</h3><span>Hermes runtime</span></div>',
       state && state.inspectError ? '<p class="ops-shell-error">'+escapeHtml(state.inspectError)+'</p>' : '',
       '<div class="ops-runtime-tool-grid">',
       inspectSnapshotSection(summary,state),

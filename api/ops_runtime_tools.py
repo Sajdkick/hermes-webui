@@ -17,12 +17,12 @@ def runtime_capabilities() -> dict:
         "screenshot": {
             "available": True,
             "label": "Runtime screenshot",
-            "reason": "ct-runtime-backed screenshot capture is available through fork-owned endpoints.",
+            "reason": "Hermes runtime-backed screenshot capture is available through fork-owned endpoints.",
         },
         "actions": {
             "available": True,
             "label": "Runtime actions",
-            "reason": "ct-runtime-backed scripted inspect actions are available through fork-owned endpoints.",
+            "reason": "Hermes runtime-backed scripted inspect actions are available through fork-owned endpoints.",
         },
         "play": {
             "available": True,
