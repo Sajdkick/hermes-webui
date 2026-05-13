@@ -397,7 +397,6 @@ def test_legacy_bridge_preserves_play_notifications_and_opens_them_locally():
             notifications: [play],
             playStatusByProject: {},
             playBusyByProject: {},
-            playConfigByProject: {},
             playLogsByProject: {},
             playSnapshotsByProject: {},
             playScreenshotsByProject: {},
@@ -411,7 +410,6 @@ def test_legacy_bridge_preserves_play_notifications_and_opens_them_locally():
           AgentBridge: {
             play: {
               status: async () => ({}),
-              config: async () => ({}),
               logs: async () => ({ text: '' }),
               start: async () => ({}),
               restart: async () => ({}),
@@ -451,6 +449,92 @@ def test_legacy_bridge_preserves_play_notifications_and_opens_them_locally():
     assert completed.stdout.strip() == "ok"
 
 
+def test_legacy_bridge_prefers_locked_build_notification_over_newer_ready_note():
+    script = textwrap.dedent(
+        """
+        (async () => {
+        const fs = require('fs');
+        const vm = require('vm');
+
+        const bridgeSource = fs.readFileSync('static/ops-legacy-agent-bridge.js', 'utf8');
+        const api = async (path) => {
+          if (path === '/api/ops/notifications/pending'){
+            return {
+              notifications: [
+                {
+                  notificationKey: 'play:project-1:building:2026-05-06T06:00:00Z',
+                  kind: 'play',
+                  message: 'Play build in progress.',
+                  project: { id: 'project-1', name: 'Hermes' },
+                  inspectUrl: '',
+                  playStatus: 'building',
+                  playLocked: true,
+                  playNeedsRepair: false,
+                  terminalTarget: { projectId: 'project-1', taskId: '', sessionId: '', runId: '' },
+                  updatedAt: '2026-05-06T06:00:00Z'
+                },
+                {
+                  notificationKey: 'play:project-1:ready:2026-05-06T06:05:00Z',
+                  kind: 'play',
+                  message: 'Stale ready notification from the previous build.',
+                  project: { id: 'project-1', name: 'Hermes' },
+                  inspectUrl: '/play-project/project-1/app',
+                  playStatus: 'ready',
+                  playLocked: false,
+                  playNeedsRepair: false,
+                  terminalTarget: { projectId: 'project-1', taskId: '', sessionId: '', runId: '' },
+                  updatedAt: '2026-05-06T06:05:00Z'
+                }
+              ]
+            };
+          }
+          if (path === '/api/ops/runs') return { runs: [] };
+          if (path === '/api/ops/notifications/dismissed') return { dismissed: [] };
+          throw new Error('Unexpected API path: ' + path);
+        };
+        const context = {
+          console,
+          api,
+          projectUrl: (projectId, suffix='') => '/api/ops/projects/' + projectId + suffix,
+          fetch: async () => ({ ok: true, json: async () => ({}) }),
+          location: { href: 'http://example.com/ops' },
+          URL,
+          URLSearchParams,
+          EventSource: function EventSource(){},
+          FormData: function FormData(){},
+          window: {},
+          document: {},
+          setTimeout,
+          clearTimeout,
+          Date,
+        };
+        context.window = context;
+        vm.createContext(context);
+        vm.runInContext(bridgeSource, context);
+        const payload = await context.window.AgentBridge.notifications.list();
+        const playNotes = payload.notifications.filter((entry) => entry.kind === 'play');
+        if (playNotes.length !== 1){
+          throw new Error('Expected exactly one compacted play notification, got ' + playNotes.length);
+        }
+        if (playNotes[0].playStatus !== 'building' || playNotes[0].playLocked !== true){
+          throw new Error('Compaction should keep the active locked build notification over a newer stale ready note.');
+        }
+        console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
 def test_play_notification_click_starts_build_and_opens_inspect_url():
     script = textwrap.dedent(
         """
@@ -463,6 +547,7 @@ def test_play_notification_click_starts_build_and_opens_inspect_url():
         const assigned = [];
         const toasts = [];
         const startCalls = [];
+        let notificationRefreshes = 0;
         let statusCalls = 0;
         const note = {
           id: 'play:project-1:run-1:stale:now',
@@ -480,6 +565,7 @@ def test_play_notification_click_starts_build_and_opens_inspect_url():
           console,
           URL,
           setTimeout: (fn) => { fn(); return 1; },
+          clearTimeout: () => {},
           window: {},
         };
         context.window = context;
@@ -512,17 +598,34 @@ def test_play_notification_click_starts_build_and_opens_inspect_url():
         if (rendered.includes('data-ops-action="open-notification-target"')){
           throw new Error('Stale Play notification still renders the chat/project target action.');
         }
+        const buildingNote = {
+          ...note,
+          id: 'play:project-1:run-1:building:now',
+          message: 'Play build is running.',
+          inspectUrl: '',
+          playStatus: 'building',
+          playNeedsRepair: false,
+          playLocked: true,
+          playPrimaryAction: '',
+        };
+        const buildingRendered = notificationDashboard.renderNotification(buildingNote);
+        if (buildingRendered.includes('data-ops-action="open-play-notification"')){
+          throw new Error('Building Play notification should not render an open action while locked.');
+        }
+        if (!buildingRendered.includes('Play build') || !buildingRendered.includes('Locked until the Play build finishes')){
+          throw new Error('Building Play notification did not show the locked build state.');
+        }
         vm.runInContext(playSource, context);
+        const playOps = {
+          notifications: [note],
+          playStatusByProject: {},
+          playBusyByProject: {},
+          playLogsByProject: {},
+          playSnapshotsByProject: {},
+          playScreenshotsByProject: {},
+        };
         const dashboard = context.window.HermesOpsModules.play.bindDashboard({
-          OPS: {
-            notifications: [note],
-            playStatusByProject: {},
-            playBusyByProject: {},
-            playConfigByProject: {},
-            playLogsByProject: {},
-            playSnapshotsByProject: {},
-            playScreenshotsByProject: {},
-          },
+          OPS: playOps,
           api: async () => ({}),
           projectUrl: (projectId, suffix='') => '/api/ops/projects/' + projectId + suffix,
           renderCurrentOpsView: () => {},
@@ -538,7 +641,6 @@ def test_play_notification_click_starts_build_and_opens_inspect_url():
                 }
                 return { projectId: 'project-1', configured: true, valid: true, configExists: true, status: 'ready', running: true, ready: true, inspectUrl: '/play-project/project-1/app' };
               },
-              config: async () => ({}),
               logs: async () => ({ text: '' }),
               start: async (projectId, payload) => {
                 startCalls.push({ projectId, payload });
@@ -549,7 +651,11 @@ def test_play_notification_click_starts_build_and_opens_inspect_url():
             },
             runtime: {},
           },
-          loadNotifications: async () => [],
+          loadNotifications: async () => {
+            notificationRefreshes += 1;
+            playOps.notifications = [{ ...buildingNote, id: 'play:project-1:run-1:building:fresh' }];
+            return playOps.notifications;
+          },
           playInspectOverlayUrl: (item) => item && item.inspectUrl ? item.inspectUrl : '',
           openProjectDetail: async () => { throw new Error('should not open the project/chat target'); },
           notificationById: (id) => id === note.id ? note : null,
@@ -568,6 +674,12 @@ def test_play_notification_click_starts_build_and_opens_inspect_url():
         if (startCalls[0].payload.runId !== 'run-1' || startCalls[0].payload.taskId !== 'task-1' || startCalls[0].payload.sessionId !== 'session-1'){
           throw new Error('Play notification did not preserve terminal target metadata when starting Play.');
         }
+        if (notificationRefreshes < 1){
+          throw new Error('Play notification start did not refresh notifications immediately.');
+        }
+        if (playOps.notifications.some((item) => item.id === note.id)){
+          throw new Error('Old Play notification still lingered after the build notification refresh.');
+        }
         console.log('ok');
         })().catch((error) => {
           console.error(error && error.stack ? error.stack : error);
@@ -581,4 +693,43 @@ def test_play_notification_click_starts_build_and_opens_inspect_url():
         capture_output=True,
         text=True,
     )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_play_quick_action_accepts_backend_status_fields():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        const source = fs.readFileSync('static/ops-legacy-dashboard-quick-actions.js', 'utf8');
+        const context = { window: { HermesOpsModules: {} } };
+        vm.createContext(context);
+        vm.runInContext(source, context);
+        const dashboard = context.window.HermesOpsModules.dashboardQuickActions.bindDashboard({
+          OPS: { playBusyByProject: {} },
+          esc: (value) => String(value ?? ''),
+          svg: { play: '' },
+          playStatusFor: () => ({
+            status: 'ready',
+            configured: true,
+            valid: true,
+            configExists: true,
+            ready: true,
+            inspectUrl: '/play-project/project-1/app',
+            title: 'Ready',
+            label: 'Play ready',
+          }),
+          isPlayRunning: () => false,
+          playStatusTitle: (status) => status.title || '',
+          playStatusLabel: (status) => status.label || '',
+        });
+        const html = dashboard.renderProjectPlayQuickAction({ id: 'project-1' });
+        if (!html.includes('data-ops-action="open-play"')) throw new Error('Quick action did not switch to Play.');
+        if (html.includes('disabled')) throw new Error('Quick action Play button should not be disabled.');
+        if (!html.includes('<span>Play</span>')) throw new Error('Quick action did not render Play label.');
+        console.log('ok');
+        """
+    )
+    completed = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
     assert completed.stdout.strip() == "ok"

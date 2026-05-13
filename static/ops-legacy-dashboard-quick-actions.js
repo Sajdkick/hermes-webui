@@ -26,30 +26,32 @@
       const status=playStatusFor(project.id);
       const busy=String(OPS.playBusyByProject[project.id]||'').trim();
       const state=String(status&&status.status||'idle').toLowerCase();
-      let action='show-play-config';
-      let label='Configure';
+      const configured=!!(status&&(status.configAvailable===true||status.configExists===true||status.configured===true));
+      const valid=!!(status&&(status.configValid===true||status.valid===true));
+      let action='start-play';
+      let label='Build';
       let title=playStatusTitle(status);
-      let disabled=!!busy;
+      let disabled=true;
       let primary=false;
-      if(status&&status.configAvailable&&status.configValid){
+      if(configured&&valid){
         if(status.ready&&status.inspectUrl){
           action='open-play';
           label='Play';
+          disabled=!!busy;
           primary=true;
         }else if(isPlayRunning(status)){
           action='start-play';
-          label=busy&&busy==='start'?'Starting...':playStatusLabel(status);
+          label=busy&&busy==='start'?'Building...':playStatusLabel(status);
           disabled=true;
         }else if(state==='failed'||state==='stopped'){
           action='restart-play';
           label=busy&&busy==='restart'?'Restarting...':'Restart';
+          disabled=!!busy;
         }else{
           action='start-play';
-          label=busy&&busy==='start'?'Starting...':'Start';
+          label=busy&&busy==='start'?'Building...':'Build';
+          disabled=!!busy;
         }
-      }else if(status&&status.configAvailable&&!status.configValid){
-        label='Configure';
-        disabled=false;
       }
       return `<button class="ops-btn ${primary&&!disabled?'primary':''}" type="button" data-ops-action="${esc(action)}" data-project-id="${esc(project.id)}" ${disabled?'disabled':''} title="${esc(title)}">${svg.play}<span>${esc(label)}</span></button>`;
     }

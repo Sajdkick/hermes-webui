@@ -15,6 +15,8 @@
     const normalizedAutoApprovalPolicy=ctx&&ctx.normalizedAutoApprovalPolicy;
     const loadProjects=ctx&&ctx.loadProjects;
     const openProjectDetail=ctx&&ctx.openProjectDetail;
+    const createQuickTask=ctx&&ctx.createQuickTask;
+    const executeReadyTasksWithAi=ctx&&ctx.executeReadyTasksWithAi;
     const loadNotifications=ctx&&ctx.loadNotifications;
     const loadOpsRuns=ctx&&ctx.loadOpsRuns;
     const loadNotificationDiagnostics=ctx&&ctx.loadNotificationDiagnostics;
@@ -31,6 +33,7 @@
     const renderProjectGitQuickAction=ctx&&ctx.renderProjectGitQuickAction;
     const renderProjectPlayQuickAction=ctx&&ctx.renderProjectPlayQuickAction;
     const renderProjectActivityQuickAction=ctx&&ctx.renderProjectActivityQuickAction;
+    const playStatusFor=ctx&&ctx.playStatusFor;
     const sessionAccentStyle=ctx&&ctx.sessionAccentStyle;
     const sessionGroupAccentStyle=ctx&&ctx.sessionGroupAccentStyle;
     const sessionRefValue=ctx&&ctx.sessionRefValue;
@@ -61,6 +64,8 @@
       || typeof esc!=='function'
       || !svg
       || typeof loadProjects!=='function'
+      || typeof createQuickTask!=='function'
+      || typeof executeReadyTasksWithAi!=='function'
       || typeof loadNotifications!=='function'
       || typeof loadOpsRuns!=='function'
       || typeof findProject!=='function'
@@ -482,12 +487,21 @@
       );
     }
 
+    function formatSessionActivityBranchLabel(session){
+      const direct=String(session&&session.branchLabel||session&&session.branch||'').trim();
+      if(direct)return direct;
+      const projectId=String(session&&session.projectId||session&&session.ops_project_id||'').trim();
+      const project=projectId?findProject(projectId):null;
+      return project?String(projectBranchLabel(project)||'').trim():'';
+    }
+
     function formatSessionActivityTitle(session){
+      const branchLabel=formatSessionActivityBranchLabel(session);
+      if(branchLabel)return branchLabel;
       return String(
         session&&(
           session.label
           || session.taskText
-          || session.branchLabel
           || session.projectName
           || session.title
           || 'Untitled'
@@ -497,6 +511,55 @@
 
     function formatSessionActivityRepoLabel(session){
       return String(session&&session.repoLabel||session&&session.projectName||'').trim();
+    }
+
+    function sessionActivityTaskText(session){
+      return String(
+        session&&(
+          session.taskText
+          || (session.ops_task&&session.ops_task.text)
+          || ''
+        )||''
+      ).replace(/\s+/g,' ').trim();
+    }
+
+    function formatSessionActivityTaskPreview(session){
+      const text=sessionActivityTaskText(session);
+      if(!text)return '';
+      const limit=140;
+      if(text.length<=limit)return text;
+      return `${text.slice(0,limit-1).trimEnd()}…`;
+    }
+
+    function sessionActivityProjectPlayState(session){
+      if(typeof playStatusFor!=='function')return null;
+      const projectId=String(session&&session.projectId||session&&session.ops_project_id||'').trim();
+      if(!projectId)return null;
+      const status=playStatusFor(projectId);
+      if(!status)return null;
+      const configured=!!(status.configured===true||status.configAvailable===true||status.configExists===true);
+      if(!configured)return null;
+      const normalizedStatus=String(status.status||'idle').trim().toLowerCase()||'idle';
+      if(normalizedStatus==='queued'){
+        return {key:'queued',label:'Queued',stateClass:'state-queued',title:'Project Play is queued behind another build.'};
+      }
+      if(normalizedStatus==='building'||normalizedStatus==='starting'){
+        return {
+          key:'building',
+          label:'Building',
+          stateClass:'state-building',
+          title:normalizedStatus==='starting'
+            ? 'Project Play build passed and the app is starting.'
+            : 'Project Play build is running.',
+        };
+      }
+      if(normalizedStatus==='ready'&&status.ready===true){
+        return {key:'play',label:'Play',stateClass:'state-ready',title:'Project Play is ready.'};
+      }
+      if(normalizedStatus==='failed'){
+        return {key:'failed',label:'Failed',stateClass:'state-failed',title:status.error||'Project Play failed.'};
+      }
+      return {key:'idle',label:'Idle',stateClass:'state-idle',title:'Project Play is idle.'};
     }
 
     function formatSessionActivitySummary(entries,groups,refreshedLabel){
@@ -711,7 +774,7 @@
     }
 
     async function openMainSession(session,options){
-      const sessionKey=sessionRefValue(session);
+      const sessionKey=sessionActionRefValue(session);
       if(!sessionKey||typeof openOpsSession!=='function')return false;
       await openOpsSession(sessionKey);
       if(options&&options.openWorkspace&&windowRef&&typeof windowRef.toggleWorkspacePanel==='function'){
@@ -836,6 +899,14 @@
       `;
     }
 
+    function sessionActionRefValue(sessionLike){
+      if(!sessionLike)return '';
+      if(typeof sessionLike==='string')return String(sessionLike).trim();
+      const direct=String(sessionLike.session_id||sessionLike.sessionId||sessionLike.id||'').trim();
+      if(direct)return direct;
+      return String(sessionLike.sessionKey||sessionLike.session_key||sessionRefValue(sessionLike)||'').trim();
+    }
+
     function renderSessionWorkspaceRow(session,project){
       const linkedProject=project&&project.id?project:sessionWorkspaceProject(session);
       const status=sessionWorkspaceStatus(session);
@@ -843,7 +914,7 @@
       const subtitle=sessionWorkspaceSubtitle(session);
       const repo=sessionWorkspaceRepoLabel(session);
       const style=sessionAccentStyle(session,0,'ops-session-row');
-      const sessionKey=sessionRefValue(session);
+      const sessionKey=sessionActionRefValue(session);
       const rowClass=['ops-session',status.kind,sessionKey?'interactive':''].filter(Boolean).join(' ');
       const rowAttrs=sessionKey
         ? ` tabindex="0" role="button" data-ops-action="open-session" data-session-key="${esc(sessionKey)}" data-ops-session-row="true"${linkedProject&&linkedProject.id?` data-project-id="${esc(linkedProject.id)}"`:''}`
@@ -885,7 +956,7 @@
 
     function renderSessionActivityControls(session,groups){
       if(!Array.isArray(groups)||!groups.length)return '<div class="menu-session-activity-controls"></div>';
-      const sessionKey=sessionRefValue(session);
+      const sessionKey=sessionActionRefValue(session);
       return `
         <div class="menu-session-activity-controls">
           <label class="menu-session-activity-group-select-wrap" title="Move session between groups.">
@@ -899,27 +970,44 @@
       `;
     }
 
+    function renderSessionActivityItemActions(session){
+      const sessionKey=sessionActionRefValue(session);
+      if(!sessionKey)return '';
+      const projectId=String(session&&session.projectId||session&&session.ops_project_id||'').trim();
+      return `
+        <div class="menu-session-activity-actions">
+          <button class="menu-action-btn danger small" type="button" data-ops-action="close-session" data-session-key="${esc(sessionKey)}" ${projectId?`data-project-id="${esc(projectId)}"`:''} title="Close this active session.">${svg.close}<span>Close session</span></button>
+        </div>
+      `;
+    }
+
     function renderSessionActivityItem(session,groups){
       const state=sessionActivityStatus(session);
       const title=formatSessionActivityTitle(session);
       const repoLabel=formatSessionActivityRepoLabel(session);
-      const sessionKey=sessionRefValue(session);
+      const taskText=sessionActivityTaskText(session);
+      const taskPreview=formatSessionActivityTaskPreview(session);
+      const sessionKey=sessionActionRefValue(session);
       const hasReadableOutput=session&&session.readableOutputPending===true;
+      const projectPlayState=sessionActivityProjectPlayState(session);
       return `
-        <div class="menu-session-activity-item interactive ${hasReadableOutput?'has-readable-output':''}" tabindex="0" role="button" data-ops-action="open-session" data-session-key="${esc(sessionKey)}" data-ops-session-activity-item="true" data-readable-output-pending="${hasReadableOutput?'true':'false'}">
+        <div class="menu-session-activity-item interactive ${hasReadableOutput?'has-readable-output':''}" tabindex="0" role="button" data-ops-action="open-session" data-session-key="${esc(sessionKey)}" data-ops-session-activity-item="true" data-readable-output-pending="${hasReadableOutput?'true':'false'}" data-project-play-state="${esc(projectPlayState&&projectPlayState.key||'')}">
           <div class="menu-session-activity-main">
             <div class="menu-session-activity-heading">
               <div class="menu-session-activity-copy">
                 <div class="menu-session-activity-title-line">
                   <div class="menu-session-activity-title">${esc(title)}</div>
                   <span class="menu-session-activity-state state-${esc(state.toneClass||'idle')}" title="${esc(state.title||'')}">${esc(state.labelText||'Quiet')}</span>
+                  ${projectPlayState?`<span class="menu-session-activity-badge project-play play-status-badge ${esc(projectPlayState.stateClass)}" title="${esc(projectPlayState.title)}">${esc(projectPlayState.label)}</span>`:''}
                   ${hasReadableOutput?'<span class="menu-session-activity-badge readable-output">Unread output</span>':''}
                 </div>
                 ${repoLabel&&repoLabel!==title?`<div class="menu-session-activity-repo">${esc(repoLabel)}</div>`:''}
+                ${taskPreview?`<div class="menu-session-activity-task-preview" title="${esc(taskText)}"><span class="menu-session-activity-task-label">Task</span><span>${esc(taskPreview)}</span></div>`:''}
               </div>
               ${renderSessionActivityControls(session,groups)}
             </div>
           </div>
+          ${renderSessionActivityItemActions(session)}
         </div>
       `;
     }
@@ -1081,8 +1169,10 @@
       const projectOptions=OPS.projects.length
         ? OPS.projects.map(project=>`<option value="${esc(project.id)}" ${project.id===selectedProjectId?'selected':''}>${esc(formatQuickTaskProjectOptionLabel(project))}</option>`).join('')
         : '<option value="">No projects available</option>';
+      const quickTaskBusyAction=String(OPS.quickTaskBusyAction||'').trim();
       const quickTaskDisabled=OPS.loading||OPS.quickTaskBusy||OPS.quickTaskDictationActive||OPS.quickTaskDictationBusy||!selectedProjectId;
       const quickTaskAttachDisabled=OPS.loading||OPS.quickTaskBusy||!selectedProjectId;
+      const quickTaskExecuteReadyDisabled=OPS.loading||OPS.quickTaskBusy||!selectedProjectId;
       const quickTaskStatusKind=String(OPS.quickTaskStatusKind||'').trim().toLowerCase();
       const quickTaskStatusClass=quickTaskStatusKind==='error'
         ? ' error'
@@ -1144,7 +1234,11 @@
                   <button class="menu-action-btn secondary small" type="button" data-ops-action="attach-quick-task-images" ${quickTaskAttachDisabled?'disabled':''}>Attach screenshots</button>
                   <button class="task-mic-btn ${quickTaskMicState.listening?'listening':''}" type="button" data-ops-action="toggle-quick-task-dictation" ${quickTaskMicState.disabled?'disabled':''} aria-pressed="${quickTaskMicState.listening?'true':'false'}" title="${esc(quickTaskMicState.title)}">${esc(quickTaskMicState.label)}</button>
                 </div>
-                <button class="task-add-btn" type="submit" ${quickTaskDisabled?'disabled':''}>${OPS.quickTaskBusy?'Creating...':'Create & run'}</button>
+                <div class="menu-quick-task-primary-actions">
+                  <button class="menu-action-btn secondary small" type="button" data-ops-action="create-quick-task" ${quickTaskDisabled?'disabled':''}>${quickTaskBusyAction==='create-only'?'Creating...':'Create'}</button>
+                  <button class="task-add-btn" type="submit" ${quickTaskDisabled?'disabled':''}>${quickTaskBusyAction==='create-run'?'Creating...':'Create & run'}</button>
+                  <button class="menu-action-btn secondary small" type="button" data-ops-action="execute-ready-tasks" ${quickTaskExecuteReadyDisabled?'disabled':''} title="Ask Codex to execute ready and needs-more-work tasks in sequence.">${quickTaskBusyAction==='execute-ready'?'Starting...':'Execute ready tasks with AI'}</button>
+                </div>
               </div>
               <input id="opsQuickTaskImagesInput" type="file" accept="image/*" multiple hidden data-ops-quick-field="images">
             </form>
@@ -1281,6 +1375,34 @@
         if(OPS.quickTaskDictationActive)return stopQuickTaskDictation();
         return await startQuickTaskDictation();
       }
+      if(action==='create-quick-task'&&OPS.view==='home'){
+        const projectId=String(OPS.quickTaskProjectId||normalizeQuickTaskProjectSelection()||'').trim();
+        await createQuickTask(projectId,OPS.quickTaskText,{run:false});
+        return null;
+      }
+      if(action==='execute-ready-tasks'&&OPS.view==='home'){
+        const projectId=String(OPS.quickTaskProjectId||normalizeQuickTaskProjectSelection()||'').trim();
+        if(!projectId)throw new Error('Choose a project first.');
+        OPS.quickTaskBusy=true;
+        OPS.quickTaskBusyAction='execute-ready';
+        OPS.quickTaskStatus='Preparing ready task execution...';
+        OPS.quickTaskStatusKind='info';
+        if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
+        try{
+          await executeReadyTasksWithAi(projectId);
+          OPS.quickTaskStatus='Ready task execution session started.';
+          OPS.quickTaskStatusKind='success';
+        }catch(err){
+          OPS.quickTaskStatus=err&&err.message?err.message:'Unable to execute ready tasks.';
+          OPS.quickTaskStatusKind='error';
+          throw err;
+        }finally{
+          OPS.quickTaskBusy=false;
+          OPS.quickTaskBusyAction='';
+          if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
+        }
+        return null;
+      }
       if(action==='toggle-session-activity-group'){
         const groupKey=String(btn&&btn.dataset&&btn.dataset.sessionActivityGroupKey||'').trim();
         if(!groupKey)return null;
@@ -1358,7 +1480,12 @@
     function handleHomeKeydown(event){
       if(!root()||!root().contains(event.target))return false;
       const item=event.target.closest('[data-ops-session-activity-item="true"]');
-      if(item&&!event.target.closest('[data-ops-session-group-select]')&&!event.target.closest('[data-ops-session-group-label]')){
+      if(
+        item
+        && !event.target.closest('[data-ops-session-group-select]')
+        && !event.target.closest('[data-ops-session-group-label]')
+        && !event.target.closest('.menu-session-activity-actions')
+      ){
         if(event.key==='Enter'||event.key===' '){
           event.preventDefault();
           item.click();

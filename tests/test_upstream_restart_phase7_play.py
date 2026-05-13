@@ -116,7 +116,7 @@ def setup_project(monkeypatch, tmp_path, play_config, *, play_path="project_play
     return repo, project["id"]
 
 
-def test_phase7_play_config_preference_and_document_save(monkeypatch, tmp_path, git_available):
+def test_phase7_play_config_preference_and_document_routes_are_not_exposed(monkeypatch, tmp_path, git_available):
     repo, project_id = setup_project(monkeypatch, tmp_path, valid_direct_config())
     (repo / ".cloud-terminal").mkdir(parents=True, exist_ok=True)
     (repo / ".cloud-terminal" / "play.json").write_text(
@@ -139,17 +139,12 @@ def test_phase7_play_config_preference_and_document_save(monkeypatch, tmp_path, 
     assert status["configPath"] == str(repo / "project_play.json")
 
     saved_config = valid_proxy_config()
-    config_save = _FakeHandler({"content": json.dumps(saved_config, ensure_ascii=False, indent=2)})
-    assert handle_post(config_save, urlparse(f"http://example.com/api/ops/projects/{project_id}/play/config")) is True
-    save_payload = _response_json(config_save)
-    assert save_payload["saved"] is True
-    assert save_payload["path"] == str(repo / ".hermes" / "play.json")
+    config_save = _FakeHandler({"content": json.dumps(saved_config, ensure_ascii=False, indent=2)}, command="POST")
+    assert handle_post(config_save, urlparse(f"http://example.com/api/ops/projects/{project_id}/play/config")) is False
+    assert not (repo / ".hermes" / "play.json").exists()
 
     config_doc = _FakeHandler()
-    assert handle_get(config_doc, urlparse(f"http://example.com/api/ops/projects/{project_id}/play/config")) is True
-    doc_payload = _response_json(config_doc)
-    assert doc_payload["targetPath"] == str(repo / ".hermes" / "play.json")
-    assert '"mode": "proxy"' in doc_payload["content"]
+    assert handle_get(config_doc, urlparse(f"http://example.com/api/ops/projects/{project_id}/play/config")) is False
 
 
 def test_phase7_play_start_stop_status_and_logs(monkeypatch, tmp_path, git_available):
@@ -226,6 +221,35 @@ def test_phase7_ops_notifications_include_play_ready_state(monkeypatch, tmp_path
     assert play_note["playNeedsRepair"] is False
 
 
+def test_phase7_ops_notifications_include_manual_play_build_state(monkeypatch, tmp_path, git_available):
+    _repo, project_id = setup_project(monkeypatch, tmp_path, valid_proxy_config())
+
+    from api import ops_notifications, play_pipeline
+
+    with play_pipeline._LOCK:
+        state = play_pipeline.PlayPipelineState(project_id=project_id)
+        state.status = "building"
+        state.running = True
+        state.ready = False
+        state.started_at = "2026-05-06T06:01:00Z"
+        play_pipeline._PIPELINES[project_id] = state
+
+    payload = ops_notifications.list_pending_notifications(project_id)
+    play_note = next(item for item in payload["notifications"] if item["kind"] == "play")
+
+    assert play_note["project"]["id"] == project_id
+    assert play_note["playStatus"] == "building"
+    assert play_note["playLocked"] is True
+    assert play_note["inspectUrl"] == ""
+    assert play_note["task"] == {"id": "", "text": "", "grade": "green", "done": False}
+    assert play_note["terminalTarget"] == {
+        "projectId": project_id,
+        "taskId": "",
+        "sessionId": "",
+        "runId": "",
+    }
+
+
 def test_phase7_play_proxy_dispatch_rewrites_html_and_locations(monkeypatch, tmp_path, git_available):
     setup_project(monkeypatch, tmp_path, valid_proxy_config())
 
@@ -244,6 +268,9 @@ def test_phase7_play_proxy_dispatch_rewrites_html_and_locations(monkeypatch, tmp
         state.ready = True
         state.allocated_port = 5123
         state.allocated_port_host = "127.0.0.1"
+        state.run_id = "run-1"
+        state.task_id = "task-1"
+        state.session_id = "session-1"
         play_pipeline._PIPELINES[project_id] = state
 
     class FakeResponse:
@@ -282,6 +309,12 @@ def test_phase7_play_proxy_dispatch_rewrites_html_and_locations(monkeypatch, tmp
     assert html_handler.status == 200
     assert "/static/play-proxy-compat.js" in html
     assert f'data-hermes-play-proxy-prefix="/play-project/{project_id}"' in html
+    assert "/static/play-session-overlay.js" in html
+    assert f'data-hermes-play-project-id="{project_id}"' in html
+    assert 'data-hermes-play-run-id="run-1"' in html
+    assert 'data-hermes-play-task-id="task-1"' in html
+    assert 'data-hermes-play-session-id="session-1"' in html
+    assert 'data-hermes-play-session-url="/session/session-1"' in html
     assert f'src="/play-project/{project_id}/assets/logo.png"' in html
     assert dict(html_handler.sent_headers)["Content-Security-Policy"] == "default-src 'self'; frame-src 'self'"
 
@@ -422,18 +455,6 @@ def test_phase7_ops_ui_renders_play_panel_and_actions():
               })
             };
           }
-          if (path === '/api/ops/projects/project-1/play/config'){
-            if (options && options.method === 'POST'){
-              return { ok: true, json: async () => ({ saved: true, path: '/tmp/play-project/.hermes/play.json' }) };
-            }
-            return {
-              ok: true,
-              json: async () => ({
-                targetPath: '/tmp/play-project/.hermes/play.json',
-                content: '{\\n  "version": 2\\n}'
-              })
-            };
-          }
           if (path === '/api/ops/projects/project-1/play/logs?limit=200'){
             return { ok: true, json: async () => ({ text: 'play log line' }) };
           }
@@ -486,24 +507,14 @@ def test_phase7_ops_ui_renders_play_panel_and_actions():
         if (!root.innerHTML.includes('Play workflow')){
           throw new Error('Play section did not render');
         }
-        if (!root.innerHTML.includes('Configure')){
-          throw new Error('Play configure control did not render');
+        if (root.innerHTML.includes('Configure')){
+          throw new Error('Legacy Play configure control rendered');
         }
-        if (!root.innerHTML.includes('Start')){
-          throw new Error('Play start control did not render');
+        if (root.innerHTML.includes('Save Play config')){
+          throw new Error('Legacy Play config editor rendered');
         }
-
-        click({
-          target: {
-            closest: (selector) => {
-              if (selector !== '[data-ops-action]') return null;
-              return { getAttribute: (name) => name === 'data-ops-action' ? 'show-play-config' : '' };
-            }
-          }
-        });
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        if (!root.innerHTML.includes('Save Play config')){
-          throw new Error('Play config editor did not render');
+        if (!root.innerHTML.includes('Build')){
+          throw new Error('Play build control did not render');
         }
 
         click({
@@ -528,12 +539,17 @@ def test_phase7_ops_ui_renders_play_panel_and_actions():
           }
         });
         await new Promise((resolve) => setTimeout(resolve, 0));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await new Promise((resolve) => setTimeout(resolve, 0));
 
         if (!fetchCalls.some((call) => call.path === '/api/ops/projects/project-1/play/start')){
           throw new Error('Play start endpoint was not requested');
         }
-        if (!fetchCalls.some((call) => call.path === '/api/ops/projects/project-1/play/config')){
-          throw new Error('Play config endpoint was not requested');
+        if (fetchCalls.filter((call) => call.path === '/api/ops/notifications/pending').length < 2){
+          throw new Error('Workflow notifications were not refreshed after manual Play start');
+        }
+        if (fetchCalls.some((call) => call.path === '/api/ops/projects/project-1/play/config')){
+          throw new Error('Legacy Play config endpoint was requested');
         }
         if (!fetchCalls.some((call) => call.path === '/api/ops/projects/project-1/play/logs?limit=200')){
           throw new Error('Play logs endpoint was not requested');
@@ -552,3 +568,22 @@ def test_phase7_ops_ui_renders_play_panel_and_actions():
         text=True,
     )
     assert completed.stdout.strip() == "ok"
+
+
+def test_phase7_play_logs_include_status_snapshot(monkeypatch, tmp_path, git_available):
+    _, project_id = setup_project(monkeypatch, tmp_path, valid_direct_config())
+
+    from api import play_pipeline
+
+    with play_pipeline._LOCK:
+        state = play_pipeline.PlayPipelineState(project_id=project_id)
+        state.status = "building"
+        state.running = True
+        state.logs.append({"message": "building app"})
+        play_pipeline._PIPELINES[project_id] = state
+
+    payload = play_pipeline.build_project_play_logs(project_id, limit=50)
+
+    assert "building app" in payload["text"]
+    assert payload["status"]["status"] == "building"
+    assert payload["status"]["running"] is True

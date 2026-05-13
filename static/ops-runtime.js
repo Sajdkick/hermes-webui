@@ -90,14 +90,13 @@
     const ready=play.ready===true;
     const configured=play.configExists===true && play.valid===true;
     const buttons=[
-      '<button class="ops-shell-link" type="button" data-ops-action="refresh-play">Refresh Play</button>',
-      '<button class="ops-shell-link" type="button" data-ops-action="show-play-config">Configure</button>'
+      '<button class="ops-shell-link" type="button" data-ops-action="refresh-play">Refresh Play</button>'
     ];
-    buttons.push('<button class="ops-shell-link'+(configured&&!running?' primary':'')+'" type="button" data-ops-action="start-play"'+(configured&&!running&&!busy?'':' disabled')+'>'+(busy==='start'?'Starting…':'Start')+'</button>');
+    buttons.push('<button class="ops-shell-link'+(configured&&!running?' primary':'')+'" type="button" data-ops-action="start-play"'+(configured&&!running&&!busy?'':' disabled')+'>'+(busy==='start'?'Building…':'Build')+'</button>');
     buttons.push('<button class="ops-shell-link" type="button" data-ops-action="restart-play"'+(configured&&!busy?'':' disabled')+'>'+(busy==='restart'?'Restarting…':'Restart')+'</button>');
     buttons.push('<button class="ops-shell-link" type="button" data-ops-action="stop-play"'+(running&&!busy?'':' disabled')+'>'+(busy==='stop'?'Stopping…':'Stop')+'</button>');
     buttons.push('<button class="ops-shell-link" type="button" data-ops-action="show-play-logs">Logs</button>');
-    buttons.push('<button class="ops-shell-link" type="button" data-ops-action="open-play"'+(ready&&play.inspectUrl?'':' disabled')+'>Open</button>');
+    buttons.push('<button class="ops-shell-link" type="button" data-ops-action="open-play"'+(ready&&play.inspectUrl?'':' disabled')+'>Play</button>');
     return buttons.join('');
   }
 
@@ -109,24 +108,6 @@
     return bits.length ? '<p class="ops-runtime-note">'+escapeHtml(bits.join(' | '))+'</p>' : '';
   }
 
-  function playConfigPanel(state){
-    if(!(state && state.showPlayConfig))return '';
-    const doc=state.playConfigDoc||{};
-    const info=doc.info||{};
-    const target=String(doc.targetPath||doc.path||info.path||'');
-    const content=String(doc.content||'');
-    return [
-      '<form class="ops-runtime-config-form" data-ops-form="play-config">',
-      '<div class="ops-runtime-inline-header"><strong>Play config</strong><button class="ops-shell-link" type="button" data-ops-action="close-play-config">Close</button></div>',
-      target?'<p class="ops-runtime-note">'+escapeHtml(target)+'</p>':'',
-      '<textarea name="content" rows="14"'+((state.loadingPlayConfig||state.savingPlayConfig)?' disabled':'')+'>'+escapeHtml(content)+'</textarea>',
-      '<div class="ops-runtime-actions">',
-      '<button class="ops-shell-link primary" type="submit"'+((state.loadingPlayConfig||state.savingPlayConfig)?' disabled':'')+'>'+(state.savingPlayConfig?'Saving…':'Save Play config')+'</button>',
-      '<button class="ops-shell-link" type="button" data-ops-action="reload-play-config"'+(state.loadingPlayConfig?' disabled':'')+'>Reload</button>',
-      '</div>',
-      '</form>'
-    ].join('');
-  }
 
   function playLogsPanel(state){
     if(!(state && state.showPlayLogs))return '';
@@ -151,7 +132,6 @@
       '<div class="ops-runtime-play-status"><span class="ops-runtime-pill">'+escapeHtml(statusLabel(label))+'</span><p>'+escapeHtml(summaryText)+'</p></div>',
       playMeta(play),
       '<div class="ops-runtime-actions">'+playButtons(play,state)+'</div>',
-      playConfigPanel(state),
       playLogsPanel(state),
       '</section>'
     ].join('');

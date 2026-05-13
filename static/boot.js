@@ -1509,7 +1509,7 @@ window.addEventListener('pageshow', async (event) => {
   // active_stream_id / pending_user_message can reattach like a reload restore.
   if (S.session && S.session.session_id && typeof loadSession === 'function') {
     try {
-      await loadSession(S.session.session_id);
+      await loadSession(S.session.session_id,{force:true});
       if (S.session && S.session.session_id && typeof checkInflightOnBoot === 'function') {
         try { await checkInflightOnBoot(S.session.session_id); } catch (_) {}
       }

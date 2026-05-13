@@ -27,6 +27,8 @@
     const renderProjectDetail=ctx&&ctx.renderProjectDetail;
     const refreshProjectPlayStatus=ctx&&ctx.refreshProjectPlayStatus;
     const refreshProjectGitStatus=ctx&&ctx.refreshProjectGitStatus;
+    const renderProjectPlayControls=ctx&&ctx.renderProjectPlayControls;
+    const renderProjectPlayLogs=ctx&&ctx.renderProjectPlayLogs;
     const playStatusFor=ctx&&ctx.playStatusFor;
     const playStatusKind=ctx&&ctx.playStatusKind;
     const playStatusLabel=ctx&&ctx.playStatusLabel;
@@ -65,6 +67,8 @@
       || typeof renderProjectDetail!=='function'
       || typeof refreshProjectPlayStatus!=='function'
       || typeof refreshProjectGitStatus!=='function'
+      || typeof renderProjectPlayControls!=='function'
+      || typeof renderProjectPlayLogs!=='function'
       || typeof playStatusFor!=='function'
       || typeof playStatusKind!=='function'
       || typeof playStatusLabel!=='function'
@@ -219,7 +223,7 @@
     function projectSessionRefValue(sessionLike){
       if(!sessionLike)return '';
       if(typeof sessionLike==='string')return String(sessionLike).trim();
-      return String(sessionLike.sessionKey||sessionLike.session_id||sessionLike.sessionId||'').trim();
+      return String(sessionLike.session_id||sessionLike.sessionId||sessionLike.id||sessionLike.sessionKey||sessionLike.session_key||'').trim();
     }
 
     function summarizeEpics(epics){
@@ -370,9 +374,11 @@
             </div>
             <div class="quick-response-project-actions">
               ${renderSessionWorkspaceActions({projectId:project.id,project})}
+              ${renderProjectPlayControls(project,{projectCard:true})}
             </div>
           </div>
           ${sessionsHtml}
+          ${renderProjectPlayLogs(project.id)}
         </section>
       `;
     }
@@ -484,17 +490,44 @@
       ]).then(()=>refreshProjectDetailAfterSecondaryLoad(projectId));
     }
 
-    async function loadProjectDetail(projectId){
-      const [data,sessionsData]=await Promise.all([
-        api(projectUrl(projectId,'/tasks')),
-        AgentBridgeRef.sessions.list().catch(()=>({sessions:[]})),
-      ]);
+    async function loadProjectDetailSessions(projectId){
+      const sessionsData=await AgentBridgeRef.sessions.list().catch(()=>({sessions:[]}));
+      if(!OPS.currentProject||OPS.currentProject.id!==projectId)return OPS.sessions;
+      OPS.sessions=Array.isArray(sessionsData&&sessionsData.sessions)?sessionsData.sessions:[];
+      refreshProjectDetailAfterSecondaryLoad(projectId);
+      return OPS.sessions;
+    }
+
+    async function loadProjectDetail(projectId,options){
+      const opts=options&&typeof options==='object'?options:{};
+      const data=await api(projectUrl(projectId,'/tasks'));
       OPS.taskData=data;
-      OPS.sessions=Array.isArray(sessionsData.sessions)?sessionsData.sessions:[];
       OPS.taskDataByProject[projectId]=data;
       OPS.currentProject=data.project||OPS.currentProject||findProject(projectId);
+      if(opts.sessions===false){
+        void loadProjectDetailSessions(projectId);
+      }else{
+        await loadProjectDetailSessions(projectId);
+      }
       void loadProjectDetailSecondary(projectId);
       return OPS.taskData;
+    }
+
+    function ensureProjectWorkspaceInBackground(projectId){
+      api(projectUrl(projectId,'/ensure-workspace'),{method:'POST',body:JSON.stringify({})})
+        .then(data=>{
+          if(!data||!data.project)return;
+          mergeProjectUpdate(data.project);
+          if(OPS.currentProject&&OPS.currentProject.id===projectId){
+            OPS.currentProject=data.project;
+            refreshProjectDetailAfterSecondaryLoad(projectId);
+          }
+        })
+        .catch(e=>{
+          if(!isNotFoundError(e)){
+            showToast(e.message||'Workspace sync failed',3600);
+          }
+        });
     }
 
     async function openProjectDetail(projectId,options){
@@ -517,18 +550,11 @@
       OPS.runRequests=null;
       OPS.runArtifacts=null;
       OPS.runLogs=null;
-      OPS.playConfigEditingProjectId='';
       resetTaskFilters();
       setDashboardTopbar(project?nameOf(project):'Project','Loading...');
-      renderLoading('Loading project...');
-      try{
-        await api(projectUrl(projectId,'/ensure-workspace'),{method:'POST',body:JSON.stringify({})});
-      }catch(e){
-        if(!isNotFoundError(e)){
-          showToast(e.message||'Workspace sync failed',3600);
-        }
-      }
-      await loadProjectDetail(projectId);
+      renderLoading('Loading project tasks...');
+      ensureProjectWorkspaceInBackground(projectId);
+      await loadProjectDetail(projectId,{sessions:false});
       return renderProjectDetail();
     }
 

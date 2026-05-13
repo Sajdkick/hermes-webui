@@ -1075,6 +1075,10 @@ def all_sessions(diag=None):
     for s in result:
         if not s.get('profile'):
             s['profile'] = 'default'
+    try:
+        _write_session_index(updates=out)
+    except Exception:
+        logger.debug("Failed to rebuild session index after full scan")
     _diag_stage(diag, "all_sessions.lineage_metadata")
     _enrich_sidebar_lineage_metadata(result)
     return result

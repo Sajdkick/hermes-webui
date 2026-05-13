@@ -28,14 +28,28 @@ def test_clicking_current_session_is_noop_before_load_session_side_effects():
     load_session = _function_body(SESSIONS_JS, "async function loadSession")
 
     current_idx = load_session.index("const currentSid = S.session ? S.session.session_id : null")
-    noop_idx = load_session.index("if(currentSid===sid) return")
+    force_idx = load_session.index("const forceReload=")
+    noop_idx = load_session.index("if(currentSid===sid && !forceReload) return")
     loading_idx = load_session.index("_loadingSessionId = sid")
     stop_idx = load_session.index("stopApprovalPolling")
 
-    assert current_idx < noop_idx < loading_idx < stop_idx, (
-        "clicking the already-open sidebar row must be a no-op before loadSession() "
-        "mutates loading/runtime state or scroll-affecting UI"
+    assert current_idx < force_idx < noop_idx < loading_idx < stop_idx, (
+        "clicking the already-open sidebar row must normally be a no-op before "
+        "loadSession() mutates loading/runtime state or scroll-affecting UI"
     )
+
+
+def test_current_session_noop_allows_stuck_pane_recovery():
+    assert "function _activeSessionPaneNeedsRecovery(sid)" in SESSIONS_JS
+    load_session = _function_body(SESSIONS_JS, "async function loadSession")
+    assert "_activeSessionPaneNeedsRecovery(sid)" in load_session
+    assert "options.force===true" in load_session
+    assert "loadSession(sid,{force:true})" in load_session
+
+
+def test_bfcache_pageshow_forces_active_session_reload():
+    boot_js = (REPO / "static" / "boot.js").read_text(encoding="utf-8")
+    assert "loadSession(S.session.session_id,{force:true})" in boot_js
 
 
 def test_scroll_to_bottom_settles_across_late_markdown_layout_growth():

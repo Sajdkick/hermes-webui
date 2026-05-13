@@ -79,14 +79,10 @@
       upstreamSyncBusyAction:'',
       inspectError:'',
       inspectBusyAction:'',
-      loadingPlayConfig:false,
-      playConfigDoc:null,
-      savingPlayConfig:false,
       playLogs:null,
       loadingPlayLogs:false,
       playError:'',
       playBusyAction:'',
-      showPlayConfig:false,
       showPlayLogs:false,
       loadingNotifications:false,
       notifications:[],
@@ -117,7 +113,6 @@
         state.selectedProjectId=action.getAttribute('data-project-id')||'';
         state.gitStatus=null;
         state.gitError='';
-        state.playConfigDoc=null;
         state.playLogs=null;
         state.playError='';
         state.projectDatabase=null;
@@ -131,7 +126,6 @@
         state.upstreamSyncBusyAction='';
         state.inspectError='';
         state.inspectBusyAction='';
-        state.showPlayConfig=false;
         state.showPlayLogs=false;
         loadTasks(root,state);
         loadGitStatus(root,state);
@@ -230,19 +224,6 @@
         loadRuntimeSummary(root,state);
         return;
       }
-      if(kind==='show-play-config'){
-        loadPlayConfig(root,state,true);
-        return;
-      }
-      if(kind==='close-play-config'){
-        state.showPlayConfig=false;
-        render(root,state);
-        return;
-      }
-      if(kind==='reload-play-config'){
-        loadPlayConfig(root,state,true);
-        return;
-      }
       if(kind==='show-play-logs'){
         loadPlayLogs(root,state,true);
         return;
@@ -339,11 +320,6 @@
           sessionId:formData.get('sessionId'),
           response:formData.get('response'),
         });
-        return;
-      }
-      if(form.matches('[data-ops-form="play-config"]')){
-        event.preventDefault();
-        savePlayConfig(root,state,new FormData(form));
         return;
       }
       if(form.matches('[data-ops-form="runtime-screenshot"]')){
@@ -871,50 +847,6 @@
     }
   }
 
-  async function loadPlayConfig(root,state,showPanel){
-    if(!state.selectedProjectId)return;
-    state.loadingPlayConfig=true;
-    if(showPanel)state.showPlayConfig=true;
-    state.playError='';
-    render(root,state);
-    try{
-      state.playConfigDoc=await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/play/config');
-    }catch(error){
-      state.playError=error && error.message ? error.message : 'Could not load Play config.';
-    }finally{
-      state.loadingPlayConfig=false;
-      render(root,state);
-    }
-  }
-
-  async function savePlayConfig(root,state,formData){
-    if(!state.selectedProjectId)return;
-    state.savingPlayConfig=true;
-    state.playError='';
-    render(root,state);
-    try{
-      const payload=await api(apiBase+'/'+encodeURIComponent(state.selectedProjectId)+'/play/config',{
-        method:'POST',
-        body:{content:formData.get('content')},
-      });
-      if(payload){
-        state.playConfigDoc={
-          ...(state.playConfigDoc||{}),
-          ...payload,
-          content:String(formData.get('content')||''),
-        };
-      }
-      await loadRuntimeSummary(root,state);
-    }catch(error){
-      state.playError=error && error.message ? error.message : 'Could not save Play config.';
-      state.savingPlayConfig=false;
-      render(root,state);
-      return;
-    }
-    state.savingPlayConfig=false;
-    render(root,state);
-  }
-
   async function loadPlayLogs(root,state,showPanel){
     if(!state.selectedProjectId)return;
     state.loadingPlayLogs=true;
@@ -1014,6 +946,9 @@
         body:{},
       });
       await loadRuntimeSummary(root,state);
+      if(action==='start'||action==='restart'){
+        await loadNotifications(root,state);
+      }
       if(state.showPlayLogs && action!=='stop'){
         loadPlayLogs(root,state,false);
       }
@@ -1557,14 +1492,10 @@
         runtimeError:state.runtimeError,
         inspectError:state.inspectError,
         inspectBusyAction:state.inspectBusyAction,
-        loadingPlayConfig:state.loadingPlayConfig,
-        playConfigDoc:state.playConfigDoc,
-        savingPlayConfig:state.savingPlayConfig,
         playLogs:state.playLogs,
         loadingPlayLogs:state.loadingPlayLogs,
         playError:state.playError,
         playBusyAction:state.playBusyAction,
-        showPlayConfig:state.showPlayConfig,
         showPlayLogs:state.showPlayLogs,
       });
     }

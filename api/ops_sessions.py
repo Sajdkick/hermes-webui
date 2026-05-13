@@ -232,7 +232,21 @@ def project_session_defaults(project: dict) -> tuple[str | None, str | None]:
     return _project_session_defaults(project)
 
 
-def list_ops_sessions(project_id: str | None = None) -> dict:
+def _session_is_activity_linkage_candidate(session: dict) -> bool:
+    if not isinstance(session, dict) or session.get("archived"):
+        return False
+    if session.get("waitingForApproval") or session.get("waitingForInput"):
+        return True
+    if session.get("is_streaming") or session.get("pending_user_message"):
+        return True
+    if str(session.get("source_tag") or "").strip() == OPS_TASK_SOURCE_TAG:
+        return True
+    if str(session.get("project_id") or session.get("ops_project_id") or session.get("projectId") or "").strip():
+        return True
+    return False
+
+
+def list_ops_sessions(project_id: str | None = None, activity_only: bool = False) -> dict:
     projects = (
         [ops_projects.get_ops_project(project_id)]
         if project_id
@@ -244,46 +258,6 @@ def list_ops_sessions(project_id: str | None = None) -> dict:
         if isinstance(project, dict)
     }
 
-    linkage_index: dict[str, dict] = {}
-    project_tasks: dict[str, list[dict]] = {}
-    for project in projects:
-        pid = str(project.get("id") or "").strip()
-        if not pid:
-            continue
-        tasks = _task_contexts(pid)
-        project_tasks[pid] = tasks
-        try:
-            from api import ops_runs
-
-            runs = list(ops_runs.list_ops_runs({"projectId": pid}).get("runs") or [])
-        except Exception:
-            runs = []
-        run_by_id = {
-            str(run.get("id") or "").strip(): run
-            for run in runs
-            if isinstance(run, dict) and str(run.get("id") or "").strip()
-        }
-        for task in tasks:
-            for linkage in task.get("linkedSessions") or []:
-                if not isinstance(linkage, dict):
-                    continue
-                run = run_by_id.get(str(linkage.get("runId") or "").strip())
-                meta = {
-                    "project": project,
-                    "task": task,
-                    "run": run,
-                    "updatedAt": str(linkage.get("updatedAt") or linkage.get("linkedAt") or ""),
-                }
-                aliases = {
-                    str(linkage.get("sessionId") or "").strip(),
-                    str(linkage.get("linkedSessionId") or "").strip(),
-                }
-                aliases.update(_session_aliases(linkage.get("session") if isinstance(linkage.get("session"), dict) else None))
-                for alias in {value for value in aliases if value}:
-                    current = linkage_index.get(alias)
-                    if not current or meta["updatedAt"] >= current.get("updatedAt", ""):
-                        linkage_index[alias] = meta
-
     logical_sessions: dict[str, dict] = {}
     for session in all_sessions():
         if not isinstance(session, dict) or session.get("archived"):
@@ -294,6 +268,67 @@ def list_ops_sessions(project_id: str | None = None) -> dict:
         current = logical_sessions.get(lineage_root)
         if not current or _session_sort_key(session) >= _session_sort_key(current):
             logical_sessions[lineage_root] = dict(session)
+
+    activity_candidate_aliases: set[str] | None = None
+    if activity_only:
+        activity_candidate_aliases = set()
+        for session in logical_sessions.values():
+            if _session_is_activity_linkage_candidate(session):
+                activity_candidate_aliases.update(_session_aliases(session))
+
+    linkage_index: dict[str, dict] = {}
+    for project in projects:
+        pid = str(project.get("id") or "").strip()
+        if not pid:
+            continue
+        tasks = _task_contexts(pid)
+        task_linkages: list[tuple[dict, dict, set[str]]] = []
+        needed_run_ids: set[str] = set()
+        for task in tasks:
+            for linkage in task.get("linkedSessions") or []:
+                if not isinstance(linkage, dict):
+                    continue
+                aliases = {
+                    str(linkage.get("sessionId") or "").strip(),
+                    str(linkage.get("linkedSessionId") or "").strip(),
+                }
+                aliases.update(_session_aliases(linkage.get("session") if isinstance(linkage.get("session"), dict) else None))
+                aliases = {value for value in aliases if value}
+                if activity_candidate_aliases is not None and not (aliases & activity_candidate_aliases):
+                    continue
+                task_linkages.append((task, linkage, aliases))
+                run_id = str(linkage.get("runId") or "").strip()
+                if run_id:
+                    needed_run_ids.add(run_id)
+        if activity_only and not task_linkages:
+            continue
+        run_by_id: dict[str, dict] = {}
+        if needed_run_ids:
+            try:
+                from api import ops_runs
+
+                for run_id in needed_run_ids:
+                    try:
+                        run = ops_runs.get_ops_run(run_id)
+                    except Exception:
+                        continue
+                    normalized_run_id = str((run or {}).get("id") or "").strip()
+                    if normalized_run_id:
+                        run_by_id[normalized_run_id] = run
+            except Exception:
+                run_by_id = {}
+        for task, linkage, aliases in task_linkages:
+            run = run_by_id.get(str(linkage.get("runId") or "").strip())
+            meta = {
+                "project": project,
+                "task": task,
+                "run": run,
+                "updatedAt": str(linkage.get("updatedAt") or linkage.get("linkedAt") or ""),
+            }
+            for alias in aliases:
+                current = linkage_index.get(alias)
+                if not current or meta["updatedAt"] >= current.get("updatedAt", ""):
+                    linkage_index[alias] = meta
 
     grouped_sessions: dict[str, list[dict]] = {}
     ungrouped: list[dict] = []

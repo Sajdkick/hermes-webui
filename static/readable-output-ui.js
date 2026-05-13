@@ -31,8 +31,10 @@
   }
 
   function sessionReadableOutputAssetUrl(ref, assetBaseUrl){
-    const value=String(ref||'').trim();
+    let value=String(ref||'').trim();
     if(!value||/^[a-z][a-z0-9+.-]*:/i.test(value)||value.startsWith('#')||value.startsWith('/'))return value;
+    value=value.replace(/^\.\//,'');
+    value=value.replace(/^assets\//,'');
     const base=String(assetBaseUrl||'');
     if(!base)return value;
     return base+value.split('/').map(function(part){return encodeURIComponent(part);}).join('/');
@@ -82,15 +84,15 @@
       : '<div class="session-readable-output-empty">'+escapeHtml(String(artifact.error||'Readable output unavailable.'))+'</div>';
     host.hidden=false;
     host.innerHTML='' +
-      '<section class="session-readable-output-card">' +
+      '<section class="session-readable-output-card" role="dialog" aria-modal="true" aria-labelledby="sessionReadableOutputTitle">' +
         '<div class="session-readable-output-header">' +
           '<div>' +
-            '<div class="session-readable-output-title">Readable output</div>' +
+            '<div class="session-readable-output-title" id="sessionReadableOutputTitle">Readable output</div>' +
             (meta.length?'<div class="session-readable-output-meta">'+meta.map(function(item){return '<span>'+escapeHtml(item)+'</span>';}).join('')+'</div>':'') +
           '</div>' +
           '<div class="session-readable-output-actions">' +
             '<button class="session-readable-output-refresh" type="button" onclick="reloadSessionReadableOutput()">Refresh</button>' +
-            '<button class="session-readable-output-dismiss" type="button" onclick="dismissSessionReadableOutput()">Dismiss</button>' +
+            '<button class="session-readable-output-dismiss" type="button" onclick="dismissSessionReadableOutput()">Close readable output</button>' +
           '</div>' +
         '</div>' +
         '<div class="preview-md session-readable-output-body">'+body+'</div>' +

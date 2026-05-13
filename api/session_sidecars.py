@@ -182,7 +182,7 @@ def set_session_linkage(session_id: str, project_id: str, task_id: str | None = 
     return get_session_linkage(key)
 
 
-def list_project_linkages(project_id: str) -> list[dict[str, Any]]:
+def list_project_linkage_records(project_id: str) -> list[dict[str, Any]]:
     project_key = str(project_id or "").strip()
     if not project_key:
         raise SessionSidecarError("Project id is required.")
@@ -194,6 +194,20 @@ def list_project_linkages(project_id: str) -> list[dict[str, Any]]:
             continue
         if not payload or payload.get("projectId") != project_key:
             continue
+        result.append(dict(payload))
+    result.sort(
+        key=lambda linkage: (
+            str(linkage.get("updatedAt") or linkage.get("linkedAt") or ""),
+            str(linkage.get("sessionId") or ""),
+        ),
+        reverse=True,
+    )
+    return result
+
+
+def list_project_linkages(project_id: str) -> list[dict[str, Any]]:
+    result = []
+    for payload in list_project_linkage_records(project_id):
         try:
             linkage = get_session_linkage(str(payload.get("sessionId") or ""))
         except SessionSidecarError:

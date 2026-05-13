@@ -275,6 +275,7 @@ def _play_notification(project: dict, status: dict) -> dict | None:
     inspect_url = _text(status.get("inspectUrl"), limit=2048)
     status_summary = _text(status.get("statusSummary"), limit=512)
     failure_summary = _text(status.get("failureSummary") or status.get("error"), limit=512)
+    play_locked = False
     if ready:
         status_at = _text(status.get("readyAt") or status.get("updatedAt") or status.get("startedAt"), limit=128)
         if not status_at:
@@ -283,6 +284,20 @@ def _play_notification(project: dict, status: dict) -> dict | None:
         play_needs_repair = not inspect_url
         play_fallback_error = ""
         message = status_summary or "Play app is ready for inspection."
+    elif state in {"queued", "building", "starting"}:
+        status_at = _text(status.get("startedAt") or status.get("updatedAt") or status.get("readyAt"), limit=128)
+        if not status_at:
+            return None
+        play_status = state
+        play_needs_repair = False
+        play_fallback_error = ""
+        play_locked = True
+        if state == "queued":
+            message = status_summary or "Play build is queued."
+        elif state == "starting":
+            message = status_summary or "Play build is complete and the app is starting."
+        else:
+            message = status_summary or "Play build in progress."
     elif state == "failed":
         status_at = _text(status.get("finishedAt") or status.get("updatedAt") or status.get("startedAt"), limit=128)
         if not status_at:
@@ -335,6 +350,7 @@ def _play_notification(project: dict, status: dict) -> dict | None:
         "inspectUrl": inspect_url,
         "playStatus": play_status,
         "playNeedsRepair": play_needs_repair,
+        "playLocked": play_locked,
         "playFallbackError": play_fallback_error,
         "createdAt": status_at,
         "updatedAt": status_at,
@@ -429,6 +445,32 @@ def _play_handoff_fallback_notifications(project: dict, status: dict) -> list[di
     return notifications
 
 
+def _notification_linkage_from_record(record: dict) -> dict | None:
+    session_id = _text(record.get("sessionId") or record.get("session_id"), limit=256)
+    if not session_id:
+        return None
+    try:
+        linkage = session_sidecars.get_session_linkage(session_id)
+    except Exception:
+        linkage = None
+    if isinstance(linkage, dict):
+        return linkage
+    return {
+        **record,
+        "sessionId": session_id,
+        "linkedSessionId": _text(record.get("linkedSessionId"), limit=256) or session_id,
+        "sessionUrl": ops_sessions.session_url(session_id),
+        "available": False,
+    }
+
+
+def _project_linkage_records(project_id: str) -> list[dict]:
+    try:
+        return session_sidecars.list_project_linkage_records(project_id)
+    except AttributeError:
+        return session_sidecars.list_project_linkages(project_id)
+
+
 def list_pending_notifications(project_id: str | None = None) -> dict:
     if project_id:
         projects = [ops_projects.get_ops_project(project_id)]
@@ -437,25 +479,35 @@ def list_pending_notifications(project_id: str | None = None) -> dict:
 
     notifications = []
     for project in projects:
-        for linkage in session_sidecars.list_project_linkages(project["id"]):
-            session_id = str(linkage.get("sessionId") or "").strip()
-            task_id = str(linkage.get("taskId") or "").strip()
+        for record in _project_linkage_records(project["id"]):
+            session_id = _text(record.get("sessionId") or record.get("session_id"), limit=256)
+            task_id = _text(record.get("taskId") or record.get("task_id"), limit=256)
             if not session_id or not task_id:
                 continue
-            task_context = _task_context(project["id"], task_id)
             approval = _pending_approval(session_id)
+            clarify = _pending_clarify(session_id)
+            if not approval.get("pending") and not clarify.get("pending"):
+                continue
+            linkage = _notification_linkage_from_record(record)
+            if not linkage:
+                continue
+            task_context = _task_context(project["id"], task_id)
             if approval.get("pending"):
                 notifications.append(
                     _approval_notification(linkage, task_context, approval["pending"], int(approval.get("pending_count") or 0))
                 )
-            clarify = _pending_clarify(session_id)
             if clarify.get("pending"):
                 notifications.append(
                     _clarify_notification(linkage, task_context, clarify["pending"], int(clarify.get("pending_count") or 0))
                 )
         try:
-            from api import play_pipeline
+            from api import ops_runs, play_pipeline
 
+            # Refresh/enrich runs before reading Play status.  Enrichment is the
+            # path that notices a linked task session has finished and starts
+            # the configured Play pipeline, so notification polling must do it
+            # before deciding which Play notification to show.
+            ops_runs.list_ops_runs({"projectId": project["id"]})
             play_status = play_pipeline.build_project_play_status(project["id"])
             play_notification = _play_notification(project, play_status)
         except Exception:

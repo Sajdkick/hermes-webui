@@ -5,7 +5,7 @@ description: Use this skill when you are working in Hermes WebUI or a compatible
 
 # Hermes Runtime Tools
 
-Use `hermes-runtime` for Hermes WebUI Play and inspect workflows when available; it is the Hermes-owned runtime CLI and should be preferred over Cloud Terminal's `ct-runtime` in `/home/ubuntu/cloud-terminal-data/projects/hermes-webui`. Use `ct-runtime` only for actual Cloud Terminal project sessions that do not have `hermes-runtime`. Do not guess the app startup command, inspect URL, or screenshot tooling when the goal is to run and verify the current project from an agent session.
+Use `hermes-runtime` for Hermes WebUI Play, inspect, and gather workflows when available; it is the Hermes-owned runtime CLI and should be preferred over Cloud Terminal's `ct-runtime` in `/home/ubuntu/cloud-terminal-data/projects/hermes-webui`. Use `ct-runtime` only for actual Cloud Terminal project sessions that do not have `hermes-runtime`. Do not guess the app startup command, inspect URL, or screenshot tooling when the goal is to run and verify the current project from an agent session.
 
 ## Workflow
 
@@ -14,7 +14,7 @@ Use `hermes-runtime` in Hermes WebUI sessions. Substitute `ct-runtime` only when
 1. Diagnose the runtime/session env before deeper debugging:
    - `hermes-runtime doctor --json`
    - Prefer `HERMES_WEBUI_RUNTIME_API_BASE_URL`, `HERMES_WEBUI_REQUEST_INPUT_URL`, and `HERMES_WEBUI_REQUEST_INPUT_TOKEN` for Hermes WebUI sessions. The older `HERMES_RUNTIME_API_BASE_URL`, `HERMES_REQUEST_INPUT_URL`, and `HERMES_REQUEST_INPUT_TOKEN` names are backward-compatible fallbacks.
-   - If `doctor` reports missing runtime API/request-input env in a Hermes WebUI API-launched session, do not claim managed Play inspect is available. State the limitation and either use built-in browser tools for live verification or explicitly provide a runtime-compatible API context before running `hermes-runtime inspect ...`.
+   - If `doctor` reports missing runtime API/request-input env in a Hermes WebUI API-launched session, do not claim managed Play/inspect/gather is available. State the limitation and either use built-in browser tools, focused tests, or a clearly labeled manual Play-equivalent verification path. Do not add `ct-runtime` compatibility shims or switch to `ct-runtime` as a workaround.
 2. Check the current runtime state:
    - `hermes-runtime status`
    - `hermes-runtime play status`
@@ -32,9 +32,12 @@ Use `hermes-runtime` in Hermes WebUI sessions. Substitute `ct-runtime` only when
    - `hermes-runtime inspect action --script-file inspect-actions.json`
    - `hermes-runtime inspect action --capture-screenshot --file-name post-action-check --script-file inspect-actions.json`
    - `hermes-runtime inspect session close <session-id>`
-5. If Play fails or never becomes ready:
+5. Gather user-driven repro evidence when runtime context is available:
+   - `hermes-runtime gather create --title "Save flow repro" --json`
+   - `hermes-runtime gather show REPORT_ID --json`
+6. If Play fails or never becomes ready:
    - `hermes-runtime play logs --limit 200`
-6. If screenshot capture is unavailable or you need human feedback:
+7. If screenshot capture is unavailable or you need human feedback:
    - `hermes-runtime inspect request-review "Please inspect the running app and share feedback."`
 
 ## Guidance
@@ -42,7 +45,7 @@ Use `hermes-runtime` in Hermes WebUI sessions. Substitute `ct-runtime` only when
 - Prefer `hermes-runtime play start --wait` before trying to inspect or capture screenshots.
 - Use `hermes-runtime inspect screenshot --url <url>` only when you need a specific in-app route after Play is ready.
 - Use `hermes-runtime inspect screenshot --session <id>` when the app state lives only inside an already-mutated browser session.
-- If the project enables inspect auth (for example `inspect.auth.strategy=debug-login` or `AUTH_DEBUG_LOGIN=true` in Play config), `hermes-runtime inspect screenshot` will automatically prime a temporary authenticated browser profile before capture.
+- If the project enables inspect auth (for example `inspect.auth.strategy=debug-login` or `AUTH_DEBUG_LOGIN=*** in Play config), `hermes-runtime inspect screenshot` will automatically prime a temporary authenticated browser profile before capture.
 - Use `hermes-runtime inspect action` when you need scripted wait/click/drag automation inside the inspect browser, especially for canvas-heavy editors.
 - Before guessing at an unfamiliar UI path, check `hermes-runtime inspect guide list` for a saved guide recording for that project.
 - `hermes-runtime inspect guide show <guide-id>` prints any maintained written guide before the raw event log. Follow the written guide first and only fall back to the raw recording when you need extra detail.
@@ -71,6 +74,10 @@ Use `hermes-runtime` in Hermes WebUI sessions. Substitute `ct-runtime` only when
   - `hermes-runtime inspect action --url /app/editor --keep-session --script-file trunk-graft.json`
   - `hermes-runtime inspect screenshot --session <session-id> --file-name trunk-graft-review`
   - `hermes-runtime inspect session close <session-id>`
+- Gather repro diagnostics:
+  - `hermes-runtime doctor --json`
+  - `hermes-runtime gather create --title "Save flow repro" --json`
+  - `hermes-runtime gather show REPORT_ID --json`
 - Ask the user to verify a nuanced visual change:
   - `hermes-runtime inspect request-review "Please verify the updated visuals and tell me what still looks off."`
 - Debug a failing Play startup:

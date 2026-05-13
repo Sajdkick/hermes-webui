@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ OPS_GATHER_REPORTS_FILE = STATE_DIR / "ops" / "gather-reports.json"
 OPS_REVIEW_REQUESTS_FILE = STATE_DIR / "ops" / "review-requests.json"
 GATHER_REPORT_STATUS_VALUES = {"created", "running", "succeeded", "failed"}
 GATHER_REPORT_EVENT_LEVEL_VALUES = {"debug", "info", "warning", "error"}
+GATHER_INGEST_TOKEN_HEADER = "X-Hermes-Gather-Token"
 REVIEW_REQUEST_STATUS_VALUES = {"requested", "running", "succeeded", "failed", "canceled"}
 REVIEW_REQUEST_KIND_VALUES = {"visual", "image", "runtime", "accessibility", "other"}
 GATHER_EVENTS_MAX = 2000
@@ -132,14 +134,30 @@ def _write_store(path: Path, store: dict[str, list[dict]]) -> None:
 def _event(body: dict | None = None) -> dict:
     body = body if isinstance(body, dict) else {}
     now = _now_iso()
+    metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+    for key in ("label", "route", "url", "data", "meta"):
+        if key in body and body.get(key) not in (None, ""):
+            metadata = {**metadata, key: _json_safe(body.get(key))}
+    message = _text(body.get("message") or body.get("summary"), limit=4000)
+    label = _text(body.get("label"), limit=128)
     return {
         "id": _text(body.get("id"), limit=128) or f"event_{uuid.uuid4().hex}",
-        "type": _text(body.get("type") or body.get("kind"), limit=128) or "note",
+        "type": _text(body.get("type") or body.get("kind") or label, limit=128) or "note",
         "level": _event_level(body.get("level")),
-        "message": _text(body.get("message") or body.get("summary"), limit=4000),
+        "message": message or label,
         "source": _text(body.get("source"), limit=128) or "hermes-runtime",
-        "metadata": _json_safe(body.get("metadata") if isinstance(body.get("metadata"), dict) else {}),
+        "metadata": _json_safe(metadata),
         "createdAt": _text(body.get("createdAt"), limit=64) or now,
+    }
+
+
+def _ingest_descriptor(project_id: str, report_id: str) -> dict:
+    path = f"/api/ops/projects/{project_id}/runtime/gather/reports/{report_id}/events"
+    return {
+        "path": path,
+        "url": path,
+        "tokenHeader": GATHER_INGEST_TOKEN_HEADER,
+        "token": secrets.token_urlsafe(24),
     }
 
 
@@ -306,7 +324,7 @@ def create_gather_report(project_id: str, body: dict | None) -> dict:
         else:
             reports[match_index] = report
         _write_store(OPS_GATHER_REPORTS_FILE, store)
-    return {"report": report, "created": created}
+    return {"report": report, "created": created, "ingest": _ingest_descriptor(report["projectId"], report["id"])}
 
 
 def append_gather_report_event(project_id: str, report_id: str, body: dict | None) -> dict:

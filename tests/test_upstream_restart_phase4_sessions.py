@@ -708,8 +708,8 @@ def test_phase4_legacy_execute_uses_persisted_model_state_when_ops_has_no_dropdo
         if (ensuredPayload.model_provider !== 'openai'){
           throw new Error('Expected persisted model_provider to be forwarded to ensureTask.');
         }
-        if (ensuredPayload.profile !== 'default'){
-          throw new Error('Expected active profile to be forwarded to ensureTask.');
+        if (ensuredPayload.profile !== 'hermes'){
+          throw new Error('Expected the assigned project profile to override the active default profile.');
         }
         console.log('ok');
         })().catch((error) => {

@@ -29,14 +29,6 @@ def handle_get(handler, parsed) -> bool:
             bad(handler, str(e), e.status)
         return True
 
-    ops_project_play_config_document_match = _re.match(r"^/api/ops/projects/([^/]+)/play/config/?$", parsed.path)
-    if ops_project_play_config_document_match:
-        try:
-            j(handler, play_pipeline.get_project_play_config_document(unquote(ops_project_play_config_document_match.group(1))))
-        except play_pipeline.PlayPipelineError as e:
-            bad(handler, str(e), e.status)
-        return True
-
     ops_project_play_status_match = _re.match(r"^/api/ops/projects/([^/]+)/play/status/?$", parsed.path)
     if ops_project_play_status_match:
         try:
@@ -74,20 +66,6 @@ def handle_post(handler, parsed, body) -> bool:
         try:
             status = play_pipeline.start_project_play_pipeline(unquote(ops_project_play_start_match.group(1)), body)
             j(handler, {"ok": True, "started": True, "status": status, "message": "Play pipeline started."})
-        except play_pipeline.PlayPipelineError as e:
-            bad(handler, str(e), e.status)
-        return True
-
-    ops_project_play_config_document_match = _re.match(r"^/api/ops/projects/([^/]+)/play/config/?$", parsed.path)
-    if ops_project_play_config_document_match:
-        try:
-            j(
-                handler,
-                play_pipeline.save_project_play_config_document(
-                    unquote(ops_project_play_config_document_match.group(1)),
-                    body,
-                ),
-            )
         except play_pipeline.PlayPipelineError as e:
             bad(handler, str(e), e.status)
         return True

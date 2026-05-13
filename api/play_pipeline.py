@@ -300,30 +300,6 @@ def normalize_play_config(payload: dict, project_path: Path) -> dict:
     return {"valid": not missing, "missing": missing, "errors": [], "config": config}
 
 
-def _empty_play_template() -> dict:
-    return {
-        "version": 2,
-        "build": {"command": "", "cwd": ".", "env": {}},
-        "start": {
-            "command": "",
-            "cwd": ".",
-            "env": {},
-            "port": {
-                "mode": "auto",
-                "host": "127.0.0.1",
-                "envVar": "PORT",
-                "range": {"min": 25000, "max": 29999},
-            },
-        },
-        "inspect": {
-            "mode": "proxy",
-            "url": "/",
-            "readyPattern": "",
-            "readyTimeoutMs": PLAY_READY_TIMEOUT_DEFAULT_MS,
-        },
-    }
-
-
 def _config_candidates(project_path: Path) -> list[Path]:
     return [
         project_path / HERMES_PLAY_FILE_NAME,
@@ -361,75 +337,6 @@ def get_project_play_config_file_info(project_id: str) -> dict:
     payload["missing"] = normalized["missing"]
     payload["errors"] = normalized["errors"]
     return payload
-
-
-def get_project_play_config_document(project_id: str) -> dict:
-    project = _get_project(project_id)
-    project_path = _project_path(project)
-    info = get_project_play_config_file_info(project_id)
-    target_path = project_path / HERMES_PLAY_FILE_NAME
-    content = ""
-    raw_config: dict | None = None
-    if info["exists"]:
-        try:
-            content = Path(info["path"]).read_text(encoding="utf-8")
-            raw_config = json.loads(content or "{}")
-        except json.JSONDecodeError:
-            raw_config = None
-        except OSError as exc:
-            raise PlayPipelineError(f"Unable to read Play config: {exc}", 500) from exc
-    else:
-        raw_config = _empty_play_template()
-        content = json.dumps(raw_config, ensure_ascii=False, indent=2) + "\n"
-    normalized = normalize_play_config(raw_config or {}, project_path) if raw_config is not None else None
-    return {
-        "info": info,
-        "content": content,
-        "config": raw_config,
-        "normalized": normalized,
-        "targetPath": str(target_path),
-        "targetScope": "hermes",
-    }
-
-
-def save_project_play_config_document(project_id: str, body: dict | None) -> dict:
-    body = body if isinstance(body, dict) else {}
-    project = _get_project(project_id)
-    project_path = _project_path(project)
-    target_path = (project_path / HERMES_PLAY_FILE_NAME).resolve()
-    try:
-        target_path.relative_to(project_path)
-    except ValueError as exc:
-        raise PlayPipelineError("Play config target must stay inside the project directory.") from exc
-
-    if isinstance(body.get("content"), str):
-        content = body["content"]
-        try:
-            parsed = json.loads(content or "{}")
-        except json.JSONDecodeError as exc:
-            raise PlayPipelineError(f"Play config JSON is invalid: {exc.msg}.") from exc
-    elif isinstance(body.get("config"), dict):
-        parsed = body["config"]
-        content = json.dumps(parsed, ensure_ascii=False, indent=2) + "\n"
-    else:
-        raise PlayPipelineError("Play config content or config object is required.")
-    if not isinstance(parsed, dict):
-        raise PlayPipelineError("Play config must be a JSON object.")
-
-    normalized = normalize_play_config(parsed, project_path)
-    if not normalized["valid"]:
-        missing = ", ".join(normalized["missing"])
-        raise PlayPipelineError(f"Play config is invalid. Missing: {missing}.")
-
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    target_path.write_text(content if content.endswith("\n") else content + "\n", encoding="utf-8")
-    return {
-        "ok": True,
-        "saved": True,
-        "path": str(target_path),
-        "info": get_project_play_config_file_info(project_id),
-        "normalized": normalized,
-    }
 
 
 def get_project_play_config(project_id: str) -> dict:
@@ -893,7 +800,11 @@ def build_project_play_logs(project_id: str, limit: int = 1000) -> dict:
     with _LOCK:
         state = _PIPELINES.get(project_id)
         logs = list(state.logs[-count:]) if state else []
-    return {"logs": logs, "text": "\n".join(_format_log(entry) for entry in logs)}
+    return {
+        "logs": logs,
+        "text": "\n".join(_format_log(entry) for entry in logs),
+        "status": build_project_play_status(project_id),
+    }
 
 
 def _proxy_error(handler, status: int, message: str) -> None:
@@ -910,9 +821,30 @@ def _play_proxy_prefix(project_id: str) -> str:
     return f"{PLAY_PROJECT_PROXY_BASE_PATH}/{urlparse.quote(project_id, safe='')}"
 
 
+def _play_proxy_overlay_attributes(project_id: str) -> str:
+    with _LOCK:
+        state = _PIPELINES.get(project_id)
+        if not state or not state.session_id:
+            return ""
+        values = {
+            "data-hermes-play-overlay": "enabled",
+            "data-hermes-play-project-id": project_id,
+            "data-hermes-play-run-id": state.run_id or "",
+            "data-hermes-play-task-id": state.task_id or "",
+            "data-hermes-play-session-id": state.session_id or "",
+            "data-hermes-play-session-url": f"/session/{urlparse.quote(state.session_id or '', safe='')}",
+        }
+    return " ".join(f'{name}="{html.escape(str(value), quote=True)}"' for name, value in values.items())
+
+
 def _inject_play_proxy_scripts(text: str, project_id: str) -> str:
     prefix = html.escape(_play_proxy_prefix(project_id), quote=True)
-    loader = f'<script src="/static/play-proxy-compat.js" data-hermes-play-proxy-prefix="{prefix}"></script>'
+    overlay_attrs = _play_proxy_overlay_attributes(project_id)
+    overlay_loader = f'<script src="/static/play-session-overlay.js" {overlay_attrs}></script>' if overlay_attrs else ""
+    loader = (
+        f'<script src="/static/play-proxy-compat.js" data-hermes-play-proxy-prefix="{prefix}"></script>'
+        f"{overlay_loader}"
+    )
     lowered = text.lower()
     head_index = lowered.find("</head>")
     if head_index >= 0:

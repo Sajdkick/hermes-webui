@@ -347,6 +347,16 @@ def _serialize_activity_session(session: dict, assignment_map: dict[str, str]) -
     }
 
 
+def _list_ops_activity_source() -> dict:
+    try:
+        return ops_sessions.list_ops_sessions(activity_only=True)
+    except TypeError:
+        # Tests and older compatibility shims may monkeypatch list_ops_sessions
+        # with the historical no-argument callable. Fall back without losing the
+        # endpoint entirely.
+        return ops_sessions.list_ops_sessions()
+
+
 def list_session_activity() -> dict:
     state = _read_state()
     assignment_map = {
@@ -355,7 +365,7 @@ def list_session_activity() -> dict:
         if str(entry.get("sessionId") or "").strip() and str(entry.get("groupId") or "").strip()
     }
     try:
-        source = ops_sessions.list_ops_sessions()
+        source = _list_ops_activity_source()
     except Exception:
         source = {"sessions": []}
     sessions = [

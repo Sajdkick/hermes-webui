@@ -250,6 +250,8 @@ def test_phase11_home_session_activity_overview_matches_cloud_terminal_shape():
             renderNotifications: () => '',
             normalizedAutoApprovalPolicy: () => ({ enabled: false }),
             loadProjects: async () => [],
+            createQuickTask: async () => null,
+            executeReadyTasksWithAi: async () => null,
             loadNotifications: async () => [],
             loadOpsRuns: async () => [],
             loadNotificationDiagnostics: async () => null,
@@ -342,9 +344,18 @@ def test_phase11_home_active_session_rows_open_from_the_whole_card():
           };
           const session = {
             session_id: 'session-1',
+            sessionKey: 'project-1',
             title: 'Fix the live dashboard',
             updated_at: 1746400800,
             active_stream_id: 'stream-1',
+            projectId: 'project-1',
+          };
+          const secondSession = {
+            session_id: 'session-2',
+            sessionKey: 'project-1',
+            title: 'Review the live dashboard',
+            updated_at: 1746400900,
+            active_stream_id: 'stream-2',
             projectId: 'project-1',
           };
 
@@ -352,7 +363,7 @@ def test_phase11_home_active_session_rows_open_from_the_whole_card():
             OPS: {
               loading: false,
               projects: [project],
-              sessions: [session],
+              sessions: [session, secondSession],
               sessionActivity: [],
               sessionActivityGroups: [],
               sessionActivityCollapsed: {},
@@ -375,6 +386,8 @@ def test_phase11_home_active_session_rows_open_from_the_whole_card():
             renderNotifications: () => '',
             normalizedAutoApprovalPolicy: () => ({ enabled: false }),
             loadProjects: async () => [],
+            createQuickTask: async () => null,
+            executeReadyTasksWithAi: async () => null,
             openProjectDetail: async () => null,
             loadNotifications: async () => [],
             loadOpsRuns: async () => [],
@@ -394,9 +407,9 @@ def test_phase11_home_active_session_rows_open_from_the_whole_card():
             renderProjectActivityQuickAction: () => '',
             sessionAccentStyle: () => '',
             sessionGroupAccentStyle: () => '',
-            sessionRefValue: (entry) => entry.session_id || entry.id,
+            sessionRefValue: (entry) => entry.sessionKey || entry.session_id || entry.id,
             canonicalTaskSessions: (sessions) => sessions,
-            projectSessionsFor: () => [session],
+            projectSessionsFor: () => [session, secondSession],
             isSessionForProject: () => true,
             taskImageLabel: () => '',
             writeStoredJson: () => {},
@@ -415,11 +428,15 @@ def test_phase11_home_active_session_rows_open_from_the_whole_card():
             runActiveStatusValues: ['running'],
           });
 
-          const html = dashboard.renderProjectSessionRows(project, [session]);
+          const html = dashboard.renderProjectSessionRows(project, [session, secondSession]);
           if (!html.includes('data-ops-session-row="true"')) throw new Error('Missing interactive session-row marker.');
           if (!html.includes('data-ops-action="open-session"')) throw new Error('Missing whole-row open-session action.');
           if (!html.includes('ops-session running interactive')) throw new Error('Missing interactive active-session card class.');
           if (!html.includes('Open session')) throw new Error('Missing explicit open-session button.');
+          if (!html.includes('data-session-key="session-1"') || !html.includes('data-session-key="session-2"')) {
+            throw new Error('Active session rows must preserve each concrete session id, even when sessions share a project-level key.');
+          }
+          if (html.includes('data-session-key="project-1"')) throw new Error('Project-level session keys must not replace concrete session ids.');
 
           console.log('ok');
         })();
@@ -469,6 +486,7 @@ def test_phase11_home_menu_shell_matches_cloud_terminal_shape():
           vm.createContext(context);
           vm.runInContext(source, context);
 
+          let executeReadyProjectId = '';
           const dashboard = context.window.HermesOpsModules.home.bindDashboard({
             OPS: {
               loading: false,
@@ -478,7 +496,16 @@ def test_phase11_home_menu_shell_matches_cloud_terminal_shape():
               notifications: [],
               notificationBusy: false,
               notificationAutoApprovalPolicy: { enabled: true, rules: [] },
-              sessionActivity: [],
+              sessionActivity: [{
+                id: 's1',
+                projectId: 'hermes',
+                label: 'Hermes',
+                branchLabel: 'Summons',
+                repoLabel: 'Hermes',
+                taskText: 'Fix the active sessions view so every session card shows the first part of the task text before the user opens the chat.',
+                activityStatus: { key: 'active', toneClass: 'active', labelText: 'Codex is working', title: 'Meaningful terminal output detected recently.' },
+                lastOutputAt: 1000,
+              }],
               sessionActivityGroups: [],
               sessionActivityCollapsed: {},
               sessionActivityInitialized: {},
@@ -507,6 +534,8 @@ def test_phase11_home_menu_shell_matches_cloud_terminal_shape():
             renderNotifications: () => '<div class="ops-notification-empty">No notifications.</div>',
             normalizedAutoApprovalPolicy: () => ({ enabled: true }),
             loadProjects: async () => [],
+            createQuickTask: async () => null,
+            executeReadyTasksWithAi: async (projectId) => { executeReadyProjectId = projectId; },
             loadNotifications: async () => [],
             loadOpsRuns: async () => [],
             loadNotificationDiagnostics: async () => null,
@@ -543,10 +572,19 @@ def test_phase11_home_menu_shell_matches_cloud_terminal_shape():
             taskDictationPrompt: '',
             taskDictationAudioBitsPerSecond: 0,
             runActiveStatusValues: ['running'],
+            playStatusFor: (projectId) => projectId === 'hermes' ? { configured: true, status: 'building', running: true } : null,
           });
 
           dashboard.renderHome();
           const html = rootEl.innerHTML;
+          if (!html.includes('data-project-play-state="building"')) throw new Error('Missing active-session Play building state marker.');
+          if (!html.includes('project-play play-status-badge state-building')) throw new Error('Missing active-session Play building badge.');
+          if (!html.includes('<div class="menu-session-activity-title">Summons</div>')) throw new Error('Active-session title should prefer the branch label over the shared repository name.');
+          if (!html.includes('<div class="menu-session-activity-repo">Hermes</div>')) throw new Error('Active-session row should keep the repository name as secondary context.');
+          if (!html.includes('menu-session-activity-task-preview')) throw new Error('Active-session row should show a task preview.');
+          if (!html.includes('<span class="menu-session-activity-task-label">Task</span>')) throw new Error('Active-session task preview should be labeled.');
+          if (!html.includes('Fix the active sessions view so every session card shows the first part of the task text')) throw new Error('Active-session task preview should include the task text prefix.');
+          if (!html.includes('title="Fix the active sessions view so every session card shows the first part of the task text before the user opens the chat."')) throw new Error('Active-session task preview should keep the full task text in the title.');
           if (!html.includes('menu-page-content')) throw new Error('Missing Cloud Terminal menu-page wrapper.');
           if (!html.includes('<h2>Menu</h2>')) throw new Error('Missing Cloud Terminal menu heading.');
           if (!html.includes('Use the navigation buttons below and review active agent notifications.')) throw new Error('Missing Cloud Terminal menu description.');
@@ -554,7 +592,10 @@ def test_phase11_home_menu_shell_matches_cloud_terminal_shape():
           if (!html.includes('Auto-approve routine requests')) throw new Error('Missing Cloud Terminal auto-approve copy.');
           if (!html.includes('menu-quick-task-form')) throw new Error('Missing Cloud Terminal quick task form wrapper.');
           if (!html.includes('task-add-btn')) throw new Error('Missing Cloud Terminal quick task primary button style.');
+          if (!html.includes('data-ops-action="create-quick-task"')) throw new Error('Missing create-only quick task action.');
           if (!html.includes('Create & run')) throw new Error('Missing Cloud Terminal quick task submit label.');
+          if (!html.includes('data-ops-action="execute-ready-tasks"')) throw new Error('Missing quick task execute-ready action.');
+          if (!html.includes('Execute ready tasks with AI')) throw new Error('Missing quick task execute-ready label.');
           if (!html.includes('Run as standing /goal')) throw new Error('Missing Hermes quick-task goal-mode toggle.');
           if (!html.includes('menu-actions')) throw new Error('Missing Cloud Terminal menu action strip.');
           if (!html.includes('data-ops-action="show-create-project"')) throw new Error('Missing create-project menu action.');
@@ -567,6 +608,320 @@ def test_phase11_home_menu_shell_matches_cloud_terminal_shape():
           if (!html.includes('while this menu is visible.')) throw new Error('Missing Cloud Terminal active-session help copy.');
           if (html.includes('ops-home-top')) throw new Error('Legacy Hermes home top bar should not render in the Cloud Terminal parity shell.');
 
+          await dashboard.handleHomeAction('execute-ready-tasks', { dataset: {} });
+          if (executeReadyProjectId !== 'hermes') throw new Error('Home execute-ready action did not use the selected quick-task project.');
+          if (!rootEl.innerHTML.includes('Ready task execution session started.')) throw new Error('Home execute-ready action did not render a success status.');
+
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_phase11_quick_task_create_only_does_not_start_execution():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (async () => {
+          const source = fs.readFileSync('static/ops-legacy-task-actions.js', 'utf8');
+          const windowRef = { HermesOpsModules: {}, _opsDashboardOpen: true };
+          const context = { console, window: windowRef, document: {} };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const project = { id: 'hermes', name: 'Hermes', path: '/tmp/hermes' };
+          const quickEpic = { id: 'quick-epic', title: 'Quick tasks', tasks: [] };
+          const createdTask = { id: 'task-1', text: 'Create only', grade: 'green' };
+          const calls = [];
+          let renderHomeCount = 0;
+          let sendTurnCount = 0;
+          const OPS = {
+            currentProject: null,
+            taskData: null,
+            taskDataByProject: { hermes: { epics: [quickEpic], tasksFile: 'project_tasks/master.json', branch: 'master' } },
+            taskAutomationBusyByProject: {},
+            view: 'home',
+            quickTaskImages: [],
+            quickTaskText: 'Create only',
+            quickTaskGoalMode: true,
+            quickTaskBusy: false,
+            quickTaskBusyAction: '',
+            quickTaskDictationActive: false,
+            quickTaskDictationBusy: false,
+            quickTaskStatus: '',
+            quickTaskStatusKind: 'info',
+          };
+
+          const dashboard = context.window.HermesOpsModules.taskActions.bindDashboard({
+            OPS,
+            AgentBridge: { sessions: {}, runs: {} },
+            api: async (url, options) => {
+              calls.push({ url, method: options && options.method, body: options && options.body });
+              if (url === '/projects/hermes/tasks') return { task: createdTask };
+              throw new Error('Unexpected API call: ' + url);
+            },
+            projectUrl: (projectId, suffix) => `/projects/${projectId}${suffix || ''}`,
+            projectPath: () => '/tmp/hermes',
+            nameOf: () => 'Hermes',
+            findProject: (projectId) => projectId === 'hermes' ? project : null,
+            findTask: () => null,
+            findTaskInData: () => ({ epic: quickEpic, task: createdTask }),
+            allTasks: () => [],
+            findSession: () => null,
+            sessionTaskId: () => '',
+            latestSessionForTask: () => null,
+            sessionRefValue: () => '',
+            normalizeTaskGrade: (value) => value || 'green',
+            getTaskQaStatus: () => '',
+            getTaskMoreWork: () => '',
+            actionableTaskCount: () => 0,
+            summarizeTaskFilters: () => ({}),
+            renderProjectDetail: () => {},
+            loadProjectDetail: async () => OPS.taskDataByProject.hermes,
+            refreshOpsSessions: async () => [],
+            reloadProjectTasks: async () => OPS.taskDataByProject.hermes,
+            loadProjects: async () => [],
+            renderProjects: () => {},
+            renderHome: () => { renderHomeCount += 1; },
+            loadSession: async () => null,
+            renderSessionList: () => {},
+            closeOpsDashboard: () => {},
+            showToast: () => {},
+            showPromptDialog: async () => null,
+            showConfirmDialog: async () => false,
+            setBusy: () => {},
+            domLookup: () => null,
+            documentRef: context.document,
+            clearQuickTaskImages: () => { OPS.quickTaskImages = []; },
+            sendTurn: async () => { sendTurnCount += 1; },
+          });
+
+          await dashboard.createQuickTask('hermes', 'Create only', { run: false });
+
+          if (calls.length !== 1 || calls[0].url !== '/projects/hermes/tasks') throw new Error('Create-only should only post the quick task.');
+          if (sendTurnCount !== 0) throw new Error('Create-only should not start a chat turn.');
+          if (OPS.quickTaskText !== '') throw new Error('Create-only should clear the quick task text after creating.');
+          if (OPS.quickTaskBusy || OPS.quickTaskBusyAction) throw new Error('Create-only should clear busy state.');
+          if (OPS.quickTaskStatus !== 'Quick task created.' || OPS.quickTaskStatusKind !== 'success') throw new Error('Create-only should leave a success status.');
+          if (renderHomeCount < 2) throw new Error('Create-only should refresh the home panel while busy and after completion.');
+
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_phase11_open_session_loads_target_before_closing_dashboard():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (async () => {
+          const source = fs.readFileSync('static/ops-legacy-task-actions.js', 'utf8');
+          const windowRef = { HermesOpsModules: {}, _opsDashboardOpen: true };
+          const context = { console, window: windowRef, document: {} };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const calls = [];
+          let loadSessionCalled = false;
+          let loadResolve;
+          const loadPromise = new Promise((resolve) => { loadResolve = resolve; });
+          const OPS = {
+            currentProject: null,
+            taskData: null,
+            taskDataByProject: {},
+            sessions: [],
+            view: 'home',
+          };
+
+          const dashboard = context.window.HermesOpsModules.taskActions.bindDashboard({
+            OPS,
+            AgentBridge: { sessions: {}, runs: {} },
+            api: async () => ({}),
+            projectUrl: (projectId, suffix) => `/projects/${projectId}${suffix || ''}`,
+            projectPath: () => '/tmp/hermes',
+            nameOf: () => 'Hermes',
+            findProject: () => null,
+            findTask: () => null,
+            findTaskInData: () => null,
+            allTasks: () => [],
+            findSession: () => null,
+            sessionTaskId: () => '',
+            latestSessionForTask: () => null,
+            sessionRefValue: (item) => typeof item === 'string' ? item : (item && item.session_id || item && item.sessionId || ''),
+            normalizeTaskGrade: (value) => value || 'green',
+            getTaskQaStatus: () => '',
+            getTaskMoreWork: () => '',
+            actionableTaskCount: () => 0,
+            summarizeTaskFilters: () => ({}),
+            renderProjectDetail: () => {},
+            loadProjectDetail: async () => ({}),
+            refreshOpsSessions: async () => [],
+            reloadProjectTasks: async () => ({}),
+            loadProjects: async () => [],
+            renderProjects: () => {},
+            renderHome: () => {},
+            loadSession: async (sessionId) => {
+              if (sessionId !== 'session-1') throw new Error('Wrong session id');
+              calls.push(`load:${sessionId}`);
+              loadSessionCalled = true;
+              await loadPromise;
+            },
+            renderSessionList: () => { calls.push('render-list'); },
+            closeOpsDashboard: () => { calls.push('close-dashboard'); },
+            showToast: () => {},
+            showPromptDialog: async () => null,
+            showConfirmDialog: async () => true,
+            setBusy: () => {},
+            domLookup: () => null,
+            documentRef: context.document,
+            clearQuickTaskImages: () => {},
+          });
+
+          const pending = dashboard.openOpsSession('session-1');
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          if (!loadSessionCalled) throw new Error('loadSession was not called.');
+          if (JSON.stringify(calls) !== JSON.stringify(['load:session-1'])) {
+            throw new Error(`Dashboard closed before target session finished loading: ${JSON.stringify(calls)}`);
+          }
+          loadResolve();
+          await pending;
+          const expected = ['load:session-1', 'render-list', 'close-dashboard'];
+          if (JSON.stringify(calls) !== JSON.stringify(expected)) {
+            throw new Error(`Unexpected open order: ${JSON.stringify(calls)}`);
+          }
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_phase11_close_session_optimistically_removes_active_row_before_api_returns():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (async () => {
+          const source = fs.readFileSync('static/ops-legacy-task-actions.js', 'utf8');
+          const windowRef = { HermesOpsModules: {}, _opsDashboardOpen: true };
+          const context = { console, window: windowRef, document: {} };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const project = { id: 'hermes', name: 'Hermes', path: '/tmp/hermes' };
+          const task = { id: 'task-1', text: 'Close me', inProgress: true, sessionId: 'session-1' };
+          const epic = { id: 'epic-1', tasks: [task] };
+          const session = { session_id: 'session-1', taskId: 'task-1' };
+          let renderHomeCount = 0;
+          let closeTaskCheckedOptimisticState = false;
+          let closeTaskResolve;
+          const closeTaskPromise = new Promise((resolve) => { closeTaskResolve = resolve; });
+          const OPS = {
+            currentProject: null,
+            taskData: null,
+            taskDataByProject: { hermes: { epics: [epic] } },
+            sessions: [session],
+            view: 'home',
+          };
+
+          const dashboard = context.window.HermesOpsModules.taskActions.bindDashboard({
+            OPS,
+            AgentBridge: {
+              sessions: {
+                closeTask: async (projectId, taskId, payload) => {
+                  if (projectId !== 'hermes' || taskId !== 'task-1' || payload.sessionId !== 'session-1'){
+                    throw new Error('closeTask payload did not preserve project/task/session ids.');
+                  }
+                  if (OPS.sessions.length !== 0 || task.inProgress !== false || task.sessionId){
+                    throw new Error('Session close did not update the visible state before the API call.');
+                  }
+                  if (renderHomeCount < 1){
+                    throw new Error('Session close did not render the home panel optimistically.');
+                  }
+                  closeTaskCheckedOptimisticState = true;
+                  await closeTaskPromise;
+                  return { ok: true };
+                },
+              },
+              runs: {},
+            },
+            api: async () => ({}),
+            projectUrl: (projectId, suffix) => `/projects/${projectId}${suffix || ''}`,
+            projectPath: () => '/tmp/hermes',
+            nameOf: () => 'Hermes',
+            findProject: (projectId) => projectId === 'hermes' ? project : null,
+            findTask: () => ({ epic, task }),
+            findTaskInData: () => ({ epic, task }),
+            allTasks: () => [{ epic, task }],
+            findSession: (sid) => sid === 'session-1' ? session : null,
+            sessionTaskId: (item) => item && item.taskId || '',
+            latestSessionForTask: () => session,
+            sessionRefValue: (item) => typeof item === 'string' ? item : (item && item.session_id || item && item.sessionId || ''),
+            normalizeTaskGrade: (value) => value || 'green',
+            getTaskQaStatus: () => '',
+            getTaskMoreWork: () => '',
+            actionableTaskCount: () => 0,
+            summarizeTaskFilters: () => ({}),
+            renderProjectDetail: () => {},
+            loadProjectDetail: async () => OPS.taskDataByProject.hermes,
+            refreshOpsSessions: async () => OPS.sessions,
+            reloadProjectTasks: async () => OPS.taskDataByProject.hermes,
+            loadProjects: async () => [],
+            renderProjects: () => {},
+            renderHome: () => { renderHomeCount += 1; },
+            loadSession: async () => null,
+            renderSessionList: () => {},
+            closeOpsDashboard: () => {},
+            showToast: () => {},
+            showPromptDialog: async () => null,
+            showConfirmDialog: async () => true,
+            setBusy: () => {},
+            domLookup: () => null,
+            documentRef: context.document,
+            clearQuickTaskImages: () => {},
+          });
+
+          const pending = dashboard.setOpsSessionClosed('session-1', true, 'hermes');
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          if (!closeTaskCheckedOptimisticState) throw new Error('closeTask was not called.');
+          closeTaskResolve();
+          await pending;
+          if (OPS.sessions.length !== 0) throw new Error('Closed session was restored unexpectedly.');
           console.log('ok');
         })().catch((error) => {
           console.error(error && error.stack ? error.stack : error);
@@ -785,6 +1140,8 @@ def test_phase11_quick_task_project_picker_defers_home_rerender_during_activity_
             renderNotifications: () => '<div class="ops-notification-empty">No notifications.</div>',
             normalizedAutoApprovalPolicy: () => ({ enabled: true }),
             loadProjects: async () => [],
+            createQuickTask: async () => null,
+            executeReadyTasksWithAi: async () => null,
             openProjectDetail: async () => null,
             loadNotifications: async () => [],
             loadOpsRuns: async () => [],
@@ -1106,6 +1463,7 @@ def test_phase11_project_side_panels_match_cloud_terminal_card_shape():
           const OPS = {
             projects: [project],
             currentProject: project,
+            notifications: [],
             deploymentsByProject: {
               'project-1': {
                 deployment: {
@@ -1200,13 +1558,6 @@ def test_phase11_project_side_panels_match_cloud_terminal_card_shape():
               }],
             },
             reviewBusyByProject: {},
-            playConfigEditingProjectId: 'project-1',
-            playConfigByProject: {
-              'project-1': {
-                targetPath: '/tmp/project_play.json',
-                content: '{\\n  "version": 2\\n}',
-              },
-            },
             playStatusByProject: {
               'project-1': {
                 status: 'ready',
@@ -1214,8 +1565,9 @@ def test_phase11_project_side_panels_match_cloud_terminal_card_shape():
                 label: 'Play ready',
                 title: 'Play is ready.',
                 summary: 'Inspect overlay is available.',
-                configAvailable: true,
-                configValid: true,
+                configured: true,
+                valid: true,
+                configExists: true,
                 inspectUrl: 'https://example.com/inspect',
                 ready: true,
                 running: false,
@@ -1277,8 +1629,6 @@ def test_phase11_project_side_panels_match_cloud_terminal_card_shape():
               },
               play: {
                 status: async () => OPS.playStatusByProject['project-1'],
-                config: async () => OPS.playConfigByProject['project-1'],
-                saveConfig: async () => ({ saved: true }),
                 logs: async () => OPS.playLogsByProject['project-1'],
                 notificationTarget: async () => ({}),
               },
@@ -1304,7 +1654,6 @@ def test_phase11_project_side_panels_match_cloud_terminal_card_shape():
             ['project settings', health.renderProjectSettings(project), ['tasks-card ops-project-settings-panel', 'menu-action-btn small'], [/class="ops-btn/, /class="ops-panel/]],
             ['gather reports', health.renderProjectGatherReports(project), ['tasks-card ops-gather-panel', 'menu-action-btn secondary small'], [/class="ops-btn/, /class="ops-panel/]],
             ['review requests', health.renderProjectReviewRequests(project), ['tasks-card ops-gather-panel', 'menu-action-btn secondary small'], [/class="ops-btn/, /class="ops-panel/]],
-            ['play config', play.renderProjectPlayConfigEditor(project), ['tasks-card ops-play-config-panel', 'Save Play config'], [/ops-icon-btn/, /class="ops-btn/]],
             ['play detail controls', play.renderProjectPlayControls(project, { detail: true }), ['menu-action-btn small', 'menu-action-btn secondary small'], [/class="ops-btn/]],
             ['play logs', play.renderProjectPlayLogs(project.id), ['tasks-card ops-play-log-panel'], [/class="ops-btn/, /class="ops-panel/]],
             ['play snapshot', play.renderProjectRuntimeSnapshot(project.id), ['tasks-card ops-play-snapshot-panel'], [/class="ops-btn/, /class="ops-panel/]],
@@ -1320,8 +1669,145 @@ def test_phase11_project_side_panels_match_cloud_terminal_card_shape():
             });
           });
 
+          const playControls = play.renderProjectPlayControls(project, { detail: true });
+          if (!playControls.includes('data-ops-action="open-play"')){
+            throw new Error('Backend-shaped ready Play status did not render the Play open action.');
+          }
+          if (/data-ops-action="open-play"[^>]*disabled/.test(playControls)){
+            throw new Error('Backend-shaped ready Play status rendered a disabled Play open action.');
+          }
+
+          OPS.playStatusByProject['project-1'] = {
+            status: 'idle',
+            configured: false,
+            valid: false,
+            configExists: false,
+            ready: false,
+            inspectUrl: '',
+          };
+          OPS.notifications = [{
+            id: 'play-project-1-ready',
+            kind: 'play',
+            project_id: 'project-1',
+            inspectUrl: '/play-project/project-1/app',
+            playStatus: 'ready',
+            message: 'Play app is ready for inspection.',
+          }];
+          const notificationBackedControls = play.renderProjectPlayControls(project, { detail: true });
+          if (!notificationBackedControls.includes('data-ops-action="open-play"')){
+            throw new Error('Ready Play notification did not enable the Play open action.');
+          }
+          if (/data-ops-action="open-play"[^>]*disabled/.test(notificationBackedControls)){
+            throw new Error('Ready Play notification rendered a disabled Play open action.');
+          }
+
           console.log('ok');
         })();
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+
+def test_phase11_ops_active_session_click_loads_target_before_closing_dashboard():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (async () => {
+          const source = fs.readFileSync('static/ops-legacy-task-actions.js', 'utf8');
+          const windowRef = { HermesOpsModules: {} };
+          const context = {
+            console,
+            window: windowRef,
+            document: { querySelector: () => null, querySelectorAll: () => [] },
+            FileReader: function(){},
+            setTimeout,
+            clearTimeout,
+          };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const calls = [];
+          const dashboard = context.window.HermesOpsModules.taskActions.bindDashboard({
+            OPS: { currentProject: null, taskData: null, taskDataByProject: {}, sessions: [] },
+            AgentBridge: {
+              sessions: {
+                rename: async () => null,
+                delete: async () => null,
+                archive: async () => null,
+                setClosed: async () => null,
+                start: async () => ({ session: 'created-session' }),
+              },
+              runs: {
+                create: async () => ({}),
+                setStatus: async () => ({}),
+                complete: async () => ({}),
+                addArtifact: async () => ({}),
+              },
+            },
+            api: async () => ({}),
+            projectUrl: (projectId, path) => `/api/ops/projects/${projectId}${path}`,
+            projectPath: () => '',
+            nameOf: () => 'Project',
+            findProject: () => null,
+            findTask: () => null,
+            findTaskInData: () => null,
+            allTasks: () => [],
+            findSession: () => null,
+            sessionTaskId: () => '',
+            latestSessionForTask: () => null,
+            sessionRefValue: (entry) => typeof entry === 'string' ? entry : (entry && (entry.session_id || entry.id)) || '',
+            normalizeTaskGrade: () => 'green',
+            getTaskQaStatus: () => '',
+            getTaskMoreWork: () => '',
+            actionableTaskCount: () => 0,
+            summarizeTaskFilters: () => '',
+            renderProjectDetail: () => {},
+            loadProjectDetail: async () => ({}),
+            refreshOpsSessions: async () => [],
+            reloadProjectTasks: async () => ({}),
+            loadProjects: async () => [],
+            renderProjects: () => {},
+            renderHome: () => {},
+            loadSession: async (sid) => { calls.push(`load:${sid}`); },
+            renderSessionList: async () => { calls.push('render-list'); },
+            closeOpsDashboard: () => { calls.push('close-dashboard'); },
+            showToast: () => {},
+            showPromptDialog: async () => null,
+            showConfirmDialog: async () => false,
+            setBusy: () => {},
+            domLookup: () => ({ value: '', files: [] }),
+            documentRef: context.document,
+            windowRef,
+            FileReaderRef: function(){},
+            SRef: () => ({ session: { session_id: 'current-session' }, messages: [], entries: [] }),
+            addFiles: () => {},
+            renderTray: () => {},
+            clearSessionReadableOutput: () => {},
+            clearPersistedSessionId: () => {},
+            sendTurn: async () => {},
+            autoResize: () => {},
+            clearQuickTaskImages: () => {},
+          });
+
+          await dashboard.openOpsSession('target-session');
+          const expected = ['load:target-session', 'render-list', 'close-dashboard'];
+          if (JSON.stringify(calls) !== JSON.stringify(expected)) {
+            throw new Error(`Unexpected open order: ${JSON.stringify(calls)}`);
+          }
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
         """
     )
     completed = subprocess.run(

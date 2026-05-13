@@ -119,8 +119,6 @@
     playStatusByProject:{},
     playLogsByProject:{},
     playBusyByProject:{},
-    playConfigByProject:{},
-    playConfigEditingProjectId:'',
     playSnapshotsByProject:{},
     playScreenshotsByProject:{},
     gitStatusByProject:{},
@@ -180,6 +178,7 @@
     quickTaskText:'',
     quickTaskGoalMode:false,
     quickTaskBusy:false,
+    quickTaskBusyAction:'',
     quickTaskStatus:'',
     quickTaskStatusKind:'info',
     quickTaskImages:[],
@@ -446,6 +445,8 @@
       projectSessionsFor:typeof projectSessionsFor==='function'?projectSessionsFor:null,
       isSessionForProject:typeof isSessionForProject==='function'?isSessionForProject:null,
       taskImageLabel:(ref)=>DASHBOARD_PROJECT_DETAIL.taskImageLabel(ref),
+      createQuickTask:(projectId,text,options)=>createQuickTask(projectId,text,options),
+      executeReadyTasksWithAi:(projectId)=>executeReadyTasksWithAi(projectId),
       writeStoredJson:typeof writeDashboardStoredJson==='function'?writeDashboardStoredJson:null,
       sessionActivityStorageKey:OPS_SESSION_ACTIVITY_COLLAPSE_STORAGE_KEY,
       navigatorRef:typeof navigator!=='undefined'?navigator:null,
@@ -461,6 +462,7 @@
       taskDictationPrompt:TASK_DICTATION_PROMPT,
       taskDictationAudioBitsPerSecond:TASK_DICTATION_AUDIO_BITS_PER_SECOND,
       runActiveStatusValues:RUN_ACTIVE_STATUS_VALUES,
+      playStatusFor:(projectId)=>OPS.playStatusByProject[String(projectId||'').trim()]||null,
     })
     : {};
   const DASHBOARD_DEPLOYMENTS=OPS_MODULES.deployments&&typeof OPS_MODULES.deployments.bindDashboard==='function'
@@ -659,7 +661,6 @@
       renderProjectSettings:(project)=>renderProjectSettings(project),
       renderProjectHealth:(project)=>renderProjectHealth(project),
       renderProjectGitStatus:(project,options)=>renderProjectGitStatus(project,options),
-      renderProjectPlayConfigEditor:(project)=>renderProjectPlayConfigEditor(project),
       renderProjectRuntimeSnapshot:(projectId)=>renderProjectRuntimeSnapshot(projectId),
       renderProjectRuntimeScreenshot:(projectId)=>renderProjectRuntimeScreenshot(projectId),
       renderProjectPlayLogs:(projectId)=>renderProjectPlayLogs(projectId),
@@ -754,7 +755,7 @@
   const setOpsSessionClosed=(sessionId,closed,projectId)=>DASHBOARD_TASK_ACTIONS.setOpsSessionClosed(sessionId,closed,projectId);
   const executeTask=(taskId,options)=>DASHBOARD_TASK_ACTIONS.executeTask(taskId,options);
   const executeReadyTasksWithAi=(projectId)=>DASHBOARD_TASK_ACTIONS.executeReadyTasksWithAi(projectId);
-  const createQuickTask=(projectId,text)=>DASHBOARD_TASK_ACTIONS.createQuickTask(projectId,text);
+  const createQuickTask=(projectId,text,options)=>DASHBOARD_TASK_ACTIONS.createQuickTask(projectId,text,options);
   const clearQuickTaskImages=DASHBOARD_HOME.clearQuickTaskImages||function(){OPS.quickTaskImages=[];};
   const stopQuickTaskDictation=DASHBOARD_HOME.stopQuickTaskDictation||function(){};
   const renderHome=DASHBOARD_HOME.renderHome||function(){};
@@ -812,9 +813,6 @@
   const playStatusSummary=DASHBOARD_PLAY.playStatusSummary||function(){return 'Play status unavailable.';};
   const stopPlayStatusPolling=DASHBOARD_PLAY.stopPlayStatusPolling||function(){};
   const refreshProjectPlayStatus=DASHBOARD_PLAY.refreshProjectPlayStatus||(async function(){return null;});
-  const showProjectPlayConfig=DASHBOARD_PLAY.showProjectPlayConfig||(async function(){return null;});
-  const closeProjectPlayConfig=DASHBOARD_PLAY.closeProjectPlayConfig||function(){};
-  const renderProjectPlayConfigEditor=DASHBOARD_PLAY.renderProjectPlayConfigEditor||function(){return '';};
   const renderProjectPlayControls=DASHBOARD_PLAY.renderProjectPlayControls||function(){return '';};
   const renderProjectPlayLogs=DASHBOARD_PLAY.renderProjectPlayLogs||function(){return '';};
   const renderProjectRuntimeSnapshot=DASHBOARD_PLAY.renderProjectRuntimeSnapshot||function(){return '';};
@@ -822,7 +820,6 @@
   const startProjectPlay=DASHBOARD_PLAY.startProjectPlay||(async function(){return null;});
   const stopProjectPlay=DASHBOARD_PLAY.stopProjectPlay||(async function(){return null;});
   const restartProjectPlay=DASHBOARD_PLAY.restartProjectPlay||(async function(){return null;});
-  const saveProjectPlayConfig=DASHBOARD_PLAY.saveProjectPlayConfig||(async function(){return null;});
   const captureProjectRuntimeSnapshot=DASHBOARD_PLAY.captureProjectRuntimeSnapshot||(async function(){return null;});
   const captureProjectRuntimeScreenshot=DASHBOARD_PLAY.captureProjectRuntimeScreenshot||(async function(){return null;});
   const openProjectPlay=DASHBOARD_PLAY.openProjectPlay||function(){return null;};
@@ -867,6 +864,8 @@
       renderProjectDetail:typeof renderProjectDetail==='function'?renderProjectDetail:null,
       refreshProjectPlayStatus:typeof refreshProjectPlayStatus==='function'?refreshProjectPlayStatus:null,
       refreshProjectGitStatus:typeof refreshProjectGitStatus==='function'?refreshProjectGitStatus:null,
+      renderProjectPlayControls:typeof renderProjectPlayControls==='function'?renderProjectPlayControls:null,
+      renderProjectPlayLogs:typeof renderProjectPlayLogs==='function'?renderProjectPlayLogs:null,
       playStatusFor:typeof playStatusFor==='function'?playStatusFor:null,
       playStatusKind:typeof playStatusKind==='function'?playStatusKind:null,
       playStatusLabel:typeof playStatusLabel==='function'?playStatusLabel:null,
@@ -932,8 +931,6 @@
       setOpsSessionClosed:typeof setOpsSessionClosed==='function'?setOpsSessionClosed:null,
       repairPlayNotification:typeof repairPlayNotification==='function'?repairPlayNotification:null,
       startProjectPlay:typeof startProjectPlay==='function'?startProjectPlay:null,
-      showProjectPlayConfig:typeof showProjectPlayConfig==='function'?showProjectPlayConfig:null,
-      closeProjectPlayConfig:typeof closeProjectPlayConfig==='function'?closeProjectPlayConfig:null,
       refreshProjectGitStatus:typeof refreshProjectGitStatus==='function'?refreshProjectGitStatus:null,
       loadProjectDependencyStatus:typeof loadProjectDependencyStatus==='function'?loadProjectDependencyStatus:null,
       scanProjectInodes:typeof scanProjectInodes==='function'?scanProjectInodes:null,
@@ -970,7 +967,6 @@
       projectUrl:typeof projectUrl==='function'?projectUrl:null,
       showConfirmDialog:typeof showConfirmDialog==='function'?showConfirmDialog:(async()=>false),
       createRunArtifact:typeof createRunArtifact==='function'?createRunArtifact:null,
-      saveProjectPlayConfig:typeof saveProjectPlayConfig==='function'?saveProjectPlayConfig:null,
       createQuickTask:typeof createQuickTask==='function'?createQuickTask:null,
       toggleTaskFormDictation:typeof toggleTaskFormDictation==='function'?toggleTaskFormDictation:null,
       createAutoApprovalRule:typeof createAutoApprovalRule==='function'?createAutoApprovalRule:null,
@@ -1025,7 +1021,7 @@
   function sessionRefValue(sessionLike){
     if(!sessionLike)return '';
     if(typeof sessionLike==='string')return String(sessionLike).trim();
-    return String(sessionLike.sessionKey||sessionLike.session_id||sessionLike.sessionId||sessionLike.id||'').trim();
+    return String(sessionLike.session_id||sessionLike.sessionId||sessionLike.id||sessionLike.sessionKey||sessionLike.session_key||'').trim();
   }
 
   function findSession(sessionId){

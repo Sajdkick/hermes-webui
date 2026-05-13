@@ -54,8 +54,6 @@
     const setOpsSessionClosed=ctx&&ctx.setOpsSessionClosed;
     const repairPlayNotification=ctx&&ctx.repairPlayNotification;
     const startProjectPlay=ctx&&ctx.startProjectPlay;
-    const showProjectPlayConfig=ctx&&ctx.showProjectPlayConfig;
-    const closeProjectPlayConfig=ctx&&ctx.closeProjectPlayConfig;
     const refreshProjectGitStatus=ctx&&ctx.refreshProjectGitStatus;
     const loadProjectDependencyStatus=ctx&&ctx.loadProjectDependencyStatus;
     const scanProjectInodes=ctx&&ctx.scanProjectInodes;
@@ -92,7 +90,6 @@
     const projectUrl=ctx&&ctx.projectUrl;
     const showConfirmDialog=ctx&&ctx.showConfirmDialog;
     const createRunArtifact=ctx&&ctx.createRunArtifact;
-    const saveProjectPlayConfig=ctx&&ctx.saveProjectPlayConfig;
     const createQuickTask=ctx&&ctx.createQuickTask;
     const toggleTaskFormDictation=ctx&&ctx.toggleTaskFormDictation;
     const createAutoApprovalRule=ctx&&ctx.createAutoApprovalRule;
@@ -200,9 +197,6 @@
         if(action==='git-noop')return null;
         if(action==='repair-play-notification')return await repairPlayNotification(notificationId);
         if(action==='start-play')return await startProjectPlay(projectId);
-        if(action==='show-play-config')return await showProjectPlayConfig(projectId);
-        if(action==='close-play-config')return closeProjectPlayConfig();
-        if(action==='reload-play-config'){delete OPS.playConfigByProject[projectId];return await showProjectPlayConfig(projectId);}
         if(action==='refresh-git-status')return await refreshProjectGitStatus(projectId);
         if(action==='refresh-project-health')return await loadProjectDependencyStatus(projectId);
         if(action==='scan-project-inodes')return await scanProjectInodes(projectId);
@@ -348,15 +342,11 @@
           form.reset();
           return;
         }
-        if(kind==='play-config'){
-          await saveProjectPlayConfig(form.dataset.projectId,data.content);
-          return;
-        }
         if(kind==='quick-task'){
           OPS.quickTaskProjectId=String(data.projectId||'').trim();
           OPS.quickTaskText=String(data.text||'');
           OPS.quickTaskGoalMode=data.goalMode==='on';
-          await createQuickTask(OPS.quickTaskProjectId,OPS.quickTaskText);
+          await createQuickTask(OPS.quickTaskProjectId,OPS.quickTaskText,{run:true});
           return;
         }
         if(kind==='auto-approval-rule'){

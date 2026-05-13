@@ -1,4 +1,4 @@
 interface:
   display_name: "Cloud Terminal Gather Information"
-  short_description: "Collect user-driven runtime logs into an agent-readable report"
-  default_prompt: "Use $cloud-terminal-gather-information when you need to add temporary instrumentation, ask the user to reproduce a flow, and inspect the resulting report directly without copy/paste."
+  short_description: "Collect user-driven runtime logs into an agent-readable report with ct-runtime or hermes-runtime"
+  default_prompt: "Use $cloud-terminal-gather-information when you need to add temporary instrumentation, ask the user to reproduce a flow, and inspect the resulting report directly without copy/paste. Use hermes-runtime gather in Hermes WebUI sessions and ct-runtime gather only in Cloud Terminal sessions."

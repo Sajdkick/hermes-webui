@@ -3520,6 +3520,28 @@ function autoReadLastAssistant(){
 const INFLIGHT_KEY = 'hermes-webui-inflight'; // localStorage key for in-flight session tracking
 const INFLIGHT_STATE_KEY = 'hermes-webui-inflight-state'; // localStorage snapshots for mid-stream reload recovery
 
+function _isInflightStorageQuotaError(error){
+  if(!error)return false;
+  const name=String(error.name||'').toLowerCase();
+  const message=String(error.message||'').toLowerCase();
+  return name==='quotaexceedederror'||Number(error.code)===22||Number(error.code)===1014||message.includes('quota');
+}
+function _setInflightStorageItem(key,value){
+  try{
+    localStorage.setItem(key,value);
+    return true;
+  }catch(error){
+    if(!_isInflightStorageQuotaError(error))return false;
+    try{localStorage.removeItem(INFLIGHT_STATE_KEY);}catch(_){}
+    try{
+      localStorage.setItem(key,value);
+      return true;
+    }catch(_){
+      return false;
+    }
+  }
+}
+
 function _readInflightStateMap(){
   try{
     const raw=localStorage.getItem(INFLIGHT_STATE_KEY);
@@ -3534,7 +3556,7 @@ function saveInflightState(sid, state){
   try{
     const all=_readInflightStateMap();
     all[sid]={...state,updated_at:Date.now()};
-    localStorage.setItem(INFLIGHT_STATE_KEY, JSON.stringify(all));
+    _setInflightStorageItem(INFLIGHT_STATE_KEY, JSON.stringify(all));
   }catch(_){ }
 }
 function loadInflightState(sid, streamId){
@@ -3555,13 +3577,13 @@ function clearInflightState(sid){
     const all=_readInflightStateMap();
     if(!(sid in all)) return;
     delete all[sid];
-    if(Object.keys(all).length) localStorage.setItem(INFLIGHT_STATE_KEY, JSON.stringify(all));
+    if(Object.keys(all).length) _setInflightStorageItem(INFLIGHT_STATE_KEY, JSON.stringify(all));
     else localStorage.removeItem(INFLIGHT_STATE_KEY);
   }catch(_){ }
 }
 
 function markInflight(sid, streamId) {
-  localStorage.setItem(INFLIGHT_KEY, JSON.stringify({sid, streamId, ts: Date.now()}));
+  _setInflightStorageItem(INFLIGHT_KEY, JSON.stringify({sid, streamId, ts: Date.now()}));
 }
 function clearInflight() {
   localStorage.removeItem(INFLIGHT_KEY);

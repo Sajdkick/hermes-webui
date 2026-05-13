@@ -10,6 +10,7 @@ from api.models import get_session
 
 
 MAX_READABLE_OUTPUT_BYTES = 512 * 1024
+READABLE_OUTPUT_SCOPE_DIRS = (".hermes", ".cloud-terminal")
 
 
 class SessionReadableOutputError(Exception):
@@ -85,7 +86,9 @@ def _readable_output_dir_candidates(session) -> list[Path]:
         _workspace_root_for_session(session),
     ):
         if isinstance(root, Path):
-            candidates.append(root / ".cloud-terminal" / "readable-output" / session_id)
+            for scope_dir in READABLE_OUTPUT_SCOPE_DIRS:
+                candidates.append(root / scope_dir / "readable-output" / session_id)
+    candidates.append((STATE_DIR / "readable-output" / session_id).resolve())
     candidates.append((STATE_DIR / "ops" / "readable-output" / session_id).resolve())
 
     seen = set()
@@ -221,11 +224,20 @@ def resolve_session_readable_asset(session_id: str, asset_path: str) -> Path:
     rel = str(asset_path or "").strip().lstrip("/")
     if not rel:
         raise SessionReadableOutputError("Asset path is required.")
-    try:
-        target = (asset_dir / rel).resolve()
-        target.relative_to(asset_dir)
-    except Exception as exc:
-        raise SessionReadableOutputError("Asset path is invalid.", 400) from exc
-    if not target.exists() or not target.is_file():
-        raise SessionReadableOutputError("Asset not found.", 404)
-    return target
+    rel_candidates = [rel]
+    if rel.startswith("./"):
+        rel_candidates.append(rel[2:])
+    for prefix in ("assets/", "./assets/"):
+        if rel.startswith(prefix):
+            rel_candidates.append(rel[len(prefix) :])
+    for candidate_rel in rel_candidates:
+        if not candidate_rel:
+            continue
+        try:
+            target = (asset_dir / candidate_rel).resolve()
+            target.relative_to(asset_dir)
+        except Exception as exc:
+            raise SessionReadableOutputError("Asset path is invalid.", 400) from exc
+        if target.exists() and target.is_file():
+            return target
+    raise SessionReadableOutputError("Asset not found.", 404)

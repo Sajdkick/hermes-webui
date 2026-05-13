@@ -172,6 +172,41 @@ def test_phase6_ops_notification_dismissals_persist(monkeypatch, tmp_path):
 
 
 
+def test_phase6_pending_notifications_skips_linkage_resolution_until_pending(monkeypatch):
+    from api import ops_notifications, ops_projects, session_sidecars, play_pipeline
+
+    monkeypatch.setattr(
+        ops_projects,
+        "list_ops_projects",
+        lambda: {"projects": [{"id": "project-1", "name": "Project"}]},
+    )
+    monkeypatch.setattr(
+        session_sidecars,
+        "list_project_linkage_records",
+        lambda project_id: [
+            {"projectId": project_id, "taskId": f"task-{index}", "sessionId": f"session-{index}"}
+            for index in range(200)
+        ],
+    )
+    monkeypatch.setattr(
+        session_sidecars,
+        "get_session_linkage",
+        lambda session_id: (_ for _ in ()).throw(AssertionError("resolved an idle linkage")),
+    )
+    monkeypatch.setattr(
+        ops_notifications,
+        "_task_context",
+        lambda project_id, task_id: (_ for _ in ()).throw(AssertionError("loaded idle task context")),
+    )
+    monkeypatch.setattr(ops_notifications, "_pending_approval", lambda session_id: {"pending": None, "pending_count": 0})
+    monkeypatch.setattr(ops_notifications, "_pending_clarify", lambda session_id: {"pending": None, "pending_count": 0})
+    monkeypatch.setattr(play_pipeline, "build_project_play_status", lambda project_id: {})
+
+    payload = ops_notifications.list_pending_notifications()
+
+    assert payload == {"notifications": [], "count": 0}
+
+
 def test_phase6_shell_includes_notifications_asset_and_payload():
     from api.routes import handle_get
 

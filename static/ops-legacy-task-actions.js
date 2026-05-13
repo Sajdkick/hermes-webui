@@ -380,11 +380,11 @@
     }
 
     function currentOpsProfile(project){
+      const projectProfile=String(project&&project.profile||'').trim();
+      if(projectProfile)return projectProfile;
       const state=stateRef();
       const activeProfile=String(state&&state.activeProfile||'').trim();
-      if(activeProfile)return activeProfile;
-      const projectProfile=String(project&&project.profile||'').trim();
-      return projectProfile||'default';
+      return activeProfile||'default';
     }
 
     async function newChatInProject(projectOverride){
@@ -413,9 +413,14 @@
     async function openOpsSession(sessionId){
       const sessionRef=sessionRefValue(sessionId);
       if(!sessionRef)return;
-      await loadSession(sessionRef);
-      await renderSessionList();
-      closeOpsDashboard();
+      try{
+        await loadSession(sessionRef);
+        await renderSessionList();
+        closeOpsDashboard();
+      }catch(error){
+        showToast(error&&error.message?error.message:'Unable to open session',3600);
+        throw error;
+      }
     }
 
     async function clearDeletedSessionFromMainView(sessionId){
@@ -472,6 +477,16 @@
       });
     }
 
+    function renderAfterSessionCloseMutation(project){
+      if(project&&OPS.currentProject&&OPS.currentProject.id===project.id){
+        renderProjectDetail();
+      }else if(OPS.view==='home'){
+        renderHome();
+      }else{
+        renderProjects();
+      }
+    }
+
     async function setOpsSessionClosed(sessionId,closed,projectId){
       const sessionRef=sessionRefValue(sessionId);
       const project=projectId?findProject(projectId):OPS.currentProject;
@@ -511,21 +526,46 @@
         focusCancel:true,
       });
       if(!ok)return;
-      if(project&&linked){
-        await AgentBridgeRef.sessions.closeTask(project.id,linked.task.id,{sessionId:sessionRef});
-        await refreshOpsSessions().catch(()=>OPS.sessions||[]);
-      }else{
-        await deleteOpsSessionRecord(sessionRef);
+      const previousSessions=Array.isArray(OPS.sessions)?OPS.sessions.slice():[];
+      const previousTaskState=linked&&linked.task?{
+        inProgress:linked.task.inProgress,
+        sessionId:linked.task.sessionId,
+        session_id:linked.task.session_id,
+        lastSessionAt:linked.task.lastSessionAt,
+        startedAt:linked.task.startedAt,
+      }:null;
+      OPS.sessions=previousSessions.filter(session=>sessionRefValue(session)!==sessionRef);
+      if(linked&&linked.task){
+        linked.task.inProgress=false;
+        delete linked.task.sessionId;
+        delete linked.task.session_id;
       }
-      if(project&&OPS.currentProject&&OPS.currentProject.id===project.id){
-        await refreshDetail();
-      }else{
-        await loadProjects();
-        if(OPS.view==='home')renderHome();
-        else renderProjects();
+      renderAfterSessionCloseMutation(project);
+      try{
+        if(project&&linked){
+          await AgentBridgeRef.sessions.closeTask(project.id,linked.task.id,{sessionId:sessionRef});
+          await refreshOpsSessions().catch(()=>OPS.sessions||[]);
+        }else{
+          await deleteOpsSessionRecord(sessionRef);
+        }
+        if(project&&OPS.currentProject&&OPS.currentProject.id===project.id){
+          await refreshDetail();
+        }else{
+          await loadProjects();
+          if(OPS.view==='home')renderHome();
+          else renderProjects();
+        }
+        await renderSessionList();
+        showToast('Session closed',2200);
+      }catch(error){
+        OPS.sessions=previousSessions;
+        if(previousTaskState&&linked&&linked.task){
+          Object.assign(linked.task,previousTaskState);
+        }
+        renderAfterSessionCloseMutation(project);
+        showToast(error&&error.message?error.message:'Unable to close session',3600);
+        throw error;
       }
-      await renderSessionList();
-      showToast('Session closed',2200);
     }
 
     async function ensureTaskSession(match,projectOverride){
@@ -680,7 +720,9 @@
       }
     }
 
-    async function createQuickTask(projectId,text){
+    async function createQuickTask(projectId,text,options){
+      const opts=options&&typeof options==='object'?options:{};
+      const shouldRun=opts.run!==false;
       const project=findProject(projectId);
       const taskText=String(text||'').trim();
       const pendingQuickTaskImages=(OPS.quickTaskImages||[]).slice();
@@ -692,6 +734,7 @@
       }
 
       OPS.quickTaskBusy=true;
+      OPS.quickTaskBusyAction=shouldRun?'create-run':'create-only';
       OPS.quickTaskStatus='Creating quick task...';
       OPS.quickTaskStatusKind='info';
       if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
@@ -723,6 +766,12 @@
         const pendingQuickTaskFiles=pendingQuickTaskImages.map(entry=>entry&&entry.file).filter(Boolean);
         OPS.quickTaskText='';
         clearQuickTaskImages();
+        if(!shouldRun){
+          OPS.quickTaskStatus='Quick task created.';
+          OPS.quickTaskStatusKind='success';
+          if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
+          return match;
+        }
         OPS.quickTaskStatus=goalMode?'Quick task created. Starting Hermes goal...':'Quick task created. Starting Hermes...';
         OPS.quickTaskStatusKind='info';
         if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
@@ -736,12 +785,14 @@
           OPS.quickTaskStatusKind='warning';
           showToast(OPS.quickTaskStatus,4200);
         }
+        return match;
       }catch(err){
         OPS.quickTaskStatus=err&&err.message?err.message:'Unable to create the quick task.';
         OPS.quickTaskStatusKind='error';
         throw err;
       }finally{
         OPS.quickTaskBusy=false;
+        OPS.quickTaskBusyAction='';
         if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
       }
     }

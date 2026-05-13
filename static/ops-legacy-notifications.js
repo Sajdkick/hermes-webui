@@ -415,8 +415,17 @@
       return status==='failed'||!!playNotificationFallbackError(note);
     }
 
+    function playNotificationLocked(note){
+      if(note&&note.playLocked===true)return true;
+      const status=playNotificationStatus(note).toLowerCase();
+      return status==='queued'||status==='building'||status==='starting';
+    }
+
     function notificationTypeLabel(note){
-      if(note&&note.kind==='play')return playNotificationNeedsRepair(note)?'Play fallback':'Play ready';
+      if(note&&note.kind==='play'){
+        if(playNotificationLocked(note))return 'Play build';
+        return playNotificationNeedsRepair(note)?'Play fallback':'Play ready';
+      }
       if(note&&note.kind==='done')return 'Done';
       if(note&&note.kind==='input'){
         return note.input_kind==='approval'?'Approval':'Clarification';
@@ -425,7 +434,10 @@
     }
 
     function notificationTypeStyleKey(note){
-      if(note&&note.kind==='play')return playNotificationNeedsRepair(note)?'play-fallback':'play-ready';
+      if(note&&note.kind==='play'){
+        if(playNotificationLocked(note))return 'play-building';
+        return playNotificationNeedsRepair(note)?'play-fallback':'play-ready';
+      }
       if(note&&note.kind==='done')return 'agent-done';
       if(note&&note.kind==='input')return 'input-request';
       return 'default';
@@ -447,6 +459,7 @@
       const id=String(note&&note.id||'').trim();
       if(!id)return null;
       if(note&&note.kind==='play'){
+        if(playNotificationLocked(note))return null;
         const action=String(note&&note.playPrimaryAction||'').trim();
         const inspectUrl=playNotificationInspectUrl(note);
         if(inspectUrl||action==='open-inspect'||action==='start-inspect'||action==='restart-inspect'||playNotificationNeedsRepair(note)){
@@ -648,7 +661,8 @@
         `Type: ${notificationTypeLabel(note)}`,
       ];
       if(playStatus)meta.push(playStatus);
-      if(!inspectUrl&&!needsRepair)meta.push('Inspect URL missing');
+      if(playNotificationLocked(note))meta.push('Locked until the Play build finishes');
+      if(!inspectUrl&&!needsRepair&&!playNotificationLocked(note))meta.push('Inspect URL missing');
       return `
         <article class="menu-notification-item menu-notification-item--${esc(needsRepair?'play-fallback':'play-ready')}">
           <div class="menu-notification-body">

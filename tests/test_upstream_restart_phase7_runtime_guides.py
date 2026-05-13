@@ -100,8 +100,13 @@ def test_phase7_runtime_guides_routes_round_trip(monkeypatch, tmp_path, git_avai
     assert handle_post(report_create, urlparse(f"http://example.com/api/ops/projects/{project_id}/runtime/gather/reports")) is True
     assert report_create.status == 201
     report = _response_json(report_create)["report"]
+    ingest = _response_json(report_create)["ingest"]
     assert report["title"] == "Homepage pass"
     assert report["status"] == "running"
+    assert ingest["path"].endswith(f"/runtime/gather/reports/{report['id']}/events")
+    assert ingest["url"] == ingest["path"]
+    assert ingest["tokenHeader"] == "X-Hermes-Gather-Token"
+    assert ingest["token"]
     assert Path(report["reportPath"]).exists()
     assert Path(report["reportPath"]).is_relative_to(repo / ".hermes" / "ops" / "gather")
 
@@ -121,6 +126,23 @@ def test_phase7_runtime_guides_routes_round_trip(monkeypatch, tmp_path, git_avai
     updated_report = _response_json(report_event)["report"]
     assert updated_report["status"] == "failed"
     assert updated_report["eventsCount"] == 2
+
+    browser_event = _FakeHandler(
+        {
+            "type": "log",
+            "label": "project.dropdown.changed",
+            "route": "/ops",
+            "url": "http://example.com/ops",
+            "data": {"selectedId": "project-1", "pendingCount": 2},
+            "meta": {"source": "temporary-hook"},
+        }
+    )
+    assert handle_post(browser_event, urlparse(f"http://example.com{ingest['path']}")) is True
+    browser_report = _response_json(browser_event)["report"]
+    latest = browser_report["latestEvent"]
+    assert latest["message"] == "project.dropdown.changed"
+    assert latest["metadata"]["label"] == "project.dropdown.changed"
+    assert latest["metadata"]["data"]["pendingCount"] == 2
 
     review_create = _FakeHandler(
         {

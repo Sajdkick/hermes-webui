@@ -30,7 +30,6 @@
     const renderProjectSettings=ctx&&ctx.renderProjectSettings;
     const renderProjectHealth=ctx&&ctx.renderProjectHealth;
     const renderProjectGitStatus=ctx&&ctx.renderProjectGitStatus;
-    const renderProjectPlayConfigEditor=ctx&&ctx.renderProjectPlayConfigEditor;
     const renderProjectRuntimeSnapshot=ctx&&ctx.renderProjectRuntimeSnapshot;
     const renderProjectRuntimeScreenshot=ctx&&ctx.renderProjectRuntimeScreenshot;
     const renderProjectPlayLogs=ctx&&ctx.renderProjectPlayLogs;
@@ -625,14 +624,15 @@
     function projectDetailScrollEntries(container){
       const entries=[];
       if(!container)return entries;
+      const canQuery=typeof container.querySelector==='function';
       [
         ['root',container],
-        ['controls',container.querySelector('.tasks-controls')],
-        ['content',container.querySelector('.tasks-content')],
-        ['page',container.querySelector('.project-page-content')],
-        ['create-card',container.querySelector('.tasks-card-create')],
-        ['form-area',container.querySelector('.tasks-form-area')],
-        ['secondary-panels-body',container.querySelector('.ops-project-secondary-panels-body')],
+        ['controls',canQuery?container.querySelector('.tasks-controls'):null],
+        ['content',canQuery?container.querySelector('.tasks-content'):null],
+        ['page',canQuery?container.querySelector('.project-page-content'):null],
+        ['create-card',canQuery?container.querySelector('.tasks-card-create'):null],
+        ['form-area',canQuery?container.querySelector('.tasks-form-area'):null],
+        ['secondary-panels-body',canQuery?container.querySelector('.ops-project-secondary-panels-body'):null],
       ].forEach(([key,node])=>{
         if(!node)return;
         entries.push({key,node,top:Number(node.scrollTop)||0,left:Number(node.scrollLeft)||0});
@@ -974,7 +974,6 @@
         renderProjectSettings(project),
         renderProjectHealth(project),
         renderProjectGitStatus(project,{detail:true}),
-        renderProjectPlayConfigEditor(project),
         renderProjectRuntimeSnapshot(project.id),
         renderProjectRuntimeScreenshot(project.id),
         renderProjectPlayLogs(project.id),

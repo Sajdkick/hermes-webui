@@ -17,6 +17,16 @@ const ICONS={
 // before the first request completes (#1060).
 let _loadingSessionId = null;
 
+function _activeSessionPaneNeedsRecovery(sid){
+  if(!sid||!S.session||S.session.session_id!==sid) return false;
+  const el=typeof $==='function'?$('msgInner'):null;
+  const text=String((el&&el.textContent)||'').trim();
+  if(/^(Loading conversation|Reconnecting to session|Reconnecting to messages|Failed to load session|Failed to load messages)/.test(text)) return true;
+  const inflightMap=(typeof INFLIGHT==='object'&&INFLIGHT)?INFLIGHT:null;
+  if(S.busy&&S.activeStreamId&&inflightMap&&!inflightMap[sid]) return true;
+  return false;
+}
+
 const SESSION_VIEWED_COUNTS_KEY = 'hermes-session-viewed-counts';
 const SESSION_COMPLETION_UNREAD_KEY = 'hermes-session-completion-unread';
 const SESSION_OBSERVED_STREAMING_KEY = 'hermes-session-observed-streaming';
@@ -331,10 +341,13 @@ async function newSession(flash){
 
 async function loadSession(sid){
   const currentSid = S.session ? S.session.session_id : null;
-  // Clicking the already-open session in the sidebar is a no-op. Reloading it
+  const options=(arguments.length>1&&arguments[1]&&typeof arguments[1]==='object')?arguments[1]:{};
+  const forceReload=options.force===true || _loadingSessionId===sid || _activeSessionPaneNeedsRecovery(sid);
+  // Clicking the already-open session in the sidebar is normally a no-op. Reloading it
   // tears down active pane state and can reset the long-session scroll window
-  // to the top even though the user did not navigate anywhere.
-  if(currentSid===sid) return;
+  // to the top even though the user did not navigate anywhere. Allow a same-session
+  // reload only for explicit wake/recovery paths, or when the pane is already stuck.
+  if(currentSid===sid && !forceReload) return;
   // Mark this session as the in-flight load. Subsequent loadSession() calls
   // will overwrite this; stale awaits use the mismatch to bail out (#1060).
   _loadingSessionId = sid;
@@ -374,7 +387,7 @@ async function loadSession(sid){
     const retry=()=>{
       if(_loadingSessionId!==sid) return;
       if(typeof document!=='undefined'&&document.visibilityState==='hidden') return;
-      loadSession(sid);
+      loadSession(sid,{force:true});
     };
     setTimeout(retry, (typeof navigator!=='undefined'&&navigator.onLine===false)?2500:1200);
     if(typeof window!=='undefined') window.addEventListener('online', retry, {once:true});

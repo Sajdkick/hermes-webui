@@ -135,7 +135,6 @@
       OPS.runLogs=null;
       OPS.artifactHealth=null;
       OPS.artifactHealthBusy=false;
-      OPS.playConfigEditingProjectId='';
       windowRef._opsDashboardOpen=true;
       const layoutEl=layout();
       if(layoutEl)layoutEl.classList.add('ops-dashboard-active');

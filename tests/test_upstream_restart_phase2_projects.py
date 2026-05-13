@@ -306,6 +306,8 @@ def test_phase2_projects_view_renders_before_background_hydration():
             renderProjectDetail: () => '',
             refreshProjectPlayStatus: async () => null,
             refreshProjectGitStatus: async () => null,
+            renderProjectPlayControls: () => '',
+            renderProjectPlayLogs: () => '',
             playStatusFor: () => null,
             playStatusKind: () => '',
             playStatusLabel: () => '',
@@ -349,6 +351,140 @@ def test_phase2_projects_view_renders_before_background_hydration():
             throw new Error('Projects view did not hydrate task counts after the background requests resolved.');
           }
 
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_phase2_project_detail_does_not_wait_for_workspace_or_sessions():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (async () => {
+          const source = fs.readFileSync('static/ops-legacy-projects.js', 'utf8');
+          const rootEl = { innerHTML: '' };
+          let renderDetailCalls = 0;
+          let sessionsRequested = false;
+          let ensureRequested = false;
+          const project = {
+            id: 'project-1',
+            name: 'hermes-webui',
+            fullName: 'Sajdkick/hermes-webui',
+            path: '/tmp/hermes-webui',
+            coreBranch: 'master',
+            profile: 'hermes',
+          };
+          const windowRef = { HermesOpsModules: {}, _opsDashboardOpen: true };
+          const context = {
+            console,
+            window: windowRef,
+            document: {
+              getElementById(){ return null; },
+            },
+            setTimeout,
+            clearTimeout,
+          };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const dashboard = context.window.HermesOpsModules.projects.bindDashboard({
+            OPS: {
+              view: 'home',
+              projects: [project],
+              profiles: [],
+              sessions: [{ session_id: 'stale-session' }],
+              sessionGroups: null,
+              counts: {},
+              taskDataByProject: {},
+              currentProject: null,
+              taskData: null,
+              showCreate: false,
+              playStatusByProject: {},
+              gitStatusByProject: {},
+            },
+            api: async (path) => {
+              if (path === '/api/ops/projects/project-1/tasks') {
+                return { project, branch: 'master', epics: [{ id: 'epic-1', title: 'Quick tasks', tasks: [] }] };
+              }
+              if (path === '/api/ops/projects/project-1/ensure-workspace') {
+                ensureRequested = true;
+                return new Promise(() => {});
+              }
+              throw new Error('Unexpected api path: ' + path);
+            },
+            AgentBridge: {
+              sessions: {
+                grouped: async () => ({ sessions: [], groups: [], ungrouped: [] }),
+                list: async () => {
+                  sessionsRequested = true;
+                  return new Promise(() => {});
+                },
+              },
+              profiles: {
+                list: async () => ({ profiles: [{ name: 'hermes' }] }),
+              },
+            },
+            root: () => rootEl,
+            esc: (value) => String(value ?? ''),
+            svg: { plus: '', refresh: '', arrow: '', chat: '', folder: '' },
+            nameOf: (entry) => entry.fullName || entry.name || entry.id,
+            projectPath: (entry) => entry.path,
+            projectUrl: (projectId, suffix = '') => '/api/ops/projects/' + projectId + suffix,
+            projectProfileLabel: (entry) => entry.profile || 'No assigned profile',
+            renderProjectProfileOptions: () => '',
+            projectUsesBranchTitle: () => false,
+            projectCardTitle: (entry) => entry.fullName || entry.name || entry.id,
+            projectContextLabel: () => '',
+            projectAccentStyle: () => '',
+            setDashboardTopbar: () => {},
+            renderLoading: (label) => { rootEl.innerHTML = label; },
+            renderGitHubDiscovery: () => '',
+            renderSessionWorkspaceActions: () => '',
+            renderProjectSessionRows: () => '',
+            showToast: () => {},
+            resetTaskFilters: () => {},
+            renderProjectDetail: () => {
+              renderDetailCalls += 1;
+              rootEl.innerHTML = 'project detail rendered';
+            },
+            refreshProjectPlayStatus: async () => null,
+            refreshProjectGitStatus: async () => null,
+            renderProjectPlayControls: () => '',
+            renderProjectPlayLogs: () => '',
+            playStatusFor: () => null,
+            playStatusKind: () => '',
+            playStatusLabel: () => '',
+            loadOpsRuns: async () => [],
+            loadProjectDependencyStatus: async () => null,
+            loadProjectGatherReports: async () => null,
+            loadProjectReviewRequests: async () => null,
+            loadProjectDeployment: async () => null,
+            loadProjectDatabase: async () => null,
+            windowRef,
+          });
+
+          const result = await Promise.race([
+            dashboard.openProjectDetail('project-1').then(() => 'resolved'),
+            new Promise((resolve) => setTimeout(() => resolve('timeout'), 100)),
+          ]);
+          if (result !== 'resolved') throw new Error('openProjectDetail waited for background work.');
+          if (!ensureRequested) throw new Error('workspace ensure was not started in the background.');
+          if (!sessionsRequested) throw new Error('sessions hydration was not started in the background.');
+          if (renderDetailCalls < 1) throw new Error('project detail did not render after task data loaded.');
+          if (!rootEl.innerHTML.includes('project detail rendered')) throw new Error('project detail was not rendered.');
           console.log('ok');
         })().catch((error) => {
           console.error(error && error.stack ? error.stack : error);
@@ -444,7 +580,6 @@ def test_phase2_project_detail_uses_cloud_terminal_task_shell():
             renderProjectSettings: () => '',
             renderProjectHealth: () => '',
             renderProjectGitStatus: () => '',
-            renderProjectPlayConfigEditor: () => '',
             renderProjectRuntimeSnapshot: () => '',
             renderProjectRuntimeScreenshot: () => '',
             renderProjectPlayLogs: () => '',
@@ -564,7 +699,6 @@ def test_phase2_project_detail_preserves_task_and_epic_drafts_across_rerender():
             renderProjectSettings: () => '',
             renderProjectHealth: () => '',
             renderProjectGitStatus: () => '',
-            renderProjectPlayConfigEditor: () => '',
             renderProjectRuntimeSnapshot: () => '',
             renderProjectRuntimeScreenshot: () => '',
             renderProjectPlayLogs: () => '',
@@ -840,6 +974,8 @@ def test_phase2_project_detail_pushes_ops_history_state():
             renderProjectDetail: () => '',
             refreshProjectPlayStatus: async () => null,
             refreshProjectGitStatus: async () => null,
+            renderProjectPlayControls: () => '',
+            renderProjectPlayLogs: () => '',
             playStatusFor: () => null,
             playStatusKind: () => '',
             playStatusLabel: () => '',
@@ -970,7 +1106,6 @@ def test_phase2_dashboard_restores_saved_ops_project_detail_state_on_open():
                   renderProjectSettings: () => '',
                   renderProjectHealth: () => '',
                   renderProjectGitStatus: () => '',
-                  renderProjectPlayConfigEditor: () => '',
                   renderProjectRuntimeSnapshot: () => '',
                   renderProjectRuntimeScreenshot: () => '',
                   renderProjectPlayLogs: () => '',

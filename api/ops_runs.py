@@ -408,11 +408,13 @@ def list_ops_runs(filters: dict | None = None) -> dict:
 
     with _LOCK:
         runs = list(_read_runs())
-    enriched = [_enrich_run(run) for run in runs]
     if project_id:
-        enriched = [run for run in enriched if _text(run.get("projectId"), limit=128) == project_id]
+        runs = [run for run in runs if _text(run.get("projectId"), limit=128) == project_id]
     if task_id:
-        enriched = [run for run in enriched if _text(run.get("taskId"), limit=128) == task_id]
+        runs = [run for run in runs if _text(run.get("taskId"), limit=128) == task_id]
+    if status:
+        runs = [run for run in runs if _status(run.get("status"), default="running") == status]
+    enriched = [_enrich_run(run) for run in runs]
     if session_id:
         filtered = []
         for run in enriched:
@@ -425,8 +427,6 @@ def list_ops_runs(filters: dict | None = None) -> dict:
             if session_id in aliases:
                 filtered.append(run)
         enriched = filtered
-    if status:
-        enriched = [run for run in enriched if run.get("status") == status]
     enriched.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
     return {"runs": enriched, "count": len(enriched)}
 
@@ -478,7 +478,7 @@ def update_ops_run(run_id: str, updates: dict | None = None) -> dict:
 def _maybe_start_play_pipeline_for_terminal_run(run: dict, *, previous_status: str = "") -> dict | None:
     """Start Play automatically when a successful task run has valid Play config."""
     status = _status(run.get("status"), default="running")
-    if status != "succeeded" or previous_status in RUN_TERMINAL_STATUSES:
+    if status != "succeeded" or previous_status == "succeeded":
         return
     project_id = _text(run.get("projectId"), limit=128)
     if not project_id:

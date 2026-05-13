@@ -34,8 +34,8 @@ def _load_session_error_block() -> str:
     assert start > 0, "loadSession metadata request not found"
     catch_idx = SESSIONS_JS.find("} catch(e) {", start)
     assert catch_idx > start, "loadSession metadata catch block not found"
-    end = SESSIONS_JS.find("return;", catch_idx)
-    assert end > catch_idx, "loadSession metadata catch return not found"
+    end = SESSIONS_JS.find("  // Guard: api() may have redirected", catch_idx)
+    assert end > catch_idx, "loadSession metadata catch end not found"
     return SESSIONS_JS[catch_idx:end]
 
 

@@ -7,6 +7,8 @@
 
   const legacyNotificationCompatState={
     dismissed:new Set(),
+    dismissedLoadedAt:0,
+    dismissedLoadPromise:null,
     index:new Map(),
     settings:{
       inAppEnabled:true,
@@ -55,15 +57,29 @@
     legacyNotificationCompatState.logs=legacyNotificationCompatState.logs.slice(0,20);
   }
 
-  async function loadCompatDismissedNotifications(){
-    try{
-      const response=await api('/api/ops/notifications/dismissed');
-      const dismissed=Array.isArray(response&&response.dismissed)?response.dismissed:[];
-      legacyNotificationCompatState.dismissed=new Set(dismissed.map(item=>String(item||'').trim()).filter(Boolean));
-    }catch(error){
-      compatNotificationLog('notification.dismissed-sync-unavailable');
+  async function loadCompatDismissedNotifications(options={}){
+    const force=options&&options.force===true;
+    const now=Date.now();
+    if(!force&&legacyNotificationCompatState.dismissedLoadedAt&&now-legacyNotificationCompatState.dismissedLoadedAt<30000){
+      return legacyNotificationCompatState.dismissed;
     }
-    return legacyNotificationCompatState.dismissed;
+    if(!force&&legacyNotificationCompatState.dismissedLoadPromise){
+      return legacyNotificationCompatState.dismissedLoadPromise;
+    }
+    legacyNotificationCompatState.dismissedLoadPromise=(async()=>{
+      try{
+        const response=await api('/api/ops/notifications/dismissed');
+        const dismissed=Array.isArray(response&&response.dismissed)?response.dismissed:[];
+        legacyNotificationCompatState.dismissed=new Set(dismissed.map(item=>String(item||'').trim()).filter(Boolean));
+        legacyNotificationCompatState.dismissedLoadedAt=Date.now();
+      }catch(error){
+        compatNotificationLog('notification.dismissed-sync-unavailable');
+      }finally{
+        legacyNotificationCompatState.dismissedLoadPromise=null;
+      }
+      return legacyNotificationCompatState.dismissed;
+    })();
+    return legacyNotificationCompatState.dismissedLoadPromise;
   }
 
   async function persistCompatDismissal(notificationId){
@@ -71,10 +87,12 @@
     if(!id) throw new Error('Notification id is required.');
     legacyNotificationCompatState.dismissed.add(id);
     try{
-      return await api('/api/ops/notifications/dismiss',{
+      const result=await api('/api/ops/notifications/dismiss',{
         method:'POST',
         body:JSON.stringify({notificationId:id}),
       });
+      legacyNotificationCompatState.dismissedLoadedAt=Date.now();
+      return result;
     }catch(error){
       compatNotificationLog('notification.dismissed-sync-unavailable',id);
       return {ok:false,persisted:false,notificationId:id};
@@ -98,6 +116,7 @@
       const createdAt=compatNotificationTimestamp(source.updatedAt||source.createdAt||source.readyAt||0);
       const playStatus=String(source.playStatus||source.status||'ready').trim()||'ready';
       const playNeedsRepair=source.playNeedsRepair===true;
+      const playLocked=source.playLocked===true;
       const playFallbackError=String(source.playFallbackError||'').trim();
       const playPrimaryAction=String(source.playPrimaryAction||'').trim();
       const playRepairAvailable=source.playRepairAvailable===true;
@@ -123,6 +142,7 @@
         inspectUrl:String(source.inspectUrl||'').trim(),
         playStatus:playStatus,
         playNeedsRepair:playNeedsRepair,
+        playLocked:playLocked,
         playFallbackError:playFallbackError,
         playPrimaryAction:playPrimaryAction,
         playRepairAvailable:playRepairAvailable,
@@ -229,11 +249,44 @@
       .filter(item=>item&&Number(item.created_at||0)>=cutoff);
   }
 
+  function compactCompatPlayNotifications(notifications){
+    const items=Array.isArray(notifications)?notifications:[];
+    const activePlayStates=new Set(['queued','building','starting']);
+    function playCompactionPriority(item){
+      const status=String(item&&item.playStatus||'').trim().toLowerCase();
+      if(item&&item.playLocked===true)return 2;
+      if(activePlayStates.has(status))return 2;
+      return 1;
+    }
+    const latestPlayByProject=new Map();
+    items.forEach((item,index)=>{
+      if(!item||item.kind!=='play')return;
+      const projectId=String(item.project_id||item.projectId||item.project&&item.project.id||item.payload&&item.payload.projectId||'').trim();
+      if(!projectId)return;
+      const existing=latestPlayByProject.get(projectId);
+      const stamp=Number(item.updated_at||item.created_at)||0;
+      const priority=playCompactionPriority(item);
+      const existingStamp=Number(existing&&existing.item&&(existing.item.updated_at||existing.item.created_at))||0;
+      const existingPriority=playCompactionPriority(existing&&existing.item);
+      if(!existing||priority>existingPriority||(priority===existingPriority&&stamp>=existingStamp)){
+        latestPlayByProject.set(projectId,{item,index});
+      }
+    });
+    if(!latestPlayByProject.size)return items;
+    return items.filter((item,index)=>{
+      if(!item||item.kind!=='play')return true;
+      const projectId=String(item.project_id||item.projectId||item.project&&item.project.id||item.payload&&item.payload.projectId||'').trim();
+      if(!projectId)return true;
+      const latest=latestPlayByProject.get(projectId);
+      return !!latest&&latest.index===index;
+    });
+  }
+
   async function listCompatNotifications(){
-    await loadCompatDismissedNotifications();
     const [response,doneNotifications]=await Promise.all([
       api('/api/ops/notifications/pending').catch(()=>({notifications:[]})),
       listCompatDoneNotifications().catch(()=>[]),
+      loadCompatDismissedNotifications().catch(()=>legacyNotificationCompatState.dismissed),
     ]);
     const items=Array.isArray(response&&response.notifications)?response.notifications:[];
     legacyNotificationCompatState.index.clear();
@@ -252,8 +305,9 @@
         notifications.push(item);
       }
     });
-    notifications.sort((left,right)=>(Number(right&&right.updated_at)||0)-(Number(left&&left.updated_at)||0));
-    return {notifications};
+    const compacted=compactCompatPlayNotifications(notifications);
+    compacted.sort((left,right)=>(Number(right&&right.updated_at)||0)-(Number(left&&left.updated_at)||0));
+    return {notifications:compacted};
   }
 
   function compatNotificationMonitorSnapshot(openCount){
@@ -273,7 +327,7 @@
   function bridgeSessionKey(sessionLike){
     if(!sessionLike) return '';
     if(typeof sessionLike==='string') return String(sessionLike).trim();
-    return String(sessionLike.sessionKey||sessionLike.session_key||sessionLike.session_id||sessionLike.sessionId||'').trim();
+    return String(sessionLike.session_id||sessionLike.sessionId||sessionLike.id||sessionLike.sessionKey||sessionLike.session_key||'').trim();
   }
 
   async function resolveBridgeSessionId(sessionLike, options={}){
@@ -737,12 +791,6 @@
       },
     },
     play:{
-      config(projectId){
-        return api(compatProjectUrl(projectId,'/play/config'));
-      },
-      saveConfig(projectId,payload){
-        return api(compatProjectUrl(projectId,'/play/config'),{method:'POST',body:JSON.stringify(payload||{})});
-      },
       status(projectId){
         return api(compatProjectUrl(projectId,'/play/status'));
       },

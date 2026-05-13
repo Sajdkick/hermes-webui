@@ -82,10 +82,43 @@ def test_phase5_session_readable_output_routes_use_workspace_repo_fallback(tmp_p
     assert bytes(asset_handler.body) == b"png"
 
 
+def test_phase5_session_readable_output_routes_do_not_reuse_current_alias_for_unrelated_sessions(tmp_path):
+    repo_root = tmp_path / "readable-output-project"
+    app_dir = repo_root / "apps" / "demo"
+    app_dir.mkdir(parents=True)
+    (repo_root / ".git").mkdir()
+
+    from api.models import new_session
+    from api.routes import handle_get
+
+    session = new_session(workspace=str(app_dir))
+    session.title = "Hermes readable output session"
+    session.save()
+
+    readable_dir = repo_root / ".hermes" / "readable-output" / "current"
+    asset_dir = readable_dir / "assets"
+    asset_dir.mkdir(parents=True)
+    message_path = readable_dir / "message.md"
+    message_path.write_text("# Hermes session note\n\n![Result](assets/result.png)\n", encoding="utf-8")
+    (asset_dir / "result.png").write_bytes(b"png")
+
+    payload_handler = _FakeHandler()
+    assert handle_get(
+        payload_handler,
+        urlparse(f"http://example.com/api/ops/sessions/{session.session_id}/readable-output"),
+    ) is True
+    artifact = _response_json(payload_handler)["readableOutput"]
+
+    assert artifact["exists"] is False
+    assert artifact["path"] == ""
+    assert artifact["sessionId"] == session.session_id
+
+
 def test_phase5_readable_output_frontend_wiring_and_wrappers_present():
     index_html = Path("static/index.html").read_text(encoding="utf-8")
     messages_js = Path("static/messages.js").read_text(encoding="utf-8")
     product_js = Path("static/readable-output-ui.js").read_text(encoding="utf-8")
+    product_css = Path("static/readable-output-ui.css").read_text(encoding="utf-8")
 
     assert 'id="sessionReadableOutputHost"' in index_html
     assert 'static/readable-output-ui.css' in index_html
@@ -93,6 +126,10 @@ def test_phase5_readable_output_frontend_wiring_and_wrappers_present():
     assert "window.loadSession=async function(sid)" in product_js
     assert "window.newSession=async function()" in product_js
     assert "loadSessionReadableOutput(completedSid)" in messages_js
+    assert "Close readable output" in product_js
+    assert 'role="dialog"' in product_js
+    assert "position: fixed;" in product_css
+    assert "z-index:" in product_css
 
 
 def test_phase5_readable_output_ui_loads_and_clears_with_session_wrappers():
@@ -153,9 +190,14 @@ def test_phase5_readable_output_ui_loads_and_clears_with_session_wrappers():
 
         if (host.hidden) throw new Error('Readable output host stayed hidden after session load');
         if (!host.innerHTML.includes('Readable output')) throw new Error('Readable output card did not render');
-        if (!host.innerHTML.includes('/api/ops/sessions/session-1/readable-output/assets/assets/result.png')) {
+        if (!host.innerHTML.includes('role="dialog"')) throw new Error('Readable output must render as a dialog overlay');
+        if (!host.innerHTML.includes('Close readable output')) throw new Error('Readable output needs an explicit close button');
+        if (!host.innerHTML.includes('/api/ops/sessions/session-1/readable-output/assets/result.png')) {
           throw new Error('Readable output asset refs were not rewritten');
         }
+
+        context.window.dismissSessionReadableOutput();
+        if (!host.hidden) throw new Error('Readable output close button path did not hide the overlay');
 
         await context.window.newSession();
 
