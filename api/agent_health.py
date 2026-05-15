@@ -14,8 +14,10 @@ volume is shared, those checks always return ``None`` and the dashboard
 incorrectly shows "Gateway not running". To stay accurate without forcing a
 ``pid: "service:hermes-agent"`` compose workaround, we accept a recent
 ``updated_at`` timestamp on ``gateway_state.json`` (combined with
-``gateway_state == "running"``) as an equivalent live-process signal — the
-gateway already writes that file on every tick.
+``gateway_state == "running"``) as an equivalent live-process signal.  Older
+gateway builds do not refresh that file periodically, so a stale
+``gateway_state == "running"`` record is treated as inconclusive rather than a
+confirmed outage.
 """
 
 from __future__ import annotations
@@ -89,6 +91,76 @@ def _runtime_status_is_fresh(
         # in the future) is rejected to avoid trusting a broken clock.
         return -age_s <= threshold_s
     return age_s <= threshold_s
+
+
+def _runtime_status_is_stale_stopped(
+    runtime_status: dict[str, Any] | None,
+    *,
+    now: datetime | None = None,
+    threshold_s: float = GATEWAY_FRESHNESS_THRESHOLD_S,
+) -> bool:
+    """Return ``True`` for an old clean-stop root gateway state.
+
+    A user may run only profile-scoped gateways while a root
+    ``gateway_state.json`` from an older, intentionally stopped gateway remains
+    on disk (#1944). Treat that stale stopped file like "no root gateway
+    configured" so the heartbeat banner does not keep warning about a service
+    the user is not running. Fresh stopped state still reports down.
+    """
+    if not isinstance(runtime_status, dict):
+        return False
+    if runtime_status.get("gateway_state") != "stopped":
+        return False
+
+    raw_updated_at = runtime_status.get("updated_at")
+    if not isinstance(raw_updated_at, str) or not raw_updated_at:
+        return False
+
+    try:
+        updated_at = datetime.fromisoformat(raw_updated_at)
+    except (TypeError, ValueError):
+        return False
+    if updated_at.tzinfo is None:
+        return False
+
+    reference = now if now is not None else datetime.now(timezone.utc)
+    age_s = (reference - updated_at).total_seconds()
+    return age_s > threshold_s
+
+
+def _runtime_status_is_stale_running(
+    runtime_status: dict[str, Any] | None,
+    *,
+    now: datetime | None = None,
+    threshold_s: float = GATEWAY_FRESHNESS_THRESHOLD_S,
+) -> bool:
+    """Return ``True`` when the gateway last self-reported running, but stale.
+
+    WebUI often runs in a separate container from the gateway. In that shape PID
+    checks can be impossible, and older gateway versions only update
+    ``gateway_state.json`` on lifecycle/platform changes. A stale ``running``
+    file therefore means "not enough information from WebUI" rather than
+    "gateway is down".
+    """
+    if not isinstance(runtime_status, dict):
+        return False
+    if runtime_status.get("gateway_state") != "running":
+        return False
+
+    raw_updated_at = runtime_status.get("updated_at")
+    if not isinstance(raw_updated_at, str) or not raw_updated_at:
+        return False
+
+    try:
+        updated_at = datetime.fromisoformat(raw_updated_at)
+    except (TypeError, ValueError):
+        return False
+    if updated_at.tzinfo is None:
+        return False
+
+    reference = now if now is not None else datetime.now(timezone.utc)
+    age_s = (reference - updated_at).total_seconds()
+    return age_s > threshold_s
 
 
 def _gateway_status_module():
@@ -259,6 +331,28 @@ def build_agent_health_payload() -> dict[str, Any]:
             "details": {
                 "state": "alive",
                 "reason": "cross_container_freshness",
+                **safe_details,
+            },
+        }
+
+    if _runtime_status_is_stale_stopped(runtime_status):
+        return {
+            "alive": None,
+            "checked_at": checked_at,
+            "details": {
+                "state": "unknown",
+                "reason": "gateway_stale_stopped_state",
+                **safe_details,
+            },
+        }
+
+    if _runtime_status_is_stale_running(runtime_status):
+        return {
+            "alive": None,
+            "checked_at": checked_at,
+            "details": {
+                "state": "unknown",
+                "reason": "gateway_stale_running_state",
                 **safe_details,
             },
         }

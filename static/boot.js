@@ -223,6 +223,62 @@ function closeMobileSidebar(){
   if(sidebar)sidebar.classList.remove('mobile-open');
   if(overlay)overlay.classList.remove('visible');
 }
+
+// ── Desktop sidebar collapse toggle ────────────────────────────────────────
+// Two discoverability paths into the same state:
+//   (1) Click the already-active rail icon → collapse / expand the sidebar.
+//   (2) Cmd/Ctrl+B keyboard shortcut (VS Code convention).
+// Mobile is unaffected: the sidebar is an overlay there, and every collapse
+// code path is gated on `_isDesktopWidth()` (min-width:641px).
+// State is persisted via localStorage and survives reloads + bfcache.
+const _SIDEBAR_COLLAPSED_KEY='hermes-webui-sidebar-collapsed';
+
+function _isDesktopWidth(){
+  try{return window.matchMedia('(min-width:641px)').matches;}catch(_){return true;}
+}
+
+function _isSidebarCollapsed(){
+  return document.querySelector('.layout')?.classList.contains('sidebar-collapsed')||false;
+}
+
+function _syncSidebarAria(){
+  // Mirror the open/collapsed state on the active rail button via aria-expanded
+  // so screen readers announce the toggle. Open=true, collapsed=false.
+  const active=document.querySelector('.rail .rail-btn.nav-tab.active[data-panel]');
+  if(active)active.setAttribute('aria-expanded',!_isSidebarCollapsed());
+}
+
+function toggleSidebar(forceState){
+  if(!_isDesktopWidth())return; // mobile uses an overlay; never collapse there
+  const layout=document.querySelector('.layout');
+  if(!layout)return;
+  const next=typeof forceState==='boolean'?forceState:!_isSidebarCollapsed();
+  layout.classList.toggle('sidebar-collapsed',next);
+  // Clear the flash-prevention root-level marker once JS owns the state.
+  try{document.documentElement.removeAttribute('data-sidebar-collapsed');}catch(_){}
+  try{localStorage.setItem(_SIDEBAR_COLLAPSED_KEY,next?'1':'0');}catch(_){}
+  _syncSidebarAria();
+}
+
+function expandSidebar(){
+  if(_isSidebarCollapsed())toggleSidebar(false);
+}
+
+// Boot-time restore. The inline flash-prevention script in index.html already
+// set data-sidebar-collapsed='1' on <html> before the stylesheet so the page
+// renders collapsed without paint flash. This IIFE promotes that pre-paint
+// state into the .layout class system where both JS and CSS can read it.
+(function _restoreSidebarState(){
+  try{document.documentElement.removeAttribute('data-sidebar-collapsed');}catch(_){}
+  if(!_isDesktopWidth())return;
+  try{
+    if(localStorage.getItem(_SIDEBAR_COLLAPSED_KEY)==='1'){
+      const layout=document.querySelector('.layout');
+      if(layout)layout.classList.add('sidebar-collapsed');
+    }
+  }catch(_){}
+  _syncSidebarAria();
+})();
 function toggleMobileFiles(){
   toggleWorkspacePanel();
 }
@@ -875,6 +931,11 @@ $('modelSelect').onchange=async()=>{
 $('msg').addEventListener('input',()=>{
   autoResize();
   updateSendBtn();
+  // Persist composer draft to server (debounced in _saveComposerDraft).
+  const sid = S && S.session && S.session.session_id;
+  if (sid && typeof _saveComposerDraft === 'function') {
+    _saveComposerDraft(sid, $('msg').value, S.pendingFiles ? [...S.pendingFiles] : []);
+  }
   const text=$('msg').value;
   if(text.startsWith('/')&&text.indexOf('\n')===-1){
     if(typeof getSlashAutocompleteMatches==='function'){
@@ -946,6 +1007,18 @@ $('msg').addEventListener('keydown',e=>{
 });
 // B14: Cmd/Ctrl+K creates a new chat from anywhere
 document.addEventListener('keydown',async e=>{
+  // Cmd/Ctrl+B toggles desktop sidebar collapse (VS Code convention).
+  // Skip when typing in an input/textarea/contenteditable so text-edit
+  // shortcuts (e.g. bold in some embedded editors) are never stolen.
+  if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&!e.altKey&&(e.key==='b'||e.key==='B')){
+    const t=e.target;
+    const isText=t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.isContentEditable);
+    if(!isText&&typeof toggleSidebar==='function'&&_isDesktopWidth()){
+      e.preventDefault();
+      toggleSidebar();
+      return;
+    }
+  }
   // Enter on approval card = Allow once (when a button inside the card is focused or
   // card is visible and focus is not on an input/textarea/select)
   if(e.key==='Enter'&&!e.metaKey&&!e.ctrlKey&&!e.shiftKey){
@@ -1120,7 +1193,7 @@ function _normalizeAppearance(theme,skin){
   return {theme:nextTheme,skin:nextSkin};
 }
 
-// Sync <meta name="theme-color"> with the active theme's computed --bg.
+// Sync <meta name="theme-color"> with the active theme's app chrome color.
 // This surfaces the WebUI's exact theme background to:
 //   1. Mobile Safari status bar (the prefers-color-scheme media variants in index.html
 //      cover the pre-load case; this updater handles user-toggled changes mid-session).
@@ -1128,12 +1201,12 @@ function _normalizeAppearance(theme,skin){
 //   3. Native WKWebView wrappers (e.g. hermes-swift-mac) that read this attribute as
 //      the source of truth for AppKit chrome (tab bar, title bar, traffic-light area)
 //      instead of pixel-sampling — overlay-resistant and IPC-free.
-// Reading getComputedStyle(html).getPropertyValue('--bg') picks up the active skin
+// Reading getComputedStyle(html).getPropertyValue('--sidebar') picks up the active skin
 // (Default, Sienna, Sisyphus, Charizard, etc.) so each skin's distinct paint reaches
 // the meta tag.
 function _syncThemeColorMeta(){
   try{
-    const bg=getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+    const bg=getComputedStyle(document.documentElement).getPropertyValue('--sidebar').trim();
     if(!bg) return;
     const known=document.getElementById('hermes-theme-color');
     if(known){
@@ -1306,9 +1379,14 @@ function applyBotName(){
     window._sendKey=s.send_key||'enter';
     window._showTokenUsage=!!s.show_token_usage;
     window._showTps=!!s.show_tps;
+    window._fadeTextEffect=!!s.fade_text_effect;
     window._showCliSessions=!!s.show_cli_sessions;
     window._soundEnabled=!!s.sound_enabled;
     window._notificationsEnabled=!!s.notifications_enabled;
+    // Persist default workspace so the blank new-chat page can show it
+    // and workspace actions (New file/folder) work before the first session (#804).
+    if(s.default_workspace) S._profileDefaultWorkspace=s.default_workspace;
+    window._whatsNewSummaryEnabled=!!s.whats_new_summary_enabled;
     window._showThinking=s.show_thinking!==false;
     window._simplifiedToolCalling=s.simplified_tool_calling!==false;
     window._sidebarDensity=(s.sidebar_density==='detailed'?'detailed':'compact');
@@ -1316,9 +1394,6 @@ function applyBotName(){
     window._sessionEndlessScrollEnabled=!!s.session_endless_scroll;
     window._botName=s.bot_name||'Hermes';
     if(s.default_model) window._defaultModel=s.default_model;
-    // Persist default workspace so the blank new-chat page can show it
-    // and workspace actions (New file/folder) work before the first session (#804).
-    if(s.default_workspace) S._profileDefaultWorkspace=s.default_workspace;
     window._sessionJumpButtonsEnabled=!!s.session_jump_buttons;
     const appearance=_normalizeAppearance(s.theme,s.skin);
     localStorage.setItem('hermes-theme',appearance.theme);
@@ -1342,9 +1417,11 @@ function applyBotName(){
     window._sendKey='enter';
     window._showTokenUsage=false;
     window._showTps=false;
+    window._fadeTextEffect=false;
     window._showCliSessions=false;
     window._soundEnabled=false;
     window._notificationsEnabled=false;
+    window._whatsNewSummaryEnabled=false;
     window._showThinking=true;
     window._simplifiedToolCalling=true;
     window._sessionJumpButtonsEnabled=false;
@@ -1524,4 +1601,14 @@ window.addEventListener('pageshow', async (event) => {
   }
   // Restart the gateway SSE watcher — the persisted connection is dead after bfcache
   if (typeof startGatewaySSE === 'function') try { startGatewaySSE(); } catch (_) {}
+  // Re-sync sidebar collapse state from localStorage. bfcache restored the
+  // frozen DOM but another tab may have toggled the sidebar in the meantime.
+  if (typeof _isSidebarCollapsed === 'function' && typeof toggleSidebar === 'function') {
+    try {
+      const _want = localStorage.getItem('hermes-webui-sidebar-collapsed') === '1';
+      const _have = _isSidebarCollapsed();
+      if (_want !== _have) toggleSidebar(_want);
+      if (typeof _syncSidebarAria === 'function') _syncSidebarAria();
+    } catch (_) {}
+  }
 });
