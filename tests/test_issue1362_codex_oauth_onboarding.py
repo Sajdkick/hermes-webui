@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 import threading
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -250,7 +252,56 @@ def test_codex_credentials_written_to_active_profile_auth_json(monkeypatch, tmp_
     assert entry["auth_type"] == "oauth"
     assert entry["source"] == "manual:device_code"
     assert entry["base_url"] == "https://chatgpt.com/backend-api/codex"
+    assert store["providers"]["openai-codex"]["tokens"]["access_token"] == "access-secret"
+    assert store["providers"]["openai-codex"]["tokens"]["refresh_token"] == "refresh-secret"
+    assert store["providers"]["openai-codex"]["auth_mode"] == "chatgpt"
     assert _provider_oauth_authenticated("openai-codex", active_home) is True
+
+
+def test_runtime_provider_wrapper_backfills_codex_singleton_from_pool(monkeypatch, tmp_path):
+    import api.oauth as oauth
+
+    auth_path = tmp_path / "auth.json"
+    auth_path.write_text(json.dumps({
+        "version": 1,
+        "credential_pool": {
+            "openai-codex": [{
+                "id": "codex-oauth-1234",
+                "label": "Codex OAuth",
+                "auth_type": "oauth",
+                "source": "manual:device_code",
+                "access_token": "access-secret",
+                "refresh_token": "refresh-secret",
+                "base_url": "https://chatgpt.com/backend-api/codex",
+                "last_refresh": "2026-05-15T00:00:00Z",
+                "updated_at": "2026-05-15T00:00:00Z",
+            }]
+        }
+    }), encoding="utf-8")
+
+    fake_streaming = types.ModuleType("api.streaming")
+    fake_streaming._ENV_LOCK = threading.Lock()
+    monkeypatch.setitem(sys.modules, "api.streaming", fake_streaming)
+    monkeypatch.setattr(oauth, "_get_active_hermes_home", lambda: tmp_path)
+
+    def _resolver(*args, **kwargs):
+        store = json.loads(auth_path.read_text(encoding="utf-8"))
+        return {
+            "provider_state": store["providers"]["openai-codex"],
+            "requested": kwargs.get("requested"),
+        }
+
+    payload = oauth.resolve_runtime_provider_with_anthropic_env_lock(
+        _resolver,
+        requested="openai-codex",
+    )
+
+    provider_state = payload["provider_state"]
+    assert payload["requested"] == "openai-codex"
+    assert provider_state["tokens"]["access_token"] == "access-secret"
+    assert provider_state["tokens"]["refresh_token"] == "refresh-secret"
+    assert provider_state["last_refresh"] == "2026-05-15T00:00:00Z"
+    assert provider_state["auth_mode"] == "chatgpt"
 
 
 def test_frontend_uses_onboarding_oauth_endpoints_and_no_secret_poll_url():

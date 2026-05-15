@@ -80,6 +80,15 @@ def resolve_runtime_provider_with_anthropic_env_lock(resolver, *args, **kwargs):
     from api.streaming import _ENV_LOCK
 
     with _ENV_LOCK:
+        requested = kwargs.get("requested")
+        if requested is None and args:
+            candidate = args[0]
+            if isinstance(candidate, str):
+                requested = candidate
+        try:
+            _prime_runtime_oauth_state(str(requested or ""))
+        except Exception:
+            logger.debug("Failed to prime runtime OAuth state for %r", requested, exc_info=True)
         return resolver(*args, **kwargs)
 
 
@@ -160,6 +169,104 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _set_codex_provider_state(
+    auth: dict[str, Any],
+    *,
+    access_token: str,
+    refresh_token: str,
+    last_refresh: str,
+) -> bool:
+    """Mirror Codex OAuth tokens into the singleton provider state.
+
+    The Hermes CLI runtime currently resolves Codex credentials from
+    ``providers.openai-codex.tokens`` while the WebUI stores OAuth entries in
+    ``credential_pool``. Keep both in sync so browser logins work for session
+    startup without requiring a separate CLI auth step.
+    """
+    providers = auth.setdefault("providers", {})
+    if not isinstance(providers, dict):
+        providers = {}
+        auth["providers"] = providers
+
+    state = providers.get("openai-codex")
+    if not isinstance(state, dict):
+        state = {}
+        providers["openai-codex"] = state
+
+    changed = False
+    desired_tokens = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+    }
+    if state.get("tokens") != desired_tokens:
+        state["tokens"] = desired_tokens
+        changed = True
+    if state.get("last_refresh") != last_refresh:
+        state["last_refresh"] = last_refresh
+        changed = True
+    if state.get("auth_mode") != "chatgpt":
+        state["auth_mode"] = "chatgpt"
+        changed = True
+    return changed
+
+
+def _best_codex_pool_entry(auth: dict[str, Any]) -> dict[str, Any] | None:
+    pool = auth.get("credential_pool")
+    if not isinstance(pool, dict):
+        return None
+    entries = pool.get("openai-codex")
+    if not isinstance(entries, list):
+        return None
+
+    best = None
+    preferred_sources = {"manual:device_code", "oauth_device"}
+    for candidate in entries:
+        if not isinstance(candidate, dict):
+            continue
+        access_token = str(candidate.get("access_token") or "").strip()
+        refresh_token = str(candidate.get("refresh_token") or "").strip()
+        if not access_token or not refresh_token:
+            continue
+        if best is None:
+            best = candidate
+        if str(candidate.get("source") or "") in preferred_sources:
+            return candidate
+    return best
+
+
+def _sync_codex_provider_state_from_pool(hermes_home: Path | None = None) -> Path | None:
+    """Backfill the runtime-facing Codex provider state from credential_pool."""
+    auth_path = Path(hermes_home or _get_active_hermes_home()) / "auth.json"
+    auth = _read_auth_json(auth_path)
+    entry = _best_codex_pool_entry(auth)
+    if not entry:
+        return None
+
+    access_token = str(entry.get("access_token") or "").strip()
+    refresh_token = str(entry.get("refresh_token") or "").strip()
+    if not access_token or not refresh_token:
+        return None
+
+    last_refresh = str(entry.get("last_refresh") or entry.get("updated_at") or _now_iso())
+    if not _set_codex_provider_state(
+        auth,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        last_refresh=last_refresh,
+    ):
+        return None
+
+    auth["updated_at"] = _now_iso()
+    return _write_auth_json(auth, auth_path)
+
+
+def _prime_runtime_oauth_state(provider: str) -> None:
+    normalized = _normalize_onboarding_oauth_provider(provider)
+    if normalized != "openai-codex":
+        return
+    _sync_codex_provider_state_from_pool(_get_active_hermes_home())
+
+
 def _persist_codex_credentials(hermes_home: Path, token_data: dict[str, Any]) -> Path:
     """Persist Codex OAuth credentials to active-profile auth.json."""
     access_token = str(token_data.get("access_token") or "").strip()
@@ -215,6 +322,12 @@ def _persist_codex_credentials(hermes_home: Path, token_data: dict[str, Any]) ->
             "last_refresh": now,
             "updated_at": now,
         }
+    )
+    _set_codex_provider_state(
+        auth,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        last_refresh=now,
     )
     auth["updated_at"] = now
     path = _write_auth_json(auth, auth_path)
