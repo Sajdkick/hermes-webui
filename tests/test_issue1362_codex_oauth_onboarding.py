@@ -69,6 +69,44 @@ def test_start_payload_does_not_leak_provider_device_secrets(monkeypatch, tmp_pa
         assert forbidden not in serialized
 
 
+def test_codex_json_request_sends_explicit_user_agent(monkeypatch):
+    import api.oauth as oauth
+
+    captured = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps({"ok": True}).encode("utf-8")
+
+    def _fake_urlopen(req, timeout=0):
+        captured["timeout"] = timeout
+        captured["user_agent"] = req.headers.get("User-agent")
+        captured["accept"] = req.headers.get("Accept")
+        captured["content_type"] = req.headers.get("Content-type")
+        captured["url"] = req.full_url
+        return _Resp()
+
+    monkeypatch.setattr(oauth.urllib.request, "urlopen", _fake_urlopen)
+
+    payload = oauth._json_request(
+        oauth.CODEX_USER_CODE_URL,
+        {"client_id": oauth.CODEX_CLIENT_ID},
+    )
+
+    assert payload == {"ok": True}
+    assert captured["url"] == oauth.CODEX_USER_CODE_URL
+    assert captured["timeout"] == 15
+    assert captured["user_agent"] == oauth.CODEX_OAUTH_USER_AGENT
+    assert captured["accept"] == "application/json"
+    assert captured["content_type"] == "application/json"
+
+
 def test_poll_returns_high_level_status_only(monkeypatch, tmp_path):
     import api.oauth as oauth
 

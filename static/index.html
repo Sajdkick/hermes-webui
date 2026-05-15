@@ -1080,7 +1080,7 @@
             <div class="settings-section-head">
               <div>
                 <div class="settings-section-title">Codex</div>
-                <div class="settings-section-meta">Shared Codex CLI configuration and ChatGPT OAuth for the <code>openai-codex</code> provider.</div>
+                <div class="settings-section-meta">Shared Codex CLI configuration plus Hermes ChatGPT OAuth for the <code>openai-codex</code> provider.</div>
               </div>
               <span class="settings-version-badge" id="settingsCodexProviderBadge">Loading…</span>
             </div>
@@ -1101,7 +1101,7 @@
             </div>
             <div class="settings-field">
               <label>ChatGPT OAuth</label>
-              <div class="settings-inline-note" id="settingsCodexOAuthHint">Check whether the Codex provider is authenticated and start the device-code flow without leaving the WebUI.</div>
+              <div class="settings-inline-note" id="settingsCodexOAuthHint">Check whether Hermes is authenticated for <code>openai-codex</code> and start the ChatGPT device-code flow here. A standalone Codex CLI login in <code>~/.codex</code> is separate.</div>
               <div class="settings-inline-actions">
                 <button class="settings-action-btn" type="button" id="settingsCodexOAuthBtn" onclick="startSettingsCodexOAuth()">Login with Codex (ChatGPT)</button>
                 <button class="settings-action-btn" type="button" onclick="switchSettingsSection('providers')">Open provider cards</button>

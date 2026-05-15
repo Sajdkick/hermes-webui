@@ -36,6 +36,7 @@ CODEX_TOKEN_URL = f"{CODEX_ISSUER}/oauth/token"
 CODEX_REDIRECT_URI = f"{CODEX_ISSUER}/deviceauth/callback"
 CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 CODEX_FLOW_MAX_WAIT_SECONDS = 15 * 60
+CODEX_OAUTH_USER_AGENT = "hermes-webui-codex-oauth/1.0"
 
 _ALLOWED_ONBOARDING_OAUTH_PROVIDERS = {"openai-codex", "anthropic", "claude", "claude-code"}
 _ANTHROPIC_PROVIDER_ALIASES = {"anthropic", "claude", "claude-code"}
@@ -468,11 +469,18 @@ def _json_request(url: str, payload: dict[str, Any], *, form: bool = False) -> d
     else:
         data = json.dumps(payload).encode("utf-8")
         content_type = "application/json"
+    # auth.openai.com rejects the default Python-urllib/* signature with a
+    # Cloudflare 530 route error on the Codex device-code endpoints. Use an
+    # explicit product UA so the WebUI matches the working Hermes-agent path.
     req = urllib.request.Request(
         url,
         data=data,
         method="POST",
-        headers={"Content-Type": content_type, "Accept": "application/json"},
+        headers={
+            "Content-Type": content_type,
+            "Accept": "application/json",
+            "User-Agent": CODEX_OAUTH_USER_AGENT,
+        },
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read().decode("utf-8"))

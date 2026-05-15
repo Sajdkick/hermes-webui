@@ -1,5 +1,6 @@
 import stat
 from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 
@@ -68,3 +69,20 @@ def test_routes_expose_codex_config_get_and_post(monkeypatch):
         (200, {"path": "/tmp/.codex/config.toml", "content": "foo='bar'\n"}),
         (200, {"ok": True, "path": "/tmp/.codex/config.toml", "content": "[profiles]\nactive='default'\n"}),
     ]
+
+
+def test_settings_panel_uses_onboarding_codex_oauth_routes():
+    js = (Path(__file__).resolve().parents[1] / "static" / "panels.js").read_text(encoding="utf-8")
+
+    assert "/api/onboarding/oauth/start" in js
+    assert "/api/onboarding/oauth/poll" in js
+    assert "/api/oauth/codex/start" not in js
+    assert "/api/oauth/codex/poll" not in js
+
+
+def test_settings_panel_copy_clarifies_hermes_vs_codex_cli_auth():
+    html = (Path(__file__).resolve().parents[1] / "static" / "index.html").read_text(encoding="utf-8")
+
+    assert "Hermes ChatGPT OAuth" in html
+    assert "standalone Codex CLI login" in html
+    assert "~/.codex" in html

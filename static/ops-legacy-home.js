@@ -760,6 +760,23 @@
       return entries[0]||null;
     }
 
+    function shellUrl(path){
+      const rel=String(path||'').trim();
+      const base=(documentRef&&documentRef.baseURI)
+        || (windowRef&&windowRef.location&&windowRef.location.href)
+        || (typeof location!=='undefined' && location.href)
+        || '';
+      if(!base)return rel;
+      try{return new URL(rel, base).href;}catch(_error){return rel;}
+    }
+
+    function mainAppUrl(panel){
+      const rel=panel&&panel!=='chat'
+        ? `index.html?panel=${encodeURIComponent(panel)}`
+        : 'index.html';
+      return shellUrl(rel);
+    }
+
     async function switchMainPanel(panel){
       if(windowRef&&typeof windowRef.switchPanel==='function'){
         await windowRef.switchPanel(panel);
@@ -767,7 +784,7 @@
         return true;
       }
       if(windowRef&&windowRef.location&&typeof windowRef.location.assign==='function'){
-        windowRef.location.assign(panel==='chat'?'/':`/?panel=${encodeURIComponent(panel)}`);
+        windowRef.location.assign(mainAppUrl(panel));
         return true;
       }
       return false;
@@ -1318,14 +1335,14 @@
       if(action==='view-settings')return await switchMainPanel('settings');
       if(action==='go-recovery'){
         if(windowRef&&windowRef.location&&typeof windowRef.location.assign==='function'){
-          windowRef.location.assign('/recovery');
+          windowRef.location.assign(shellUrl('recovery'));
         }
         return null;
       }
       if(action==='back-to-terminal')return await openTerminalDestination();
       if(action==='back-to-hermes'){
         if(windowRef&&windowRef.location&&typeof windowRef.location.assign==='function'){
-          windowRef.location.assign('/');
+          windowRef.location.assign(mainAppUrl('chat'));
         }
         return null;
       }

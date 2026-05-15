@@ -102,7 +102,50 @@ def test_ops_phase_shell_route_is_registered_and_serves_html():
     assert 'src="static/ops-upstream-sync.js?v=' in html
     assert 'src="static/ops-projects.js?v=' in html
     assert 'src="static/cloud-terminal-entry.js?v=' in html
+    assert 'href="index.html">Back to Hermes' in html
     assert 'href="api/ops/shell"' in html
+
+
+def test_ops_phase_shell_back_link_resolves_to_main_app_under_trailing_slash_routes():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        const html = fs.readFileSync('static/ops-shell.html', 'utf8');
+        const match = html.match(/<script>(\\(function\\(\\)\\{[\\s\\S]*?\\}\\)\\(\\))<\\/script>/);
+        if (!match) throw new Error('Missing ops shell base bootstrap.');
+        const bootstrap = match[1];
+
+        function resolveBase(pathname){
+          const writes = [];
+          const context = {
+            location: { origin: 'http://example.com', pathname },
+            document: { write: (value) => writes.push(value) },
+          };
+          vm.createContext(context);
+          vm.runInContext(bootstrap, context);
+          return writes[0];
+        }
+
+        const plain = resolveBase('/demo/ops-phase');
+        const trailing = resolveBase('/demo/ops-phase/');
+        if (plain !== '<base href="http://example.com/demo/">') {
+          throw new Error('Plain ops-phase route should resolve to the app root base.');
+        }
+        if (trailing !== '<base href="http://example.com/demo/">') {
+          throw new Error('Trailing-slash ops-phase route should resolve to the app root base.');
+        }
+        console.log('ok');
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
 
 
 def test_ops_shell_bootstrap_api_is_registered():

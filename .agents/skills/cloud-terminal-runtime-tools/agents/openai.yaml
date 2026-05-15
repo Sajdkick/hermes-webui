@@ -1,4 +1,4 @@
 interface:
-  display_name: "Hermes Runtime Tools"
-  short_description: "Run, inspect, gather, and review apps with hermes-runtime in Hermes WebUI"
-  default_prompt: "Use $cloud-terminal-runtime-tools to run the project, inspect the app, gather repro evidence, and capture review evidence through hermes-runtime in Hermes WebUI. Use ct-runtime only when explicitly inside a Cloud Terminal project session."
+  display_name: "Cloud Terminal Runtime Tools"
+  short_description: "Run, inspect, and review apps in Cloud Terminal"
+  default_prompt: "Use $cloud-terminal-runtime-tools to run the project, inspect the app, and capture review evidence through Cloud Terminal."

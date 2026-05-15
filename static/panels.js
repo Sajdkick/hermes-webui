@@ -4125,7 +4125,8 @@ let _settingsAppearanceAutosaveTimer = null;
 let _settingsAppearanceAutosaveRetryPayload = null;
 let _settingsPreferencesAutosaveTimer = null;
 let _settingsPreferencesAutosaveRetryPayload = null;
-let _settingsCodexOAuthSSE = null;
+let _settingsCodexOAuthPollTimer = null;
+let _settingsCodexOAuthFlowId = null;
 let _settingsMaintenanceLoaded = false;
 const _settingsMaintenanceState = {
   projects: [],
@@ -4787,7 +4788,7 @@ function _updateCodexProviderUi(provider){
   }
   if(provider.has_key){
     _setCodexProviderBadge('Authenticated');
-    hint.textContent=t('providers_oauth_hint')||'Authenticated via OAuth. No API key needed.';
+    hint.textContent='Authenticated in Hermes via OAuth. No API key needed.';
     return;
   }
   if(provider.auth_error){
@@ -4796,7 +4797,7 @@ function _updateCodexProviderUi(provider){
     return;
   }
   _setCodexProviderBadge('Not authenticated');
-  hint.textContent='Not authenticated. Start the device-code flow here instead of switching back to the terminal.';
+  hint.textContent='Not authenticated in Hermes. Start the device-code flow here. A standalone Codex CLI login in ~/.codex is separate.';
 }
 
 async function loadCodexSettingsPanel(opts){
@@ -4856,22 +4857,80 @@ async function saveCodexConfigSettings(){
   }
 }
 
+function _clearSettingsCodexOAuthPoll(){
+  if(_settingsCodexOAuthPollTimer){
+    clearTimeout(_settingsCodexOAuthPollTimer);
+    _settingsCodexOAuthPollTimer=null;
+  }
+}
+
+function _renderSettingsCodexOAuthResult(status,message){
+  const flowDiv=$('settingsCodexOAuthFlow');
+  if(!flowDiv) return;
+  const ok=status==='success';
+  const icon=ok?'✅':status==='expired'?'⌛':status==='cancelled'?'⏹':'❌';
+  const title=ok?t('oauth_codex_success'):(status==='expired'?t('oauth_codex_expired'):(status==='cancelled'?'OAuth login cancelled':t('oauth_codex_error')));
+  flowDiv.innerHTML=`
+    <div class="onboarding-oauth-card ${ok?'onboarding-oauth-ready':''}" ${ok?'':'style="border-color:var(--error,#e55)"'}>
+      <div class="onboarding-oauth-icon">${icon}</div>
+      <div><strong>${title}</strong><p style="margin-top:6px;color:var(--muted);font-size:13px">${esc(message||'')}</p></div>
+    </div>`;
+}
+
+async function _pollSettingsCodexOAuth(){
+  const flowId=_settingsCodexOAuthFlowId;
+  const btn=$('settingsCodexOAuthBtn');
+  if(!flowId||!btn) return;
+  try{
+    const resp=await api('/api/onboarding/oauth/poll?flow_id='+encodeURIComponent(flowId));
+    const status=(resp&&resp.status)||'error';
+    if(status==='pending'){
+      _settingsCodexOAuthPollTimer=setTimeout(_pollSettingsCodexOAuth,3000);
+      return;
+    }
+    _clearSettingsCodexOAuthPoll();
+    _settingsCodexOAuthFlowId=null;
+    btn.disabled=false;
+    btn.textContent=t('oauth_login_codex');
+    if(status==='success'){
+      _renderSettingsCodexOAuthResult('success','Credentials saved to the active Hermes auth store. Refreshing provider status…');
+      showToast(t('oauth_codex_success'));
+      loadCodexSettingsPanel({preserveEditor:true}).catch(()=>{});
+      loadProvidersPanel().catch(()=>{});
+    }else if(status==='expired'){
+      _renderSettingsCodexOAuthResult('expired','The code expired. Start a new login flow to try again.');
+    }else if(status==='cancelled'){
+      _renderSettingsCodexOAuthResult('cancelled','The login flow was cancelled.');
+    }else{
+      _renderSettingsCodexOAuthResult('error',(resp&&resp.error)||'OAuth login failed. Please try again.');
+    }
+  }catch(e){
+    _clearSettingsCodexOAuthPoll();
+    _settingsCodexOAuthFlowId=null;
+    btn.disabled=false;
+    btn.textContent=t('oauth_login_codex');
+    _renderSettingsCodexOAuthResult('error',(e&&e.message)||String(e));
+  }
+}
+
 async function startSettingsCodexOAuth(){
   const flowDiv=$('settingsCodexOAuthFlow');
   const btn=$('settingsCodexOAuthBtn');
   if(!flowDiv||!btn) return;
+  _clearSettingsCodexOAuthPoll();
+  _settingsCodexOAuthFlowId=null;
   btn.disabled=true;
   btn.textContent='Starting…';
   flowDiv.style.display='block';
   flowDiv.innerHTML=`<div class="onboarding-oauth-card onboarding-oauth-pending"><div class="onboarding-oauth-icon">⏳</div><div><strong>${t('oauth_codex_polling')}</strong><p>Starting device-code flow…</p></div></div>`;
   try{
-    const resp=await api('/api/oauth/codex/start',{method:'POST'});
+    const resp=await api('/api/onboarding/oauth/start',{method:'POST',body:JSON.stringify({provider:'openai-codex'})});
     if(resp.error) throw new Error(resp.error);
-    const deviceCode=resp.device_code;
+    const flowId=resp.flow_id;
     const userCode=resp.user_code;
     const verificationUri=resp.verification_uri;
-    if(!deviceCode||!userCode||!verificationUri) throw new Error('Invalid OAuth response');
-    window.open(verificationUri,'_blank');
+    if(!flowId||!userCode||!verificationUri) throw new Error('Invalid OAuth response');
+    _settingsCodexOAuthFlowId=flowId;
     flowDiv.innerHTML=`
       <div class="onboarding-oauth-card onboarding-oauth-pending">
         <div class="onboarding-oauth-icon">📋</div>
@@ -4883,70 +4942,11 @@ async function startSettingsCodexOAuth(){
           <p style="margin-top:8px;color:var(--muted);font-size:13px">${t('oauth_codex_polling')}</p>
         </div>
       </div>`;
-    const pollUrl=new URL('api/oauth/codex/poll?device_code='+encodeURIComponent(deviceCode),location.href);
-    if(_settingsCodexOAuthSSE){
-      _settingsCodexOAuthSSE.close();
-      _settingsCodexOAuthSSE=null;
-    }
-    _settingsCodexOAuthSSE=new EventSource(pollUrl.href);
-    _settingsCodexOAuthSSE.onmessage=function(ev){
-      let data;
-      try{
-        data=JSON.parse(ev.data);
-      }catch(_error){
-        return;
-      }
-      if(data.status==='success'){
-        if(_settingsCodexOAuthSSE){
-          _settingsCodexOAuthSSE.close();
-          _settingsCodexOAuthSSE=null;
-        }
-        flowDiv.innerHTML=`
-          <div class="onboarding-oauth-card onboarding-oauth-ready">
-            <div class="onboarding-oauth-icon">✅</div>
-            <div><strong>${t('oauth_codex_success')}</strong><p>Token saved to the shared Codex credential cache.</p></div>
-          </div>`;
-        btn.disabled=false;
-        btn.textContent=t('oauth_login_codex');
-        showToast(t('oauth_codex_success'));
-        loadCodexSettingsPanel({preserveEditor:true}).catch(()=>{});
-        loadProvidersPanel().catch(()=>{});
-      }else if(data.status==='error'){
-        if(_settingsCodexOAuthSSE){
-          _settingsCodexOAuthSSE.close();
-          _settingsCodexOAuthSSE=null;
-        }
-        const isExpired=String(data.error||'').includes('expired');
-        flowDiv.innerHTML=`
-          <div class="onboarding-oauth-card" style="border-color:var(--error,#e55)">
-            <div class="onboarding-oauth-icon">❌</div>
-            <div><strong>${isExpired?t('oauth_codex_expired'):t('oauth_codex_error')}</strong><p>${esc(data.error||'Unknown error')}</p></div>
-          </div>`;
-        btn.disabled=false;
-        btn.textContent=t('oauth_login_codex');
-      }
-    };
-    _settingsCodexOAuthSSE.onerror=function(){
-      if(_settingsCodexOAuthSSE){
-        _settingsCodexOAuthSSE.close();
-        _settingsCodexOAuthSSE=null;
-      }
-      btn.disabled=false;
-      btn.textContent=t('oauth_login_codex');
-      if(!flowDiv.querySelector('.onboarding-oauth-ready')&&!flowDiv.querySelector('[style*="error"]')){
-        flowDiv.innerHTML=`
-          <div class="onboarding-oauth-card" style="border-color:var(--error,#e55)">
-            <div class="onboarding-oauth-icon">❌</div>
-            <div><strong>${t('oauth_codex_error')}</strong><p>Connection lost. Please try again.</p></div>
-          </div>`;
-      }
-    };
+    _settingsCodexOAuthPollTimer=setTimeout(_pollSettingsCodexOAuth,Math.max(1000,Number(resp.poll_interval_seconds||3)*1000));
   }catch(e){
-    flowDiv.innerHTML=`
-      <div class="onboarding-oauth-card" style="border-color:var(--error,#e55)">
-        <div class="onboarding-oauth-icon">❌</div>
-        <div><strong>${t('oauth_codex_error')}</strong><p>${esc(e&&e.message?e.message:String(e))}</p></div>
-      </div>`;
+    _clearSettingsCodexOAuthPoll();
+    _settingsCodexOAuthFlowId=null;
+    _renderSettingsCodexOAuthResult('error',(e&&e.message)||String(e));
     btn.disabled=false;
     btn.textContent=t('oauth_login_codex');
   }
