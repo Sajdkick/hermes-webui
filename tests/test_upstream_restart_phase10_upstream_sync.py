@@ -184,7 +184,74 @@ def test_phase10_start_upstream_sync_session_records_prompt_and_session(monkeypa
     assert record["profile"] == "default"
     assert record["model"] == "gpt-5.5"
     assert "Read AGENTS.md" in record["prompt"]
+    assert "Type 1: /ops dashboard/project/task-flow work" in record["prompt"]
+    assert "If upstream already fixed it, remove our local patch" in record["prompt"]
+    assert "docs/local-upstream-patches.md" in record["prompt"]
     assert str(worktree) in record["prompt"]
+
+
+def test_phase10_upstream_sync_prefers_active_profile_defaults_when_present(monkeypatch):
+    project = {
+        "id": "project-1",
+        "name": "Sync Project",
+        "profile": "hermes",
+        "defaultModel": "gpt-5.2",
+        "defaultModelProvider": "openai-codex",
+    }
+
+    monkeypatch.setattr(ops_upstream_sync, "_active_profile_name", lambda: "summons")
+    monkeypatch.setattr(
+        ops_upstream_sync.ops_sessions,
+        "_profile_config_defaults",
+        lambda profile: ("gpt-5.5", "openai-codex") if profile == "summons" else ("gpt-5.2", "openai-codex"),
+    )
+    monkeypatch.setattr(
+        ops_upstream_sync.ops_sessions,
+        "project_session_defaults",
+        lambda _project: ("gpt-5.2", "openai-codex"),
+    )
+    monkeypatch.setattr(
+        ops_upstream_sync.ops_sessions,
+        "project_profile",
+        lambda _project: "hermes",
+    )
+
+    profile, model, provider = ops_upstream_sync._resolve_profile_and_model(project, {})
+
+    assert profile == "summons"
+    assert model == "gpt-5.5"
+    assert provider == "openai-codex"
+
+
+def test_phase10_upstream_sync_respects_explicit_profile_override(monkeypatch):
+    project = {
+        "id": "project-1",
+        "name": "Sync Project",
+        "profile": "hermes",
+    }
+
+    monkeypatch.setattr(ops_upstream_sync, "_active_profile_name", lambda: "summons")
+    monkeypatch.setattr(
+        ops_upstream_sync.ops_sessions,
+        "_profile_config_defaults",
+        lambda profile: ("gpt-5.4-mini", "openai") if profile == "default" else ("gpt-5.5", "openai-codex"),
+    )
+    monkeypatch.setattr(
+        ops_upstream_sync.ops_sessions,
+        "project_session_defaults",
+        lambda _project: ("gpt-5.2", "openai-codex"),
+    )
+    monkeypatch.setattr(
+        ops_upstream_sync.ops_sessions,
+        "project_profile",
+        lambda _project: "hermes",
+    )
+
+    profile, model, provider = ops_upstream_sync._resolve_profile_and_model(project, {"profile": "default"})
+
+    assert profile == "default"
+    assert model == "gpt-5.4-mini"
+    assert provider == "openai"
 
 
 def test_phase10_apply_upstream_sync_fast_forwards_live_checkout(tmp_path, monkeypatch, git_available):

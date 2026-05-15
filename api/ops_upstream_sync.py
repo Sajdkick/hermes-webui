@@ -213,15 +213,49 @@ def _session_url(session_id: str) -> str:
     return ops_sessions.session_url(session_id)
 
 
+def _active_profile_name() -> str | None:
+    try:
+        from api.profiles import get_active_profile_name
+
+        return _text(get_active_profile_name(), limit=128) or None
+    except Exception:
+        return None
+
+
+def _resolve_profile_and_model(project: dict, body: dict | None = None) -> tuple[str | None, str | None, str | None]:
+    payload = body if isinstance(body, dict) else {}
+    requested_profile = _text(payload.get("profile"), limit=128) or None
+    active_profile = _active_profile_name()
+    project_profile = ops_sessions.project_profile(project)
+    profile = requested_profile or active_profile or project_profile
+
+    model = _text(payload.get("model"), limit=256) or None
+    model_provider = _text(payload.get("modelProvider") or payload.get("model_provider"), limit=128).lower() or None
+
+    if requested_profile or active_profile:
+        default_model, default_provider = ops_sessions._profile_config_defaults(profile)
+    else:
+        default_model, default_provider = ops_sessions.project_session_defaults(project)
+
+    if not model:
+        model = default_model
+    if not model_provider and default_model == model and default_provider:
+        model_provider = default_provider
+    return profile or None, model or None, model_provider or None
+
+
 def _maintenance_prompt(context: UpstreamSyncContext) -> str:
     return (
         "You are working in a maintenance worktree for an upstream sync.\n\n"
         "Rules:\n"
         "1. Read AGENTS.md before making changes.\n"
-        "2. Treat this worktree as the review/apply candidate only; do not edit the source checkout directly.\n"
-        "3. Merge or replay the upstream core branch into this worktree, resolve conflicts carefully, run focused verification, and summarize the risk.\n"
-        "4. Leave the source checkout untouched until the /ops apply action fast-forwards it.\n"
-        "5. If you uncover unrelated messy code, add a follow-up task in the branch-scoped project_tasks file.\n\n"
+        "2. Classify every change before you make it. Type 1: /ops dashboard/project/task-flow work that we own; keep these changes isolated to fork-owned /ops surfaces and touch upstream Hermes code as little as possible. Type 2: a small local patch to upstream-owned Hermes code; only do this for bugs we are unwilling to wait on upstream to fix.\n"
+        "3. For every Type 2 patch, first check whether the current upstream already fixed it. If upstream already fixed it, remove our local patch instead of carrying it forward.\n"
+        "4. Document every Type 2 patch in docs/local-upstream-patches.md with the files touched, why the patch exists, how to tell when upstream supersedes it, and the exact removal steps.\n"
+        "5. Treat this worktree as the review/apply candidate only; do not edit the source checkout directly.\n"
+        "6. Merge or replay the upstream core branch into this worktree, resolve conflicts carefully, run focused verification, and summarize the risk.\n"
+        "7. Leave the source checkout untouched until the /ops apply action fast-forwards it.\n"
+        "8. If you uncover unrelated messy code, add a follow-up task in the branch-scoped project_tasks file.\n\n"
         f"Source branch: {context.source_branch}\n"
         f"Source head: {context.source_head_sha}\n"
         f"Upstream remote: {context.upstream_remote}\n"
@@ -427,16 +461,7 @@ def _create_context(project_id: str, body: dict | None = None) -> UpstreamSyncCo
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
     sync_branch = f"upstream-sync/{_safe_slug(source_branch)}/{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
     _run_git(repo_path, ["worktree", "add", "-b", sync_branch, str(worktree_path), "HEAD"], timeout=180.0)
-    profile = _text(body.get("profile"), limit=128) or ops_sessions.project_profile(project)
-    model = _text(body.get("model"), limit=256) or None
-    model_provider = _text(body.get("modelProvider"), limit=128).lower() or None
-    default_model, default_provider = ops_sessions.project_session_defaults(project)
-    if not model:
-        model = default_model
-        if not model_provider:
-            model_provider = default_provider
-    elif not model_provider and default_model == model and default_provider:
-        model_provider = default_provider
+    profile, model, model_provider = _resolve_profile_and_model(project, body)
     return UpstreamSyncContext(
         project=project,
         repo_path=repo_path,
