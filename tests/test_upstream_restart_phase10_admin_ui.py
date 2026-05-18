@@ -161,19 +161,65 @@ def test_main_shell_exposes_ops_navigation_entry():
     js = Path("static/panels.js").read_text(encoding="utf-8")
 
     assert html.count('onclick="openOpsDashboard()"') == 3
-    assert html.count("title=\"Ops dashboard\"") == 2
+    assert html.count('aria-label="Ops dashboard"') == 2
     assert "Open Ops dashboard" in html
     assert "function openOpsDashboard()" in js
     assert "const base=(typeof document!=='undefined' && document.baseURI)" in js
     assert "return new URL(rel, base).href;" in js
-    assert "_appRelativeUrl('ops')" in js
+    assert "const target=_siteRootUrl('ops-phase');" in js
 
     assert html.count('onclick="openRecoveryPage()"') == 3
-    assert html.count("title=\"Recovery page\"") == 2
+    assert html.count('aria-label="Recovery page"') == 2
     assert "Open recovery page" in html
     assert "function openRecoveryPage()" in js
     assert "function _siteRootUrl(path)" in js
     assert "const target=_siteRootUrl('recovery');" in js
+
+
+def test_main_shell_ops_navigation_uses_site_root_from_session_routes():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        const source = fs.readFileSync('static/panels.js', 'utf8');
+        const start = source.indexOf("function _siteRootUrl(path){");
+        const end = source.indexOf("function openRecoveryPage()", start);
+        if (start === -1 || end === -1){
+          throw new Error('Could not isolate ops navigation helpers from panels.js');
+        }
+        const snippet = source.slice(start, end);
+        const calls = [];
+        const locationRef = {
+          origin: 'http://example.com',
+          href: 'http://example.com/session/demo/index.html',
+          assign: (target) => calls.push(target),
+        };
+        const context = {
+          URL,
+          window: { location: locationRef },
+          document: { baseURI: 'http://example.com/session/demo/' },
+          location: locationRef,
+        };
+        vm.createContext(context);
+        vm.runInContext(snippet, context);
+        context.openOpsDashboard();
+        if (calls.length !== 1){
+          throw new Error('Ops navigation should assign exactly one target URL.');
+        }
+        if (calls[0] !== 'http://example.com/ops-phase'){
+          throw new Error('Ops navigation should leave session-prefixed routes and open the site-root ops shell.');
+        }
+        console.log('ok');
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
 
 
 def test_main_shell_exposes_codex_and_maintenance_settings_entries():
@@ -186,10 +232,12 @@ def test_main_shell_exposes_codex_and_maintenance_settings_entries():
     assert 'data-settings-section="maintenance"' in html
     assert 'id="settingsPaneMaintenance"' in html
     assert 'id="settingsMaintenanceProject"' in html
+    assert 'data-settings-section="plugins"' in html
     assert "switchSettingsSection('codex')" in html
     assert "switchSettingsSection('maintenance')" in html
+    assert "switchSettingsSection('plugins')" in html
 
-    assert "name==='appearance'||name==='preferences'||name==='providers'||name==='codex'||name==='maintenance'||name==='system'" in js
+    assert "name==='appearance'||name==='preferences'||name==='providers'||name==='codex'||name==='maintenance'||name==='plugins'||name==='system'" in js
     assert "api('/api/codex-config')" in js
     assert "/api/ops/projects/'+encodeURIComponent(state.selectedProjectId)+'/upstream-sync" in js
     assert "Open Codex settings" in js

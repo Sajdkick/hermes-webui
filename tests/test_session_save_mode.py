@@ -222,6 +222,29 @@ def test_same_assistant_text_across_different_turns_is_preserved():
     ]
 
 
+def test_current_user_turn_stays_before_replayed_assistant_delta():
+    """If provider replay returns assistant before user, UI transcript still reads top-to-bottom."""
+    previous_display = [
+        {"role": "user", "content": "older prompt"},
+        {"role": "assistant", "content": "older answer"},
+    ]
+    previous_context = list(previous_display)
+    result_messages = previous_context + [
+        {"role": "assistant", "content": "current answer"},
+        {"role": "user", "content": "latest prompt"},
+    ]
+
+    merged = streaming._merge_display_messages_after_agent_result(
+        previous_display=previous_display,
+        previous_context=previous_context,
+        result_messages=result_messages,
+        msg_text="latest prompt",
+    )
+
+    assert [m["role"] for m in merged] == ["user", "assistant", "user", "assistant"]
+    assert [m["content"] for m in merged[-2:]] == ["latest prompt", "current answer"]
+
+
 def test_llm_title_generated_survives_save_and_load(_isolate_state):
     s = Session(
         session_id="generated_title",

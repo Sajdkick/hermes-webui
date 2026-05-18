@@ -153,6 +153,7 @@ def test_phase5_readable_output_ui_loads_and_clears_with_session_wrappers():
           window: {},
           fetch: async (path) => {
             fetchCalls.push(path);
+            const sid = String(path).includes('session-2') ? 'session-2' : 'session-1';
             return {
               ok: true,
               json: async () => ({
@@ -160,8 +161,8 @@ def test_phase5_readable_output_ui_loads_and_clears_with_session_wrappers():
                   exists: true,
                   title: 'Readable output',
                   path: '/tmp/message.md',
-                  markdown: '# Done\\n\\n![Result](assets/result.png)\\n',
-                  assetBaseUrl: '/api/ops/sessions/session-1/readable-output/assets/',
+                  markdown: '# Done '+sid+'\\n\\n![Result](assets/result.png)\\n',
+                  assetBaseUrl: '/api/ops/sessions/'+sid+'/readable-output/assets/',
                   assets: [{ path: 'result.png' }],
                   updated_at: 1,
                   size: 24
@@ -201,7 +202,17 @@ def test_phase5_readable_output_ui_loads_and_clears_with_session_wrappers():
 
         await context.window.newSession();
 
-        if (!host.hidden) throw new Error('Readable output host did not clear on new session');
+        if (!host.hidden) throw new Error('Readable output host did not stay hidden on a new blank session');
+        await context.window.loadSession('session-2');
+        if (host.hidden) throw new Error('Readable output host did not render for a different session');
+        if (!host.innerHTML.includes('Done session-2')) throw new Error('Readable output did not switch to the current session artifact');
+        context.window.dismissSessionReadableOutput();
+        if (!host.hidden) throw new Error('Session-2 readable output close did not hide only session-2 overlay');
+        await context.window.loadSession('session-1');
+        if (!host.hidden) throw new Error('Session-1 readable output dismissal was not retained independently');
+        await context.window.reloadSessionReadableOutput();
+        if (host.hidden) throw new Error('Session-1 readable output reload did not clear its own dismissal');
+        if (!host.innerHTML.includes('Done session-1')) throw new Error('Session-1 readable output cache was not restored');
         if (!fetchCalls.includes('/api/ops/sessions/session-1/readable-output')) {
           throw new Error('Readable output session route was not requested');
         }

@@ -172,6 +172,77 @@ def test_phase6_ops_notification_dismissals_persist(monkeypatch, tmp_path):
 
 
 
+def test_phase6_ops_legacy_notification_dismiss_is_optimistic():
+    script = textwrap.dedent(
+        """
+        (async () => {
+        const fs = require('fs');
+        const vm = require('vm');
+        const source = fs.readFileSync('static/ops-legacy-notifications.js', 'utf8');
+        const context = { window: {}, console, setInterval, clearInterval };
+        vm.createContext(context);
+        vm.runInContext(source, context);
+
+        let persisted = false;
+        let dismissResolve = null;
+        let renderCount = 0;
+        const OPS = {
+          notifications: [
+            { id: 'note-1', kind: 'run', message: 'First' },
+            { id: 'note-2', kind: 'run', message: 'Second' },
+          ],
+          selectedRunId: 'run-1',
+        };
+        const bound = context.window.HermesOpsModules.notifications.bindDashboard({
+          OPS,
+          AgentBridge: {
+            notifications: {
+              dismiss(id){
+                if (id !== 'note-1') throw new Error('wrong notification dismissed: '+id);
+                return new Promise((resolve) => { dismissResolve = () => { persisted = true; resolve({ ok: true }); }; });
+              },
+              list(){
+                return Promise.resolve({ notifications: persisted ? [{ id: 'note-2', kind: 'run', message: 'Second' }] : OPS.notifications });
+              },
+            },
+            runs: { update(){ return Promise.resolve({}); }, createEvent(){ return Promise.resolve({}); }, list(){ return Promise.resolve({ runs: [] }); } },
+            sessions: { list(){ return Promise.resolve({ sessions: [] }); } },
+          },
+          renderCurrentOpsView(){ renderCount += 1; },
+          showToast(){},
+          esc(value){ return String(value || ''); },
+          svg(){ return ''; },
+          windowRef: { navigator: {} },
+          documentRef: { activeElement: null },
+          loadRunDetail(){ throw new Error('dismiss should not block on run-detail reload'); },
+          loadOpsRuns(){ return Promise.resolve({}); },
+        });
+
+        const pending = bound.dismissNotification('note-1');
+        if (OPS.notifications.some((item) => item.id === 'note-1')) throw new Error('notification was not removed optimistically');
+        if (renderCount !== 1) throw new Error('optimistic render did not happen before persistence');
+        if (!dismissResolve) throw new Error('dismiss persistence was not started');
+        dismissResolve();
+        await pending;
+        if (OPS.notifications.some((item) => item.id === 'note-1')) throw new Error('dismissed notification reappeared after persistence');
+        if (renderCount < 2) throw new Error('final render after persistence did not happen');
+        console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+
 def test_phase6_pending_notifications_skips_linkage_resolution_until_pending(monkeypatch):
     from api import ops_notifications, ops_projects, session_sidecars, play_pipeline
 
@@ -366,3 +437,11 @@ def test_phase6_ops_ui_renders_and_responds_to_notifications():
         text=True,
     )
     assert completed.stdout.strip() == "ok"
+
+
+def test_phase6_notification_refresh_preserves_existing_cards_during_loading():
+    source = (Path(__file__).parent.parent / "static" / "ops-notifications.js").read_text(encoding="utf-8")
+    assert "const content=items.length" in source
+    assert "? '<div class=\"ops-notification-list\">'" in source
+    assert "String(items.length)+' pending · refreshing'" in source
+    assert "escapeHtml(headerText)" in source

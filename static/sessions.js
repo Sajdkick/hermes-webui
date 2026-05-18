@@ -458,10 +458,105 @@ async function newSession(flash, options={}){
   // don't call renderSessionList here - callers do it when needed
 }
 
+function enterOpsSessionInspectMode(options){
+  const opts=options&&typeof options==='object'?options:{};
+  if(typeof document==='undefined')return;
+  try{
+    const sid=String(opts.sessionId||opts.session_id||(S&&S.session&&S.session.session_id)||'').trim();
+    if(typeof sessionStorage!=='undefined')sessionStorage.setItem('hermes-webui-ops-session-inspect',sid||'1');
+  }catch(_){}
+  document.body.classList.add('ops-session-inspect');
+  const main=document.querySelector('main.main');
+  if(main){
+    Array.from(main.classList).forEach((name)=>{if(/^showing-/.test(name))main.classList.remove(name);});
+  }
+  const btn=document.getElementById('opsSessionInspectBack');
+  if(btn)btn.hidden=false;
+  const refreshBtn=document.getElementById('opsSessionInspectRefresh');
+  if(refreshBtn)refreshBtn.hidden=false;
+}
+
+function exitOpsSessionInspectMode(options){
+  const opts=options&&typeof options==='object'?options:{};
+  if(typeof document!=='undefined'){
+    document.body.classList.remove('ops-session-inspect');
+    const btn=document.getElementById('opsSessionInspectBack');
+    if(btn)btn.hidden=true;
+    const refreshBtn=document.getElementById('opsSessionInspectRefresh');
+    if(refreshBtn)refreshBtn.hidden=true;
+  }
+  try{if(typeof sessionStorage!=='undefined')sessionStorage.removeItem('hermes-webui-ops-session-inspect');}catch(_){}
+  if(opts.openDashboard&&typeof openOpsDashboard==='function'){
+    openOpsDashboard({skipStoredState:true});
+  }
+}
+
+function restoreOpsSessionInspectMode(sessionId){
+  if(typeof document==='undefined')return;
+  let stored='';
+  let requestedByUrl=false;
+  try{stored=typeof sessionStorage!=='undefined'?String(sessionStorage.getItem('hermes-webui-ops-session-inspect')||''):'';}catch(_){stored='';}
+  try{
+    const qs=new URLSearchParams((window&&window.location&&window.location.search)||'');
+    requestedByUrl=qs.get('opsSessionInspect')==='1'||qs.get('opsSessionInspect')==='true';
+  }catch(_){requestedByUrl=false;}
+  const sid=String(sessionId||'').trim();
+  if(requestedByUrl){
+    enterOpsSessionInspectMode({sessionId:sid});
+    return;
+  }
+  if(!stored)return;
+  if(stored==='1'||!sid||stored===sid){
+    enterOpsSessionInspectMode({sessionId:sid});
+  }else{
+    exitOpsSessionInspectMode();
+  }
+}
+
+function _setOpsSessionInspectRefreshBusy(busy){
+  const btn=typeof document!=='undefined'?document.getElementById('opsSessionInspectRefresh'):null;
+  if(!btn)return;
+  btn.disabled=!!busy;
+  btn.setAttribute('aria-busy', busy?'true':'false');
+  btn.title=busy?'Refreshing session chat…':'Refresh session chat';
+}
+
+async function forceRefreshOpsSessionInspectMode(){
+  const sid=String((S&&S.session&&S.session.session_id)||'').trim();
+  if(!sid){
+    if(typeof showToast==='function')showToast('No active session to refresh',2500,'error');
+    return;
+  }
+  const btn=typeof document!=='undefined'?document.getElementById('opsSessionInspectRefresh'):null;
+  if(btn&&btn.disabled)return;
+  _setOpsSessionInspectRefreshBusy(true);
+  try{
+    enterOpsSessionInspectMode({sessionId:sid});
+    if(typeof _saveComposerDraftNow==='function')_saveComposerDraftNow(sid, ($('msg') || {}).value || '', S.pendingFiles ? [...S.pendingFiles] : []);
+    if(typeof setComposerStatus==='function')setComposerStatus('Refreshing session…');
+    await loadSession(sid,{force:true});
+    if(typeof showToast==='function')showToast('Session refreshed',1600,'success');
+  }catch(e){
+    console.warn('forceRefreshOpsSessionInspectMode failed:', e);
+    if(typeof showToast==='function')showToast('Failed to refresh session',3000,'error');
+  }finally{
+    _setOpsSessionInspectRefreshBusy(false);
+  }
+}
+
+if(typeof window!=='undefined'){
+  window.enterOpsSessionInspectMode=enterOpsSessionInspectMode;
+  window.exitOpsSessionInspectMode=exitOpsSessionInspectMode;
+  window.restoreOpsSessionInspectMode=restoreOpsSessionInspectMode;
+  window.forceRefreshOpsSessionInspectMode=forceRefreshOpsSessionInspectMode;
+}
+
 async function loadSession(sid){
   const currentSid = S.session ? S.session.session_id : null;
   const options=(arguments.length>1&&arguments[1]&&typeof arguments[1]==='object')?arguments[1]:{};
-  const forceReload=options.force===true || _loadingSessionId===sid || _activeSessionPaneNeedsRecovery(sid);
+  const explicitForce=options.force===true;
+  const needsRecovery=_activeSessionPaneNeedsRecovery(sid);
+  const forceReload=explicitForce || _loadingSessionId===sid || needsRecovery;
   // Clicking the already-open session in the sidebar is normally a no-op. Reloading it
   // tears down active pane state and can reset the long-session scroll window
   // to the top even though the user did not navigate anywhere. Allow a same-session
@@ -482,14 +577,16 @@ async function loadSession(sid){
   if (currentSid && currentSid !== sid) {
     _saveComposerDraftNow(currentSid, ($('msg') || {}).value || '', S.pendingFiles ? [...S.pendingFiles] : []);
   }
-  if (currentSid !== sid) {
+  const resetConversationPane=currentSid!==sid||explicitForce||needsRecovery;
+  if (resetConversationPane) {
     S.messages = [];
     S.toolCalls = [];
     _messagesTruncated = false;
     _oldestIdx = 0;
     _loadingOlder = false;
+    if(typeof _bumpMessagesGeneration==='function') _bumpMessagesGeneration();
     const _msgInner = $('msgInner');
-    if (_msgInner) _msgInner.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:14px;padding:40px;text-align:center;">Loading conversation...</div>';
+    if (_msgInner) _msgInner.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:14px;padding:40px;text-align:center;">'+(currentSid===sid?'Refreshing conversation…':'Loading conversation...')+'</div>';
   }
   const _isTransientLoadError=(e)=>{
     return (typeof document!=='undefined'&&document.visibilityState==='hidden') ||
@@ -565,6 +662,7 @@ async function loadSession(sid){
   _clearSessionCompletionUnread(S.session.session_id);
   localStorage.setItem('hermes-webui-session',S.session.session_id);
   _setActiveSessionUrl(S.session.session_id);
+  restoreOpsSessionInspectMode(S.session.session_id);
 
   const activeStreamId=S.session.active_stream_id||null;
   // If the server says the session is idle, discard any browser-side inflight

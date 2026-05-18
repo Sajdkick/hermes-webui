@@ -22,6 +22,33 @@
     try{return new URL(rel, base).href;}catch(_error){return raw.startsWith('/') ? raw : '/'+raw;}
   }
 
+  function captureLogScrollState(container){
+    const snapshot={};
+    if(!container||typeof container.querySelectorAll!=='function')return snapshot;
+    container.querySelectorAll('[data-ops-log-scroll-key]').forEach(function(node){
+      const key=String(node && node.dataset && node.dataset.opsLogScrollKey || '').trim();
+      if(!key)return;
+      const maxScroll=Math.max(0,(node.scrollHeight||0)-(node.clientHeight||0));
+      snapshot[key]={top:Number(node.scrollTop)||0,atBottom:maxScroll-(Number(node.scrollTop)||0)<=8};
+    });
+    return snapshot;
+  }
+
+  function restoreLogScrollState(container,snapshot){
+    if(!container||!snapshot||typeof container.querySelectorAll!=='function')return;
+    const apply=function(){
+      container.querySelectorAll('[data-ops-log-scroll-key]').forEach(function(node){
+        const key=String(node && node.dataset && node.dataset.opsLogScrollKey || '').trim();
+        const entry=key?snapshot[key]:null;
+        if(!entry)return;
+        const maxScroll=Math.max(0,(node.scrollHeight||0)-(node.clientHeight||0));
+        node.scrollTop=entry.atBottom?maxScroll:Math.min(Number(entry.top)||0,maxScroll);
+      });
+    };
+    apply();
+    if(typeof requestAnimationFrame==='function')requestAnimationFrame(apply);
+  }
+
   function mount(root,shellPayload){
     const state={
       shellPayload:shellPayload||{},
@@ -1301,6 +1328,7 @@
   }
 
   function render(root,state){
+    const logScrollState=captureLogScrollState(root);
     const projectsButtonLabel=state.projectsOpen ? 'Hide projects' : 'Projects';
     const selectedProject=state.projects.find(function(project){return project.id===state.selectedProjectId;}) || null;
     const tasksData=state.tasksData && state.tasksData.project && state.tasksData.project.id===state.selectedProjectId ? state.tasksData : null;
@@ -1332,6 +1360,7 @@
       '</div>',
       '</div>'
     ].join('');
+    restoreLogScrollState(root,logScrollState);
   }
 
   function renderNotificationsSection(state){

@@ -11,6 +11,83 @@
 <script>(function(){var themes={light:1,dark:1,system:1},skins={default:1,ares:1,mono:1,slate:1,poseidon:1,sisyphus:1,charizard:1},legacy={slate:['dark','slate'],solarized:['dark','poseidon'],monokai:['dark','sisyphus'],nord:['dark','slate'],oled:['dark','default']},t=(localStorage.getItem('hermes-theme')||'dark').toLowerCase(),s=(localStorage.getItem('hermes-skin')||'').toLowerCase(),m=legacy[t],theme=m?m[0]:(themes[t]?t:'dark'),skin=skins[s]?s:(m?m[1]:'default');localStorage.setItem('hermes-theme',theme);localStorage.setItem('hermes-skin',skin);if(theme==='system')theme=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';if(theme==='dark')document.documentElement.classList.add('dark');if(skin!=='default')document.documentElement.dataset.skin=skin;})()</script>
 <script>(function(){var fs=(localStorage.getItem('hermes-font-size')||'default').toLowerCase();if(fs==='small'||fs==='large')document.documentElement.dataset.fontSize=fs;})()</script>
 <link rel="stylesheet" href="static/ops-legacy.css?v=__WEBUI_VERSION__">
+<script>
+(function(){
+  function safeSerialize(value){
+    try{return JSON.parse(JSON.stringify(value));}catch(_error){return null;}
+  }
+  function sendGatherEvent(label,data,extras){
+    try{
+      fetch("api/ops/page-debug",{
+        method:"POST",
+        headers:{
+          "content-type":"application/json"
+        },
+        credentials:"include",
+        body:JSON.stringify({
+          type:(extras&&extras.type)||"log",
+          level:(extras&&extras.level)||"info",
+          label:label,
+          message:(extras&&extras.message)||"",
+          route:typeof window!=="undefined"?window.location.pathname:"",
+          url:typeof window!=="undefined"?window.location.href:"",
+          data:safeSerialize(data)||{},
+          meta:(extras&&extras.meta)||null
+        })
+      }).catch(function(){});
+    }catch(_error){}
+  }
+  function stylesheetSnapshot(){
+    var links=Array.prototype.slice.call(document.querySelectorAll('link[rel="stylesheet"]'));
+    return links.map(function(link){
+      return {
+        href:link.getAttribute('href')||'',
+        resolvedHref:link.href||'',
+        hasSheet:Boolean(link.sheet),
+        media:link.media||'',
+        disabled:Boolean(link.disabled)
+      };
+    });
+  }
+  sendGatherEvent("hermes-ops-legacy-bootstrap",{
+    pathname:window.location.pathname,
+    href:window.location.href,
+    baseURI:document.baseURI||"",
+    referrer:document.referrer||"",
+    stylesheets:stylesheetSnapshot(),
+    scripts:Array.prototype.slice.call(document.scripts).map(function(script){return script.getAttribute('src')||'[inline]';})
+  });
+  window.addEventListener("error",function(event){
+    var target=event&&event.target;
+    if(!target||target===window)return;
+    sendGatherEvent("hermes-ops-legacy-resource-error",{
+      tagName:target.tagName||"",
+      src:target.getAttribute&&(target.getAttribute("src")||target.src)||"",
+      href:target.getAttribute&&(target.getAttribute("href")||target.href)||"",
+      outerHTML:target.outerHTML?String(target.outerHTML).slice(0,300):""
+    },{level:"error"});
+  },true);
+  window.addEventListener("load",function(){
+    setTimeout(function(){
+      var bodyStyle=window.getComputedStyle(document.body);
+      var titleEl=document.getElementById("topbarTitle");
+      var titleStyle=titleEl?window.getComputedStyle(titleEl):null;
+      sendGatherEvent("hermes-ops-legacy-load",{
+        pathname:window.location.pathname,
+        href:window.location.href,
+        baseURI:document.baseURI||"",
+        bodyBackgroundColor:bodyStyle?bodyStyle.backgroundColor:"",
+        bodyColor:bodyStyle?bodyStyle.color:"",
+        topbarTitleFontSize:titleStyle?titleStyle.fontSize:"",
+        topbarTitleDisplay:titleStyle?titleStyle.display:"",
+        styleSheetCount:document.styleSheets?document.styleSheets.length:0,
+        stylesheets:stylesheetSnapshot(),
+        bodyText:String(document.body&&document.body.innerText||"").slice(0,400)
+      });
+    },250);
+  });
+})();
+</script>
 </head>
 <body>
 <div class="layout">

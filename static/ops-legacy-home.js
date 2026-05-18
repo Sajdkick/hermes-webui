@@ -487,6 +487,25 @@
       );
     }
 
+    function sessionActivityCompactStatusBadge(session){
+      const state=sessionActivityStatus(session);
+      const key=String(state&&state.key||'idle').trim().toLowerCase()||'idle';
+      const labels={
+        active:'Working',
+        connecting:'Connecting',
+        waiting:'Waiting',
+        approval:'Approval',
+        degraded:'Issue',
+        done:'Done',
+        prompt:'Prompt',
+        idle:'Quiet',
+      };
+      const label=labels[key]||String(state&&state.labelText||key).replace(/^Codex\s+(?:is\s+|needs\s+)?/i,'').trim()||key;
+      const tone=String(state&&state.toneClass||key).trim().toLowerCase()||key;
+      const title=String(state&&state.title||state&&state.labelText||label).trim()||label;
+      return `<span class="menu-session-activity-status ${esc(tone)}" title="${esc(title)}" aria-label="Session status: ${esc(label)}"><span class="menu-session-activity-status-dot" aria-hidden="true"></span><span>${esc(label)}</span></span>`;
+    }
+
     function formatSessionActivityBranchLabel(session){
       const direct=String(session&&session.branchLabel||session&&session.branch||'').trim();
       if(direct)return direct;
@@ -537,8 +556,26 @@
       if(!projectId)return null;
       const status=playStatusFor(projectId);
       if(!status)return null;
-      const configured=!!(status.configured===true||status.configAvailable===true||status.configExists===true);
-      if(!configured)return null;
+      const canBuild=!!(
+        status.canBuild===true
+        || status.buildAvailable===true
+        || status.playBuildAvailable===true
+        || (
+          status.configured===true
+          && status.canBuild!==false
+          && status.buildAvailable!==false
+          && status.playBuildAvailable!==false
+          && status.valid!==false
+          && status.configValid!==false
+        )
+        || (
+          status.canBuild!==false
+          && status.buildAvailable!==false
+          && (status.configured===true||status.configAvailable===true||status.configExists===true)
+          && (status.valid===true||status.configValid===true)
+        )
+      );
+      if(!canBuild)return null;
       const normalizedStatus=String(status.status||'idle').trim().toLowerCase()||'idle';
       if(normalizedStatus==='queued'){
         return {key:'queued',label:'Queued',stateClass:'state-queued',title:'Project Play is queued behind another build.'};
@@ -910,7 +947,7 @@
           <button class="ops-btn" type="button" data-ops-action="new-chat" data-project-id="${esc(project.id)}">${svg.chat}<span>Chat</span></button>
           ${settings.showProjectLink===false?'':`<button class="ops-btn" type="button" data-ops-action="open-project" data-project-id="${esc(project.id)}"><span>Project</span></button>`}
           ${renderProjectGitQuickAction(project)}
-          ${renderProjectPlayQuickAction(project)}
+          ${settings.showPlayAction===false?'':renderProjectPlayQuickAction(project)}
           ${renderProjectActivityQuickAction(project)}
         </div>
       `;
@@ -999,7 +1036,6 @@
     }
 
     function renderSessionActivityItem(session,groups){
-      const state=sessionActivityStatus(session);
       const title=formatSessionActivityTitle(session);
       const repoLabel=formatSessionActivityRepoLabel(session);
       const taskText=sessionActivityTaskText(session);
@@ -1007,6 +1043,7 @@
       const sessionKey=sessionActionRefValue(session);
       const hasReadableOutput=session&&session.readableOutputPending===true;
       const projectPlayState=sessionActivityProjectPlayState(session);
+      const activityStatusBadge=sessionActivityCompactStatusBadge(session);
       return `
         <div class="menu-session-activity-item interactive ${hasReadableOutput?'has-readable-output':''}" tabindex="0" role="button" data-ops-action="open-session" data-session-key="${esc(sessionKey)}" data-ops-session-activity-item="true" data-readable-output-pending="${hasReadableOutput?'true':'false'}" data-project-play-state="${esc(projectPlayState&&projectPlayState.key||'')}">
           <div class="menu-session-activity-main">
@@ -1014,7 +1051,7 @@
               <div class="menu-session-activity-copy">
                 <div class="menu-session-activity-title-line">
                   <div class="menu-session-activity-title">${esc(title)}</div>
-                  <span class="menu-session-activity-state state-${esc(state.toneClass||'idle')}" title="${esc(state.title||'')}">${esc(state.labelText||'Quiet')}</span>
+                  ${activityStatusBadge}
                   ${projectPlayState?`<span class="menu-session-activity-badge project-play play-status-badge ${esc(projectPlayState.stateClass)}" title="${esc(projectPlayState.title)}">${esc(projectPlayState.label)}</span>`:''}
                   ${hasReadableOutput?'<span class="menu-session-activity-badge readable-output">Unread output</span>':''}
                 </div>
@@ -1175,10 +1212,38 @@
       }
     }
 
+    function captureLogScrollState(container){
+      const snapshot={};
+      if(!container||typeof container.querySelectorAll!=='function')return snapshot;
+      container.querySelectorAll('[data-ops-log-scroll-key]').forEach(node=>{
+        const key=String(node&&node.dataset&&node.dataset.opsLogScrollKey||'').trim();
+        if(!key)return;
+        const maxScroll=Math.max(0,(node.scrollHeight||0)-(node.clientHeight||0));
+        snapshot[key]={top:Number(node.scrollTop)||0,atBottom:maxScroll-(Number(node.scrollTop)||0)<=8};
+      });
+      return snapshot;
+    }
+
+    function restoreLogScrollState(container,snapshot){
+      if(!container||!snapshot||typeof container.querySelectorAll!=='function')return;
+      const apply=()=>{
+        container.querySelectorAll('[data-ops-log-scroll-key]').forEach(node=>{
+          const key=String(node&&node.dataset&&node.dataset.opsLogScrollKey||'').trim();
+          const entry=key?snapshot[key]:null;
+          if(!entry)return;
+          const maxScroll=Math.max(0,(node.scrollHeight||0)-(node.clientHeight||0));
+          node.scrollTop=entry.atBottom?maxScroll:Math.min(Number(entry.top)||0,maxScroll);
+        });
+      };
+      apply();
+      requestAnimationFrameRef(apply);
+    }
+
     function renderHome(){
       setDashboardTopbar('Menu','');
       const el=root();
       if(!el)return;
+      const logScrollState=captureLogScrollState(el);
       OPS.sessionActivityRenderPending=false;
       ensureSessionActivityAutoRefresh();
       rememberQuickTaskFocus();
@@ -1276,6 +1341,7 @@
           </div>
         </div>
       `;
+      restoreLogScrollState(el,logScrollState);
       restoreQuickTaskFocus();
       focusSessionActivityGroupInput();
     }

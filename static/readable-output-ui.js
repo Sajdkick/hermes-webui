@@ -24,10 +24,23 @@
     return String(sessionLike.session_id||'').trim();
   }
 
-  function readableOutputViewKey(artifact){
+  function readableOutputViewKey(sessionId, artifact){
+    const sid=String(sessionId||'').trim();
     const path=String(artifact&&artifact.path||'').trim();
     const updated=String(artifact&&artifact.updated_at||'').trim();
-    return path||updated ? path+':'+updated : '';
+    return sid && (path||updated) ? sid+':'+path+':'+updated : (path||updated ? path+':'+updated : '');
+  }
+
+  function readableOutputMap(){
+    if(typeof S!=='object' || !S)return null;
+    if(!S.readableOutputBySession || typeof S.readableOutputBySession!=='object')S.readableOutputBySession={};
+    return S.readableOutputBySession;
+  }
+
+  function readableOutputDismissedMap(){
+    if(typeof S!=='object' || !S)return null;
+    if(!S.readableOutputDismissedViewKeysBySession || typeof S.readableOutputDismissedViewKeysBySession!=='object')S.readableOutputDismissedViewKeysBySession={};
+    return S.readableOutputDismissedViewKeysBySession;
   }
 
   function sessionReadableOutputAssetUrl(ref, assetBaseUrl){
@@ -48,8 +61,15 @@
     });
   }
 
-  function clearSessionReadableOutput(){
+  function clearSessionReadableOutput(sessionLike){
     if(typeof S!=='object' || !S)return;
+    const sid=sessionIdFor(sessionLike||S.session);
+    if(sid){
+      const map=readableOutputMap();
+      const dismissed=readableOutputDismissedMap();
+      if(map)delete map[sid];
+      if(dismissed)delete dismissed[sid];
+    }
     S.readableOutput=null;
     S.readableOutputSessionId='';
     S.readableOutputDismissedViewKey='';
@@ -60,14 +80,19 @@
     const host=el('sessionReadableOutputHost');
     if(!host)return;
     const sessionId=sessionIdFor(typeof S==='object' && S ? S.session : null);
-    const artifact=typeof S==='object' && S && S.readableOutputSessionId===sessionId ? S.readableOutput : null;
+    const map=readableOutputMap();
+    const artifact=sessionId && map && Object.prototype.hasOwnProperty.call(map,sessionId)
+      ? map[sessionId]
+      : (typeof S==='object' && S && S.readableOutputSessionId===sessionId ? S.readableOutput : null);
     if(!artifact||(!artifact.exists&&!artifact.error)){
       host.hidden=true;
       host.innerHTML='';
       return;
     }
-    const viewKey=readableOutputViewKey(artifact);
-    if(viewKey && typeof S==='object' && S && S.readableOutputDismissedViewKey===viewKey){
+    const viewKey=readableOutputViewKey(sessionId,artifact);
+    const dismissedMap=readableOutputDismissedMap();
+    const dismissedKey=sessionId && dismissedMap ? dismissedMap[sessionId] : (typeof S==='object' && S ? S.readableOutputDismissedViewKey : '');
+    if(viewKey && dismissedKey===viewKey){
       host.hidden=true;
       host.innerHTML='';
       return;
@@ -101,7 +126,11 @@
 
   function dismissSessionReadableOutput(){
     if(typeof S!=='object' || !S)return;
-    S.readableOutputDismissedViewKey=readableOutputViewKey(S.readableOutput);
+    const sid=sessionIdFor(S.session);
+    const key=readableOutputViewKey(sid,S.readableOutput);
+    const dismissed=readableOutputDismissedMap();
+    if(sid&&dismissed)dismissed[sid]=key;
+    S.readableOutputDismissedViewKey=key;
     renderSessionReadableOutput();
   }
 
@@ -121,10 +150,13 @@
         const message=payload && payload.error ? payload.error : 'Readable output unavailable.';
         throw new Error(message);
       }
+      const readableOutput=(payload&&payload.readableOutput)||{exists:false};
+      const map=readableOutputMap();
+      if(map)map[sid]=readableOutput;
       if(sessionIdFor(S.session)!==sid){
-        return payload && payload.readableOutput ? payload.readableOutput : null;
+        return readableOutput;
       }
-      S.readableOutput=(payload&&payload.readableOutput)||{exists:false};
+      S.readableOutput=readableOutput;
       S.readableOutputSessionId=sid;
       renderSessionReadableOutput();
       return S.readableOutput;
@@ -132,7 +164,10 @@
       if(sessionIdFor(S.session)!==sid){
         return null;
       }
-      S.readableOutput={exists:false,error:error&&error.message?error.message:'Readable output unavailable.'};
+      const errorArtifact={exists:false,error:error&&error.message?error.message:'Readable output unavailable.'};
+      const map=readableOutputMap();
+      if(map)map[sid]=errorArtifact;
+      S.readableOutput=errorArtifact;
       S.readableOutputSessionId=sid;
       renderSessionReadableOutput();
       return null;
@@ -141,6 +176,9 @@
 
   async function reloadSessionReadableOutput(){
     if(typeof S!=='object' || !S)return null;
+    const sid=sessionIdFor(S.session);
+    const dismissed=readableOutputDismissedMap();
+    if(sid&&dismissed)delete dismissed[sid];
     S.readableOutputDismissedViewKey='';
     return loadSessionReadableOutput(S.session);
   }
@@ -151,10 +189,11 @@
       const originalLoadSession=window.loadSession;
       window.loadSession=async function(sid){
         const result=await originalLoadSession.apply(this,arguments);
-        if(typeof S==='object' && S && S.session && sessionIdFor(S.session)===String(sid||'')){
-          try{await loadSessionReadableOutput(sid);}catch(_){}
+        const requestedSid=sessionIdFor(sid);
+        if(typeof S==='object' && S && S.session && sessionIdFor(S.session)===requestedSid){
+          try{await loadSessionReadableOutput(requestedSid);}catch(_){}
         }else{
-          clearSessionReadableOutput();
+          clearSessionReadableOutput(requestedSid);
         }
         return result;
       };

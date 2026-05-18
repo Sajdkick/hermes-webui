@@ -84,11 +84,18 @@
     return play && typeof play === 'object' ? play : {};
   }
 
+  function playCanBuild(play){
+    if(!play||typeof play !== 'object')return false;
+    if(play.canBuild===true||play.buildAvailable===true||play.playBuildAvailable===true)return true;
+    if(play.canBuild===false||play.buildAvailable===false||play.playBuildAvailable===false)return false;
+    return !!((play.configured===true||play.configAvailable===true||play.configExists===true)&&(play.valid===true||play.configValid===true));
+  }
+
   function playButtons(play,state){
     const busy=String(state && state.playBusyAction || '').trim();
     const running=play.running===true || ['queued','building','starting','ready'].includes(String(play.status||'').toLowerCase());
     const ready=play.ready===true;
-    const configured=play.configExists===true && play.valid===true;
+    const configured=playCanBuild(play);
     const buttons=[
       '<button class="ops-shell-link" type="button" data-ops-action="refresh-play">Refresh Play</button>'
     ];
@@ -116,7 +123,7 @@
     return [
       '<div class="ops-runtime-logs-panel">',
       '<div class="ops-runtime-inline-header"><strong>Play logs</strong><button class="ops-shell-link" type="button" data-ops-action="close-play-logs">Close</button></div>',
-      '<pre class="ops-runtime-logs">'+escapeHtml(text)+'</pre>',
+      '<pre class="ops-runtime-logs" data-ops-log-scroll-key="runtime-play-logs:'+(state && state.selectedProjectId ? escapeHtml(state.selectedProjectId) : '')+'">'+escapeHtml(text)+'</pre>',
       '</div>'
     ].join('');
   }

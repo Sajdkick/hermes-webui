@@ -164,7 +164,7 @@ def test_same_session_profile_switch_rebuilds_agent_under_new_soul_home(tmp_path
     monkeypatch.setattr(
         oauth,
         "resolve_runtime_provider_with_anthropic_env_lock",
-        lambda _resolver, requested=None: {
+        lambda _resolver, requested=None, **_kwargs: {
             "provider": requested or "test-provider",
             "api_key": "synthetic-key",
             "base_url": None,

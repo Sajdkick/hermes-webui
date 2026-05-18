@@ -22,14 +22,17 @@
 
   function renderSection(state){
     const items=Array.isArray(state.notifications)?state.notifications:[];
-    const content=state.loadingNotifications
-      ? '<p class="ops-shell-loading">Loading workflow notifications…</p>'
-      : items.length
-        ? '<div class="ops-notification-list">'+items.map(function(item){return renderNotificationCard(item,state);}).join('')+'</div>'
+    const content=items.length
+      ? '<div class="ops-notification-list">'+items.map(function(item){return renderNotificationCard(item,state);}).join('')+'</div>'
+      : state.loadingNotifications
+        ? '<p class="ops-shell-loading">Loading workflow notifications…</p>'
         : '<p class="ops-shell-loading">No pending approval or clarify requests for task-linked sessions.</p>';
+    const headerText=state.loadingNotifications&&items.length
+      ? String(items.length)+' pending · refreshing'
+      : (state.loadingNotifications?'Loading…':String(items.length)+' pending');
     return [
       '<section class="ops-notification-panel">',
-      '<div class="ops-project-column-header"><h2>Workflow Inbox</h2><span>'+escapeHtml(state.loadingNotifications?'Loading…':String(items.length)+' pending')+'</span></div>',
+      '<div class="ops-project-column-header"><h2>Workflow Inbox</h2><span>'+escapeHtml(headerText)+'</span></div>',
       '<div class="ops-notification-toolbar">',
       '<p class="ops-notification-copy">Pending approval and clarify prompts from task-linked Hermes sessions appear here without taking over upstream chat flow.</p>',
       '<button class="ops-shell-link" type="button" data-ops-action="refresh-notifications">Refresh inbox</button>',

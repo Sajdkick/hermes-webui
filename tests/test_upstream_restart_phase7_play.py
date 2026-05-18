@@ -2,6 +2,7 @@ import io
 import json
 import shutil
 import subprocess
+import sys
 import textwrap
 import time
 from pathlib import Path
@@ -147,6 +148,119 @@ def test_phase7_play_config_preference_and_document_routes_are_not_exposed(monke
     assert handle_get(config_doc, urlparse(f"http://example.com/api/ops/projects/{project_id}/play/config")) is False
 
 
+def test_phase7_play_auto_detects_package_scripts_when_config_file_is_missing(monkeypatch, tmp_path, git_available):
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
+    repo = init_project_repo(tmp_path)
+    (repo / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
+    (repo / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "auto-play-project",
+                "private": True,
+                "scripts": {"build": "echo build", "dev": "echo ready"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    from api import ops_projects, play_pipeline
+
+    project = ops_projects.create_ops_project({"name": "Auto Play Project", "path": str(repo), "coreBranch": "main"})
+    with play_pipeline._LOCK:
+        play_pipeline._PIPELINES.clear()
+        play_pipeline._RESERVED_PORTS.clear()
+
+    info = play_pipeline.get_project_play_config_file_info(project["id"])
+    status = play_pipeline.build_project_play_status(project["id"])
+    config = play_pipeline.get_project_play_config(project["id"])
+
+    assert info["exists"] is False
+    assert info["autoDetected"] is True
+    assert info["valid"] is True
+    assert status["configured"] is True
+    assert status["buildAvailable"] is True
+    assert status["canBuild"] is True
+    assert status["configAvailable"] is True
+    assert status["configExists"] is False
+    assert status["configAutoDetected"] is True
+    assert status["buildOnly"] is False
+    assert "Auto-detected Play workflow" in status["statusSummary"]
+    assert config["config"]["build"]["command"] == "pnpm run build"
+    assert config["config"]["start"]["command"] == "pnpm run dev"
+    assert config["config"]["inspect"]["mode"] == "proxy"
+
+
+def test_phase7_play_auto_detects_build_only_package_script(monkeypatch, tmp_path, git_available):
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
+    repo = init_project_repo(tmp_path)
+    (repo / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "build-only-project",
+                "private": True,
+                "scripts": {"build": "echo build"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    from api import ops_notifications, ops_projects, play_pipeline
+    from api.routes import handle_post
+
+    project = ops_projects.create_ops_project({"name": "Build Only Project", "path": str(repo), "coreBranch": "main"})
+    with play_pipeline._LOCK:
+        play_pipeline._PIPELINES.clear()
+        play_pipeline._RESERVED_PORTS.clear()
+
+    info = play_pipeline.get_project_play_config_file_info(project["id"])
+    status = play_pipeline.build_project_play_status(project["id"])
+    config = play_pipeline.get_project_play_config(project["id"])
+
+    assert info["exists"] is False
+    assert info["autoDetected"] is True
+    assert info["valid"] is True
+    assert info["missing"] == []
+    assert info["buildOnly"] is True
+    assert status["configured"] is True
+    assert status["buildAvailable"] is True
+    assert status["canBuild"] is True
+    assert status["configAvailable"] is True
+    assert status["configExists"] is False
+    assert status["buildOnly"] is True
+    assert "package-script build workflow" in status["statusSummary"]
+    assert config["config"]["buildOnly"] is True
+    assert config["config"]["build"]["command"] == "npm run build"
+    assert config["config"]["start"]["command"] == ""
+
+    def fake_run_build_stage(_project_path, _config, state):
+        play_pipeline._append_log(state, stage="build", stream="system", message="Build stage completed successfully.")
+
+    monkeypatch.setattr(play_pipeline, "_run_build_stage", fake_run_build_stage)
+
+    start = _FakeHandler({}, command="POST")
+    assert handle_post(start, urlparse(f"http://example.com/api/ops/projects/{project['id']}/play/start")) is True
+
+    deadline = time.time() + 2
+    built_status = None
+    while time.time() < deadline:
+        built_status = play_pipeline.build_project_play_status(project["id"])
+        if built_status["status"] == "built":
+            break
+        time.sleep(0.05)
+
+    assert built_status is not None
+    assert built_status["status"] == "built"
+    assert built_status["ready"] is False
+    assert built_status["inspectUrl"] is None
+    assert built_status["buildOnly"] is True
+    assert "Package-script build completed" in built_status["statusSummary"]
+
+    payload = ops_notifications.list_pending_notifications(project["id"])
+    play_note = next(item for item in payload["notifications"] if item["kind"] == "play")
+    assert play_note["playStatus"] == "built"
+    assert play_note["playNeedsRepair"] is False
+    assert play_note["playLocked"] is False
+    assert "Package-script build completed" in play_note["message"]
+
+
 def test_phase7_play_start_stop_status_and_logs(monkeypatch, tmp_path, git_available):
     _repo, project_id = setup_project(monkeypatch, tmp_path, valid_proxy_config())
 
@@ -194,6 +308,39 @@ def test_phase7_play_start_stop_status_and_logs(monkeypatch, tmp_path, git_avail
     stop = _FakeHandler({}, command="POST")
     assert handle_post(stop, urlparse(f"http://example.com/api/ops/projects/{project_id}/play/stop")) is True
     assert _response_json(stop)["stopped"] is True
+
+
+def test_phase7_play_build_timeout_fails_locked_notification(monkeypatch, tmp_path, git_available):
+    config = valid_proxy_config()
+    config["build"] = {
+        **config["build"],
+        "command": f"{sys.executable} -c \"import time; time.sleep(3)\"",
+        "timeoutMs": 1000,
+    }
+    _repo, project_id = setup_project(monkeypatch, tmp_path, config)
+
+    from api import ops_notifications, play_pipeline
+    from api.routes import handle_post
+
+    start = _FakeHandler({}, command="POST")
+    assert handle_post(start, urlparse(f"http://example.com/api/ops/projects/{project_id}/play/start")) is True
+
+    deadline = time.time() + 4
+    failed_status = None
+    while time.time() < deadline:
+        failed_status = play_pipeline.build_project_play_status(project_id)
+        if failed_status["status"] == "failed":
+            break
+        time.sleep(0.05)
+
+    assert failed_status is not None
+    assert failed_status["status"] == "failed"
+    assert "Build timeout after 1s" in failed_status["error"]
+    payload = ops_notifications.list_pending_notifications(project_id)
+    play_note = next(item for item in payload["notifications"] if item["kind"] == "play")
+    assert play_note["playStatus"] == "failed"
+    assert play_note["playLocked"] is False
+    assert "Build timeout after 1s" in play_note["playFallbackError"]
 
 
 def test_phase7_ops_notifications_include_play_ready_state(monkeypatch, tmp_path, git_available):
@@ -325,6 +472,33 @@ def test_phase7_play_proxy_dispatch_rewrites_html_and_locations(monkeypatch, tmp
     assert calls[-1][1] == "POST"
 
 
+def test_phase7_play_session_overlay_embeds_simplified_session_view():
+    overlay = (Path(__file__).resolve().parents[1] / "static" / "play-session-overlay.js").read_text(encoding="utf-8")
+    sessions = (Path(__file__).resolve().parents[1] / "static" / "sessions.js").read_text(encoding="utf-8")
+    routes = (Path(__file__).resolve().parents[1] / "api" / "routes.py").read_text(encoding="utf-8")
+    helpers = (Path(__file__).resolve().parents[1] / "api" / "helpers.py").read_text(encoding="utf-8")
+
+    assert "opsSessionInspect" in overlay
+    assert "opsSessionInspectSource" in overlay
+    assert 'href="${escapeHtml(fullSessionUrl)}"' in overlay
+    assert 'src="${escapeHtml(sessionUrl)}"' in overlay
+    assert "requestedByUrl=qs.get('opsSessionInspect')==='1'||qs.get('opsSessionInspect')==='true'" in sessions
+    assert "allow_same_origin_frame=parsed.path.startswith(\"/session/\")" in routes
+    assert "'X-Frame-Options', 'SAMEORIGIN' if allow_same_origin_frame else 'DENY'" in helpers
+
+
+def test_phase7_text_helper_can_allow_same_origin_session_iframe():
+    from api.helpers import t
+
+    denied = _FakeHandler()
+    t(denied, "<html></html>", content_type="text/html; charset=utf-8")
+    assert denied.header("X-Frame-Options") == "DENY"
+
+    allowed = _FakeHandler()
+    t(allowed, "<html></html>", content_type="text/html; charset=utf-8", allow_same_origin_frame=True)
+    assert allowed.header("X-Frame-Options") == "SAMEORIGIN"
+
+
 def test_phase7_play_proxy_forwards_body_already_consumed_by_main_post_route(monkeypatch):
     from api import play_pipeline
     from api.routes_ops_play import handle_post
@@ -444,8 +618,12 @@ def test_phase7_ops_ui_renders_play_panel_and_actions():
                 reviews: { count: 0, reviews: [] },
                 play: {
                   status: 'idle',
-                  statusSummary: 'Play config is ready. Start the pipeline to inspect the app.',
-                  configExists: true,
+                  statusSummary: 'Auto-detected package-script build workflow from package.json. Build the project to verify it.',
+                  configExists: false,
+                  configAvailable: true,
+                  configAutoDetected: true,
+                  buildAvailable: true,
+                  canBuild: true,
                   valid: true,
                   inspectUrl: '',
                   ready: false,

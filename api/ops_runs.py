@@ -475,16 +475,22 @@ def update_ops_run(run_id: str, updates: dict | None = None) -> dict:
     return get_ops_run(str(runs[index].get("id") or ""))
 
 
-def _maybe_start_play_pipeline_for_terminal_run(run: dict, *, previous_status: str = "") -> dict | None:
-    """Start Play automatically when a successful task run has valid Play config."""
+def _maybe_start_play_pipeline_for_terminal_run(run: dict, *, previous_status: str = "", force: bool = False) -> dict | None:
+    """Start Play automatically when a successful task run has valid Play config.
+
+    Normal enrichment/polling only triggers once when a run first transitions to
+    ``succeeded``.  Explicit stream-completion handoffs pass ``force=True`` so a
+    task-linked session that is iterated after its first success rebuilds/restarts
+    Play for the newest files instead of reusing an old ready/built pipeline.
+    """
     status = _status(run.get("status"), default="running")
-    if status != "succeeded" or previous_status == "succeeded":
+    if status != "succeeded" or (previous_status == "succeeded" and not force):
         return
     project_id = _text(run.get("projectId"), limit=128)
     if not project_id:
         return
     metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
-    if metadata.get("playPipelineTriggeredAt"):
+    if metadata.get("playPipelineTriggeredAt") and not force:
         return
     try:
         from api import play_pipeline
@@ -533,6 +539,45 @@ def complete_ops_run(run_id: str, body: dict | None = None) -> dict:
     payload["status"] = status
     payload["completedAt"] = _now_iso()
     return update_ops_run(run_id, payload)
+
+
+def complete_ops_runs_for_session(session_id: str, *, resolved_session_id: str = "", status: str = "succeeded") -> dict:
+    """Mark active Ops runs for a completed session and trigger server-side Play handoff."""
+    session_key = _text(session_id, limit=128)
+    resolved_key = _text(resolved_session_id, limit=128)
+    aliases = {value for value in (session_key, resolved_key) if value}
+    terminal_status = _status(status, default="succeeded")
+    if not aliases or terminal_status not in RUN_TERMINAL_STATUSES:
+        return {"updated": 0, "count": 0, "runs": []}
+    updated_runs: list[tuple[dict, str, bool]] = []
+    with _LOCK:
+        runs = _read_runs()
+        changed = False
+        for index, run in enumerate(runs):
+            if _text(run.get("sessionId"), limit=128) not in aliases:
+                continue
+            previous_status = _status(run.get("status"), default="running")
+            force_play_handoff = terminal_status == "succeeded"
+            if previous_status in RUN_TERMINAL_STATUSES:
+                if previous_status != "succeeded" or terminal_status != "succeeded":
+                    continue
+            next_run = dict(run)
+            now = _now_iso()
+            next_run["status"] = terminal_status
+            next_run["updatedAt"] = now
+            next_run["completedAt"] = now
+            if resolved_key and resolved_key != _text(next_run.get("sessionId"), limit=128):
+                raw_metadata = next_run.get("metadata")
+                metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+                next_run["metadata"] = _json_safe({**metadata, "resolvedSessionId": resolved_key})
+            runs[index] = _normalize_run(next_run)
+            updated_runs.append((runs[index], previous_status, force_play_handoff))
+            changed = True
+        if changed:
+            _write_runs(runs)
+    for run, previous_status, force_play_handoff in updated_runs:
+        _maybe_start_play_pipeline_for_terminal_run(run, previous_status=previous_status, force=force_play_handoff)
+    return {"updated": len(updated_runs), "count": len(updated_runs), "runs": [_text(run.get("id"), limit=128) for run, _, _ in updated_runs]}
 
 
 def mark_stale_ops_runs(body: dict | None = None) -> dict:

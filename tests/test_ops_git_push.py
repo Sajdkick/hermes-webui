@@ -276,6 +276,51 @@ def test_execute_project_push_promotes_not_synced_tasks_after_success(monkeypatc
     assert tasks[1]["qaStatus"] == "not-synced"
 
 
+def test_execute_project_push_ignores_cloud_terminal_artifacts_during_auto_commit(monkeypatch, tmp_path, git_available):
+    remote = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True, text=True)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    _git(repo, "checkout", "-b", "main")
+    (repo / ".gitignore").write_text(".cloud-terminal/\n", encoding="utf-8")
+    (repo / "README.md").write_text("initial\n", encoding="utf-8")
+    _git(repo, "add", ".gitignore", "README.md")
+    _git(repo, "commit", "-m", "initial")
+    _git(repo, "remote", "add", "origin", str(remote))
+    _git(repo, "push", "-u", "origin", "main")
+
+    (repo / "README.md").write_text("initial\nlocal change\n", encoding="utf-8")
+    artifact_path = repo / ".cloud-terminal" / "readable-output" / "session-1"
+    artifact_path.mkdir(parents=True, exist_ok=True)
+    (artifact_path / "message.md").write_text("runtime note\n", encoding="utf-8")
+
+    project = {"id": "project-1", "resolvedPath": str(repo), "coreBranch": "main"}
+    monkeypatch.setattr(ops_git.ops_projects, "get_ops_project", lambda project_id: project)
+
+    operation = ops_git.execute_project_git_operation(
+        "project-1",
+        "push",
+        {"confirm": "push", "message": "Auto commit without runtime artifacts"},
+    )
+
+    assert operation["status"] == "succeeded"
+    assert "Committed local changes." in operation["summary"]
+    assert _git(repo, "log", "-1", "--format=%s") == "Auto commit without runtime artifacts"
+    assert "README.md" in _git(repo, "show", "--name-only", "--format=", "HEAD").splitlines()
+    assert ".cloud-terminal/readable-output/session-1/message.md" not in _git(
+        repo,
+        "show",
+        "--name-only",
+        "--format=",
+        "HEAD",
+    ).splitlines()
+    assert _git(remote, "rev-parse", "refs/heads/main") == _git(repo, "rev-parse", "HEAD")
+
+
 def test_get_project_git_status_ignores_cloud_terminal_runtime_artifacts(monkeypatch, tmp_path, git_available):
     repo = tmp_path / "repo"
     repo.mkdir()

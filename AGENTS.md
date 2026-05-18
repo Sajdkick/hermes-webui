@@ -66,3 +66,22 @@ python3 bootstrap.py
 
 Do not include private machine instructions in this tracked file. Use a
 git-ignored local note for personal workflow details.
+
+<!-- cloud-terminal:shared-instructions:start -->
+When working in the project you might run into messy code or bugs that are unrelated to your current task. If you do, add a follow-up task to the project_tasks/<branch>.json file so we can fix it in the future. If you cannot find a suitable epic for the new task, create a new epic.
+
+When adding follow-up tasks, keep them as new tasks in ready status:
+- set "done": false
+- leave "qaStatus" unset
+- leave "inProgress" unset
+- do not set "sessionId" or "lastSessionAt"
+- never set newly created tasks to "ready-for-test"
+
+Mark AI-generated epics and tasks by adding a "markers" array containing "AI suggestion".
+If the epic or task already has markers, append "AI suggestion" without removing existing entries.
+Examples:
+- Epic: "markers": ["AI suggestion"]
+- Task: "markers": ["AI suggestion"]
+
+Always use the readable output skill when outputting text.
+<!-- cloud-terminal:shared-instructions:end -->

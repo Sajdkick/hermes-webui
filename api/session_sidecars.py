@@ -70,6 +70,39 @@ def _session_sort_key(summary: dict[str, Any] | None) -> float:
     return 0.0
 
 
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _canonical_session_rank(summary: dict[str, Any] | None) -> tuple[int, int, float, float, str]:
+    """Rank lineage candidates by transcript currency, not sidebar visibility.
+
+    Ops task links are durable references to a conversation lineage. A completed
+    or closed task can archive the current tip to hide it from the normal sidebar,
+    while older sibling continuations remain unarchived. If sidecar resolution
+    prefers non-archived rows first, task resume/open actions can jump back to an
+    older root/sibling and make the conversation look like it lost messages.
+    """
+    if not isinstance(summary, dict):
+        return (0, 0, 0.0, 0.0, "")
+    session_id = str(summary.get("session_id") or "").strip()
+    lineage_tip_id = str(summary.get("_lineage_tip_id") or "").strip()
+    continuation_tip = bool(
+        summary.get("parent_session_id")
+        or (lineage_tip_id and lineage_tip_id == session_id)
+    )
+    return (
+        1 if continuation_tip else 0,
+        _safe_int(summary.get("message_count")),
+        _session_sort_key(summary),
+        float(summary.get("updated_at") or 0.0),
+        session_id,
+    )
+
+
 def _session_aliases(summary: dict[str, Any] | None) -> set[str]:
     aliases: set[str] = set()
     if not isinstance(summary, dict):
@@ -103,14 +136,7 @@ def resolve_session_summary(session_id: str) -> dict[str, Any] | None:
 
     if not candidates:
         return None
-    return max(
-        candidates.values(),
-        key=lambda session: (
-            0 if session.get("archived") else 1,
-            _session_sort_key(session),
-            str(session.get("session_id") or ""),
-        ),
-    )
+    return max(candidates.values(), key=_canonical_session_rank)
 
 
 def resolve_session_id(session_id: str) -> str | None:
@@ -180,6 +206,40 @@ def set_session_linkage(session_id: str, project_id: str, task_id: str | None = 
     }
     _write_json(_sidecar_path(key), payload)
     return get_session_linkage(key)
+
+
+def inherit_session_linkage(source_session_id: str, target_session_id: str) -> dict[str, Any] | None:
+    """Copy an Ops/task sidecar from a rotated parent segment to its continuation.
+
+    Context compression changes the WebUI session id. Without a sidecar for the
+    new id, every Ops resume/open path keeps resolving from the original root and
+    can later choose a stale sibling. Stamping the continuation gives future
+    task linkage an explicit handle for the current segment while preserving the
+    original root sidecar as an alias.
+    """
+    from api import ops_projects
+
+    source_key = _validate_session_id(source_session_id)
+    target_key = _validate_session_id(target_session_id)
+    if source_key == target_key:
+        return get_session_linkage(target_key)
+    if not _session_summary(target_key):
+        return None
+    source = _read_json(_sidecar_path(source_key))
+    if not source:
+        return None
+    existing = _read_json(_sidecar_path(target_key)) or {}
+    payload = {
+        "sessionId": target_key,
+        "projectId": source.get("projectId"),
+        "taskId": source.get("taskId"),
+        "runId": source.get("runId"),
+        "linkedAt": existing.get("linkedAt") or source.get("linkedAt") or ops_projects._now_iso(),
+        "updatedAt": ops_projects._now_iso(),
+        "inheritedFromSessionId": source_key,
+    }
+    _write_json(_sidecar_path(target_key), payload)
+    return get_session_linkage(target_key)
 
 
 def list_project_linkage_records(project_id: str) -> list[dict[str, Any]]:

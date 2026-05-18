@@ -739,6 +739,7 @@
       clearPersistedSessionId:typeof clearPersistedSessionId==='function'?clearPersistedSessionId:null,
       sendTurn:typeof send==='function'?send:null,
       autoResize:typeof autoResize==='function'?autoResize:null,
+      enterOpsSessionInspectMode:typeof enterOpsSessionInspectMode==='function'?enterOpsSessionInspectMode:null,
       clearQuickTaskImages:()=>clearQuickTaskImages(),
       taskExecutionPreface:TASK_EXECUTION_PREFACE,
       taskExecutionInstructions:TASK_EXECUTION_INSTRUCTIONS,

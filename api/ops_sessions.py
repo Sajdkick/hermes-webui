@@ -6,6 +6,8 @@ from pathlib import Path
 from datetime import datetime, timezone
 from urllib.parse import quote
 
+import logging
+
 import yaml
 
 from api.config import get_effective_default_model
@@ -15,6 +17,7 @@ from api.models import all_sessions, get_session, new_session
 
 OPS_TASK_SOURCE_TAG = "ops_task"
 OPS_TASK_SOURCE_LABEL = "Ops task"
+logger = logging.getLogger(__name__)
 
 
 class OpsSessionError(Exception):
@@ -58,6 +61,18 @@ def _session_aliases(session: dict | None) -> set[str]:
         value = str(session.get(field) or "").strip()
         if value:
             aliases.add(value)
+    return aliases
+
+
+def _linkage_aliases(linkage: dict | None) -> set[str]:
+    aliases: set[str] = set()
+    if not isinstance(linkage, dict):
+        return aliases
+    for field in ("sessionId", "linkedSessionId", "lineageRootId", "lineageTipId"):
+        value = str(linkage.get(field) or "").strip()
+        if value:
+            aliases.add(value)
+    aliases.update(_session_aliases(linkage.get("session") if isinstance(linkage.get("session"), dict) else None))
     return aliases
 
 
@@ -232,6 +247,72 @@ def project_session_defaults(project: dict) -> tuple[str | None, str | None]:
     return _project_session_defaults(project)
 
 
+def _load_linked_session_for_launch(linkage: dict | None):
+    if not isinstance(linkage, dict):
+        return None
+    session_id = str(linkage.get("sessionId") or linkage.get("linkedSessionId") or "").strip()
+    summary = linkage.get("session") if isinstance(linkage.get("session"), dict) else None
+    if summary:
+        session_id = str(summary.get("session_id") or session_id).strip()
+    if not session_id:
+        return None
+    try:
+        session = get_session(session_id)
+    except KeyError:
+        return None
+    if str(session.source_tag or "").strip() != OPS_TASK_SOURCE_TAG:
+        return None
+    return session
+
+
+def _find_existing_task_session(project_id: str, task_id: str):
+    try:
+        linkages = session_sidecars.task_linkage_map(project_id).get(str(task_id or "").strip(), [])
+    except Exception:
+        linkages = []
+    seen_linkage_sessions = {
+        str(linkage.get("sessionId") or linkage.get("linkedSessionId") or "").strip()
+        for linkage in linkages
+        if isinstance(linkage, dict)
+    }
+    try:
+        task = ops_projects.get_ops_project_task(project_id, task_id).get("task")
+    except Exception:
+        task = None
+    if isinstance(task, dict):
+        for linkage in task.get("linkedSessions") or []:
+            if not isinstance(linkage, dict):
+                continue
+            session_id = str(linkage.get("sessionId") or linkage.get("linkedSessionId") or "").strip()
+            if not session_id or session_id in seen_linkage_sessions:
+                continue
+            linkages.append(linkage)
+            seen_linkage_sessions.add(session_id)
+    candidates = []
+    for linkage in linkages:
+        session = _load_linked_session_for_launch(linkage)
+        if not session:
+            continue
+        candidates.append((linkage, session))
+    if not candidates:
+        return None
+    candidates.sort(
+        key=lambda item: _ops_task_session_rank(item[1].compact()),
+        reverse=True,
+    )
+    linkage, session = candidates[0]
+    run = None
+    run_id = str((linkage or {}).get("runId") or "").strip()
+    if run_id:
+        try:
+            from api import ops_runs
+
+            run = ops_runs.get_ops_run(run_id)
+        except Exception:
+            run = None
+    return {"linkage": linkage, "session": session, "run": run}
+
+
 def _session_is_activity_linkage_candidate(session: dict) -> bool:
     if not isinstance(session, dict) or session.get("archived"):
         return False
@@ -244,6 +325,68 @@ def _session_is_activity_linkage_candidate(session: dict) -> bool:
     if str(session.get("project_id") or session.get("ops_project_id") or session.get("projectId") or "").strip():
         return True
     return False
+
+
+def _ops_task_dedupe_key(session: dict) -> tuple[str, str] | None:
+    project_id = str(session.get("ops_project_id") or session.get("projectId") or session.get("project_id") or "").strip()
+    task_id = str(session.get("ops_task_id") or session.get("opsTaskId") or "").strip()
+    if not project_id or not task_id:
+        return None
+    return project_id, task_id
+
+
+def _safe_int(value) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _ops_task_session_rank(session: dict) -> tuple[int, int, int, float, float, str]:
+    active = bool(
+        session.get("waitingForApproval")
+        or session.get("waitingForInput")
+        or session.get("is_streaming")
+        or session.get("active_stream_id")
+        or session.get("pending_user_message")
+        or session.get("has_pending_user_message")
+    )
+    session_id = str(session.get("session_id") or "").strip()
+    lineage_tip_id = str(session.get("_lineage_tip_id") or "").strip()
+    is_continuation_tip = bool(
+        session.get("parent_session_id")
+        or (lineage_tip_id and lineage_tip_id == session_id)
+    )
+    # `lastActivityAt` can come from the shared Ops run, so sibling root/tip
+    # entries for the same task may have an identical run timestamp. Prefer the
+    # actual conversation recency and continuation/tip shape before falling back
+    # to run-level activity; otherwise a touched root session can hide the newer
+    # compressed/branched continuation that contains the latest user messages.
+    return (
+        1 if active else 0,
+        1 if is_continuation_tip else 0,
+        _safe_int(session.get("message_count")),
+        _epoch_seconds(session.get("last_message_at")),
+        float(session.get("lastActivityAt") or 0.0) or _session_sort_key(session),
+        session_id,
+    )
+
+
+def _dedupe_ops_task_sessions(sessions: list[dict]) -> list[dict]:
+    """Keep only the current visible Ops task session for each project/task pair."""
+    selected: dict[tuple[str, str], dict] = {}
+    passthrough: list[dict] = []
+    for session in sessions:
+        key = _ops_task_dedupe_key(session)
+        if not key:
+            passthrough.append(session)
+            continue
+        current = selected.get(key)
+        if not current or _ops_task_session_rank(session) > _ops_task_session_rank(current):
+            selected[key] = session
+    deduped = [*passthrough, *selected.values()]
+    deduped.sort(key=_session_sort_key, reverse=True)
+    return deduped
 
 
 def list_ops_sessions(project_id: str | None = None, activity_only: bool = False) -> dict:
@@ -288,12 +431,7 @@ def list_ops_sessions(project_id: str | None = None, activity_only: bool = False
             for linkage in task.get("linkedSessions") or []:
                 if not isinstance(linkage, dict):
                     continue
-                aliases = {
-                    str(linkage.get("sessionId") or "").strip(),
-                    str(linkage.get("linkedSessionId") or "").strip(),
-                }
-                aliases.update(_session_aliases(linkage.get("session") if isinstance(linkage.get("session"), dict) else None))
-                aliases = {value for value in aliases if value}
+                aliases = _linkage_aliases(linkage)
                 if activity_candidate_aliases is not None and not (aliases & activity_candidate_aliases):
                     continue
                 task_linkages.append((task, linkage, aliases))
@@ -307,14 +445,20 @@ def list_ops_sessions(project_id: str | None = None, activity_only: bool = False
             try:
                 from api import ops_runs
 
-                for run_id in needed_run_ids:
-                    try:
-                        run = ops_runs.get_ops_run(run_id)
-                    except Exception:
-                        continue
-                    normalized_run_id = str((run or {}).get("id") or "").strip()
-                    if normalized_run_id:
-                        run_by_id[normalized_run_id] = run
+                if activity_only:
+                    for run in ops_runs.list_ops_runs({"projectId": pid}).get("runs") or []:
+                        normalized_run_id = str((run or {}).get("id") or "").strip()
+                        if normalized_run_id in needed_run_ids:
+                            run_by_id[normalized_run_id] = run
+                else:
+                    for run_id in needed_run_ids:
+                        try:
+                            run = ops_runs.get_ops_run(run_id)
+                        except Exception:
+                            continue
+                        normalized_run_id = str((run or {}).get("id") or "").strip()
+                        if normalized_run_id:
+                            run_by_id[normalized_run_id] = run
             except Exception:
                 run_by_id = {}
         for task, linkage, aliases in task_linkages:
@@ -357,7 +501,7 @@ def list_ops_sessions(project_id: str | None = None, activity_only: bool = False
     groups = []
     for project in projects:
         pid = str(project.get("id") or "").strip()
-        sessions = sorted(grouped_sessions.get(pid, []), key=_session_sort_key, reverse=True)
+        sessions = _dedupe_ops_task_sessions(sorted(grouped_sessions.get(pid, []), key=_session_sort_key, reverse=True))
         if not sessions:
             continue
         waiting_count = sum(1 for session in sessions if session.get("waitingForApproval") or session.get("waitingForInput"))
@@ -398,6 +542,41 @@ def launch_task_session(project_id: str, task_id: str, body: dict | None = None)
     resolved = ops_projects.get_ops_project_task(project_id, task_id)
     project = resolved["project"]
     task = resolved["task"]
+    existing = _find_existing_task_session(project["id"], task["id"])
+    if existing:
+        session = existing["session"]
+        if getattr(session, "archived", False):
+            session.archived = False
+            session.save(touch_updated_at=False)
+        task_update = ops_projects.update_ops_project_task(
+            project["id"],
+            task["id"],
+            {
+                "inProgress": True,
+                "sessionId": session.session_id,
+                "startedAt": str(task.get("startedAt") or "").strip() or ops_projects._now_iso(),
+                "lastSessionAt": ops_projects._now_iso(),
+            },
+        )["task"]
+        run_url = ""
+        if existing.get("run"):
+            try:
+                from api import ops_runs
+
+                run_url = ops_runs.run_url(str(existing["run"].get("id") or ""))
+            except Exception:
+                run_url = ""
+        return {
+            "project": project,
+            "task": task_update,
+            "session": session.compact() | {"messages": session.messages},
+            "sessionUrl": session_url(session.session_id),
+            "linkage": existing["linkage"],
+            "run": existing.get("run"),
+            "runUrl": run_url,
+            "reused": True,
+        }
+
     requested_profile = _payload_profile(body)
     profile = requested_profile or _project_profile(project)
     model, model_provider = _payload_session_defaults(body)
@@ -433,6 +612,7 @@ def launch_task_session(project_id: str, task_id: str, body: dict | None = None)
         task["id"],
         {
             "inProgress": True,
+            "sessionId": session.session_id,
             "startedAt": str(task.get("startedAt") or "").strip() or ops_projects._now_iso(),
             "lastSessionAt": ops_projects._now_iso(),
         },
@@ -446,6 +626,75 @@ def launch_task_session(project_id: str, task_id: str, body: dict | None = None)
         "run": run,
         "runUrl": ops_runs.run_url(str(run.get("id") or "")),
     }
+
+
+def _requested_close_aliases(session_id: str) -> set[str]:
+    aliases = {str(session_id or "").strip()}
+    aliases = {alias for alias in aliases if alias}
+    if not aliases:
+        return set()
+    try:
+        aliases.update(_session_aliases(session_sidecars.resolve_session_summary(session_id)))
+    except Exception:
+        pass
+    try:
+        for session in all_sessions():
+            if not isinstance(session, dict):
+                continue
+            if str(session.get("session_id") or "").strip() != session_id:
+                continue
+            aliases.update(_session_aliases(session))
+            break
+    except Exception:
+        pass
+    return {alias for alias in aliases if alias}
+
+
+def _task_close_target_session_ids(project_id: str, requested_session_id: str, selected_linkage: dict | None) -> list[str]:
+    project_key = str(project_id or "").strip()
+    target_aliases: set[str] = set()
+    ordered: list[str] = []
+
+    def add(session_id: str | None) -> None:
+        sid = str(session_id or "").strip()
+        if sid and sid not in ordered:
+            ordered.append(sid)
+
+    if requested_session_id:
+        add(requested_session_id)
+        target_aliases.update(_requested_close_aliases(requested_session_id))
+        try:
+            resolved_id = session_sidecars.resolve_session_id(requested_session_id)
+        except Exception:
+            resolved_id = None
+        add(resolved_id)
+        if resolved_id:
+            target_aliases.add(resolved_id)
+
+    if selected_linkage:
+        target_aliases.update(_linkage_aliases(selected_linkage))
+        linkage_summary = selected_linkage.get("session") if isinstance(selected_linkage.get("session"), dict) else None
+        add(str((linkage_summary or {}).get("session_id") or selected_linkage.get("sessionId") or "").strip())
+
+    if target_aliases:
+        try:
+            for session in all_sessions():
+                if not isinstance(session, dict) or session.get("archived"):
+                    continue
+                sid = str(session.get("session_id") or "").strip()
+                if not sid:
+                    continue
+                if str(session.get("source_tag") or "").strip() != OPS_TASK_SOURCE_TAG:
+                    continue
+                session_project_id = str(session.get("project_id") or session.get("ops_project_id") or session.get("projectId") or "").strip()
+                if project_key and session_project_id and session_project_id != project_key:
+                    continue
+                if _session_aliases(session) & target_aliases:
+                    add(sid)
+        except Exception:
+            pass
+
+    return ordered
 
 
 def close_task_session(project_id: str, task_id: str, body: dict | None = None) -> dict:
@@ -466,38 +715,64 @@ def close_task_session(project_id: str, task_id: str, body: dict | None = None) 
 
     linkages = list(target_task.get("linkedSessions") or [])
     selected_linkage = None
+    requested_aliases = _requested_close_aliases(requested_session_id) if requested_session_id else set()
     if requested_session_id:
         for linkage in linkages:
-            aliases = {
-                str(linkage.get("sessionId") or "").strip(),
-                str(linkage.get("linkedSessionId") or "").strip(),
-            }
-            aliases.update(_session_aliases(linkage.get("session") if isinstance(linkage.get("session"), dict) else None))
-            if requested_session_id in aliases:
+            aliases = _linkage_aliases(linkage)
+            if requested_session_id in aliases or bool(aliases & requested_aliases):
                 selected_linkage = linkage
                 break
-    if not selected_linkage and linkages:
+    if not selected_linkage and linkages and not requested_session_id:
         selected_linkage = linkages[0]
 
-    resolved_session_id = str((selected_linkage or {}).get("sessionId") or "").strip()
-    if not resolved_session_id and requested_session_id:
-        resolved_session_id = session_sidecars.resolve_session_id(requested_session_id) or requested_session_id
-    if not resolved_session_id:
+    target_session_ids = _task_close_target_session_ids(project_id, requested_session_id, selected_linkage)
+    if not target_session_ids:
         raise OpsSessionError("Session not found.", 404)
 
-    try:
-        session = get_session(resolved_session_id)
-    except KeyError as exc:
-        raise OpsSessionError("Session not found.", 404) from exc
+    cancelled_stream = False
+    closed_session_ids: list[str] = []
+    for target_session_id in target_session_ids:
+        try:
+            session = get_session(target_session_id)
+        except KeyError:
+            continue
 
-    session.archived = True
-    session.save(touch_updated_at=False)
+        active_stream_id = str(getattr(session, "active_stream_id", None) or "").strip()
+        session_stream_cancelled = False
+        if active_stream_id:
+            try:
+                from api.streaming import cancel_stream
+
+                session_stream_cancelled = bool(cancel_stream(active_stream_id))
+                cancelled_stream = cancelled_stream or session_stream_cancelled
+                session = get_session(target_session_id)
+            except Exception:
+                logger.debug(
+                    "Failed to cancel stream %s while closing ops task session %s",
+                    active_stream_id,
+                    target_session_id,
+                    exc_info=True,
+                )
+
+        session.archived = True
+        if active_stream_id and not session_stream_cancelled and getattr(session, "active_stream_id", None) == active_stream_id:
+            session.active_stream_id = None
+            session.pending_user_message = None
+            session.pending_attachments = None
+            session.pending_started_at = None
+        session.save(touch_updated_at=False)
+        closed_session_ids.append(target_session_id)
+
+    if not closed_session_ids:
+        raise OpsSessionError("Session not found.", 404)
+    primary_session_id = closed_session_ids[0]
 
     updated_task = ops_projects.update_ops_project_task(
         project_id,
         task_id,
         {
             "inProgress": False,
+            "sessionId": "",
             "lastSessionAt": ops_projects._now_iso(),
         },
     )["task"]
@@ -521,8 +796,10 @@ def close_task_session(project_id: str, task_id: str, body: dict | None = None) 
 
     return {
         "ok": True,
-        "sessionId": resolved_session_id,
-        "sessionUrl": session_url(resolved_session_id),
+        "sessionId": primary_session_id,
+        "closedSessionIds": closed_session_ids,
+        "sessionUrl": session_url(primary_session_id),
+        "cancelledStream": cancelled_stream,
         "task": updated_task,
         "run": run,
     }
@@ -547,6 +824,8 @@ def complete_task_session(project_id: str, task_id: str, body: dict | None = Non
             "done": True,
             "qaStatus": "",
             "moreWork": "",
+            "sessionId": "",
+            "lastSessionAt": "",
             "inProgress": False,
             "completedAt": ops_projects._now_iso(),
         },

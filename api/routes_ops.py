@@ -44,6 +44,8 @@ def handle_get(handler, parsed) -> bool:
 
 
 def handle_post(handler, parsed, body: dict) -> bool:
+    if routes_ops_shell.handle_post(handler, parsed, body):
+        return True
     if routes_ops_notifications.handle_post(handler, parsed, body):
         return True
     if routes_ops_github.handle_post(handler, parsed, body):

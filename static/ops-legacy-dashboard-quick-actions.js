@@ -21,19 +21,25 @@
       return {};
     }
 
+    function playStatusCanBuild(status){
+      if(!status)return false;
+      if(status.canBuild===true||status.buildAvailable===true||status.playBuildAvailable===true)return true;
+      if(status.canBuild===false||status.buildAvailable===false||status.playBuildAvailable===false)return false;
+      return !!(status&&(status.configAvailable===true||status.configExists===true||status.configured===true)&&(status.configValid===true||status.valid===true));
+    }
+
     function renderProjectPlayQuickAction(project){
       if(!project||!project.id)return '';
       const status=playStatusFor(project.id);
       const busy=String(OPS.playBusyByProject[project.id]||'').trim();
       const state=String(status&&status.status||'idle').toLowerCase();
-      const configured=!!(status&&(status.configAvailable===true||status.configExists===true||status.configured===true));
-      const valid=!!(status&&(status.configValid===true||status.valid===true));
+      const canBuild=playStatusCanBuild(status);
       let action='start-play';
       let label='Build';
       let title=playStatusTitle(status);
       let disabled=true;
       let primary=false;
-      if(configured&&valid){
+      if(canBuild){
         if(status.ready&&status.inspectUrl){
           action='open-play';
           label='Play';

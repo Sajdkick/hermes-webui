@@ -15,12 +15,26 @@
     }
   }
 
+  function sessionInspectUrl(path){
+    const href=appUrl(path);
+    try{
+      const url=new URL(href, window.location.origin);
+      url.searchParams.set('opsSessionInspect','1');
+      url.searchParams.set('opsSessionInspectSource','play');
+      return url.href;
+    }catch(_error){
+      const separator=href.indexOf('?')>=0?'&':'?';
+      return href+separator+'opsSessionInspect=1&opsSessionInspectSource=play';
+    }
+  }
+
   const sessionId=text(script.dataset.hermesPlaySessionId);
   if(!sessionId)return;
   const projectId=text(script.dataset.hermesPlayProjectId);
   const taskId=text(script.dataset.hermesPlayTaskId);
   const runId=text(script.dataset.hermesPlayRunId);
-  const sessionUrl=appUrl(script.dataset.hermesPlaySessionUrl||('/session/'+encodeURIComponent(sessionId)));
+  const fullSessionUrl=appUrl(script.dataset.hermesPlaySessionUrl||('/session/'+encodeURIComponent(sessionId)));
+  const sessionUrl=sessionInspectUrl(fullSessionUrl);
   const storageKey='hermes-play-session-overlay:'+[projectId,runId,taskId,sessionId].filter(Boolean).join(':');
 
   function escapeHtml(value){
@@ -102,7 +116,7 @@
             <span>${escapeHtml(summary||sessionId)}</span>
           </div>
           <div class="hermes-play-session-actions">
-            <a class="hermes-play-session-action open-label" href="${escapeHtml(sessionUrl)}" target="_blank" rel="noopener noreferrer">Open full</a>
+            <a class="hermes-play-session-action open-label" href="${escapeHtml(fullSessionUrl)}" target="_blank" rel="noopener noreferrer">Open full</a>
             <button class="hermes-play-session-action" type="button" data-hermes-play-collapse>Hide</button>
           </div>
         </div>

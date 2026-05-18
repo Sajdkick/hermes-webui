@@ -27,6 +27,7 @@ LEGACY_PLAY_FILE_NAME = "project_play.json"
 MODERN_PLAY_FILE_NAME = ".cloud-terminal/play.json"
 HERMES_PLAY_FILE_NAME = ".hermes/play.json"
 PLAY_LOG_LINE_LIMIT = 1000
+PLAY_BUILD_TIMEOUT_DEFAULT_MS = 30 * 60 * 1000
 PLAY_READY_TIMEOUT_DEFAULT_MS = 10 * 60 * 1000
 PLAY_READY_PATTERN = re.compile(r"(ready|listening|started|compiled|server running|running at)", re.I)
 PLAY_PROJECT_PROXY_BASE_PATH = "/play-project"
@@ -83,6 +84,18 @@ class PlayPipelineState:
     allocated_port_host: str | None = None
     allocated_port_env_var: str | None = None
     logs: list[dict] = field(default_factory=list)
+    repair_requested_at: str | None = None
+    repair_stream_id: str | None = None
+    repair_error: str | None = None
+
+
+_BUILD_FAILURE_REPAIR_HANDLER = None
+
+
+def register_build_failure_repair_handler(handler) -> None:
+    """Register the WebUI session-turn handoff for failed Play builds."""
+    global _BUILD_FAILURE_REPAIR_HANDLER
+    _BUILD_FAILURE_REPAIR_HANDLER = handler if callable(handler) else None
 
 
 def _now_iso() -> str:
@@ -142,6 +155,101 @@ def _last_log_line(logs: list[dict] | None) -> str:
         if message:
             return message[:500]
     return ""
+
+
+def _redact_repair_log_text(value: str, *, limit: int = 60000) -> str:
+    text = str(value or "")[:limit]
+    if not text:
+        return ""
+    try:
+        from api.helpers import _redact_text
+
+        text = _redact_text(text)
+    except Exception:
+        pass
+    text = re.sub(r"(?i)(password|passwd|token|api[_-]?key|secret|authorization|cookie)(\s*[:=]\s*)([^\s'\"]+)", r"\1\2[REDACTED]", text)
+    text = re.sub(r"(?i)(bearer\s+)[a-z0-9._~+/-]+=*", r"\1[REDACTED]", text)
+    return text[:limit]
+
+
+def _play_build_failure_repair_prompt(state: PlayPipelineState, message: str) -> str:
+    logs = "\n".join(_format_log(entry) for entry in list(state.logs)[-200:])
+    logs = _redact_repair_log_text(logs) or "(no build logs captured)"
+    context = []
+    if state.run_id:
+        context.append(f"Run: {state.run_id}")
+    if state.task_id:
+        context.append(f"Task: {state.task_id}")
+    if state.project_id:
+        context.append(f"Project: {state.project_id}")
+    context_text = "\n".join(context)
+    if context_text:
+        context_text = f"\n\n{context_text}"
+    reason = _redact_repair_log_text(message, limit=4000) or "Play build failed."
+    return (
+        "The build failed, these are the logs, analyze them and fix the issue."
+        f"{context_text}\n\nFailure reason: {reason}\n\n"
+        "Logs:\n```text\n"
+        f"{logs}\n"
+        "```"
+    )
+
+
+def _resolve_build_failure_repair_handler():
+    if callable(_BUILD_FAILURE_REPAIR_HANDLER):
+        return _BUILD_FAILURE_REPAIR_HANDLER
+    try:
+        from api import routes
+
+        handler = getattr(routes, "start_play_build_failure_repair_turn", None)
+        return handler if callable(handler) else None
+    except Exception:
+        return None
+
+
+def _request_build_failure_repair(state: PlayPipelineState, message: str) -> None:
+    session_id = str(state.session_id or "").strip()
+    if not session_id:
+        return
+    with _LOCK:
+        if state.repair_requested_at:
+            return
+    handler = _resolve_build_failure_repair_handler()
+    if not callable(handler):
+        with _LOCK:
+            state.repair_error = "No session repair handler is registered."
+        _append_log(state, stage="system", stream="stderr", message="Could not send build failure logs back to session: no repair handler is registered.")
+        return
+    prompt = _play_build_failure_repair_prompt(state, message)
+    metadata = {
+        "projectId": state.project_id,
+        "runId": state.run_id or "",
+        "taskId": state.task_id or "",
+        "pipelineId": state.pipeline_id,
+        "reason": message,
+    }
+    try:
+        result = handler(session_id, prompt, metadata)
+    except Exception as exc:
+        with _LOCK:
+            state.repair_error = str(exc) or exc.__class__.__name__
+        _append_log(state, stage="system", stream="stderr", message=f"Could not send build failure logs back to session: {state.repair_error}")
+        return
+    if isinstance(result, dict) and result.get("ok") is False:
+        error_text = str(result.get("error") or "Session repair handoff failed.")
+        with _LOCK:
+            state.repair_error = error_text
+        _append_log(state, stage="system", stream="stderr", message=f"Could not send build failure logs back to session: {error_text}")
+        return
+    stream_id = str((result or {}).get("stream_id") or (result or {}).get("streamId") or "").strip() if isinstance(result, dict) else ""
+    now = _now_iso()
+    with _LOCK:
+        state.repair_requested_at = now
+        state.repair_stream_id = stream_id or None
+        state.repair_error = None
+        state.updated_at = time.time()
+    suffix = f" (stream {stream_id})" if stream_id else ""
+    _append_log(state, stage="system", stream="stdout", message=f"Sent build failure logs back to session for automatic repair{suffix}.")
 
 
 def _mark_state(
@@ -244,6 +352,14 @@ def _normalize_ready_timeout_ms(value: Any) -> int:
     return max(5000, min(30 * 60 * 1000, parsed))
 
 
+def _normalize_build_timeout_ms(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        parsed = PLAY_BUILD_TIMEOUT_DEFAULT_MS
+    return max(1000, min(6 * 60 * 60 * 1000, parsed))
+
+
 def normalize_play_config(payload: dict, project_path: Path) -> dict:
     source = payload if isinstance(payload, dict) else {}
     build_section = source.get("build") if isinstance(source.get("build"), dict) else {}
@@ -258,13 +374,16 @@ def normalize_play_config(payload: dict, project_path: Path) -> dict:
     )
     inspect_mode = _normalize_inspect_mode(inspect_section.get("mode") or source.get("inspectMode"))
     start_port_mode = "auto" if str(port_section.get("mode") or "").strip().lower() == "auto" else "fixed"
+    build_only = bool(source.get("buildOnly") is True or source.get("build_only") is True)
 
     config = {
         "version": int(source.get("version") or 2),
+        "buildOnly": build_only,
         "build": {
             "command": _normalize_command(build_section.get("command") or source.get("buildCommand")),
             "cwd": _normalize_relative_cwd(build_section.get("cwd") or source.get("buildCwd")),
             "env": _normalize_env(build_section.get("env") or source.get("buildEnv")),
+            "timeoutMs": _normalize_build_timeout_ms(build_section.get("timeoutMs") or source.get("buildTimeoutMs")),
         },
         "start": {
             "command": _normalize_command(start_section.get("command") or source.get("startCommand") or source.get("runCommand")),
@@ -288,14 +407,15 @@ def normalize_play_config(payload: dict, project_path: Path) -> dict:
     missing: list[str] = []
     if not config["build"]["command"]:
         missing.append("build.command")
-    if not config["start"]["command"]:
-        missing.append("start.command")
-    if not inspect_url:
-        missing.append("inspect.url")
-    if inspect_mode == "direct" and inspect_url.startswith("/"):
-        missing.append("inspect.url")
-    if inspect_mode == "proxy" and start_port_mode != "auto":
-        missing.append("start.port.mode")
+    if not build_only:
+        if not config["start"]["command"]:
+            missing.append("start.command")
+        if not inspect_url:
+            missing.append("inspect.url")
+        if inspect_mode == "direct" and inspect_url.startswith("/"):
+            missing.append("inspect.url")
+        if inspect_mode == "proxy" and start_port_mode != "auto":
+            missing.append("start.port.mode")
 
     return {"valid": not missing, "missing": missing, "errors": [], "config": config}
 
@@ -306,6 +426,61 @@ def _config_candidates(project_path: Path) -> list[Path]:
         project_path / LEGACY_PLAY_FILE_NAME,
         project_path / MODERN_PLAY_FILE_NAME,
     ]
+
+
+def _package_manager_for_project(project_path: Path) -> str:
+    if (project_path / "pnpm-lock.yaml").exists():
+        return "pnpm"
+    if (project_path / "yarn.lock").exists():
+        return "yarn"
+    if (project_path / "bun.lockb").exists() or (project_path / "bun.lock").exists():
+        return "bun"
+    return "npm"
+
+
+def _package_script_command(package_manager: str, script: str) -> str:
+    if package_manager == "yarn":
+        return f"yarn {script}"
+    return f"{package_manager} run {script}"
+
+
+def _auto_detect_play_config(project_path: Path) -> dict | None:
+    package_json = project_path / "package.json"
+    if not package_json.exists():
+        return None
+    try:
+        payload = json.loads(package_json.read_text(encoding="utf-8") or "{}")
+    except json.JSONDecodeError:
+        return None
+    scripts = payload.get("scripts") if isinstance(payload, dict) and isinstance(payload.get("scripts"), dict) else {}
+    if not scripts:
+        return None
+    package_manager = _package_manager_for_project(project_path)
+    build_script = "build" if scripts.get("build") else ""
+    start_script = "start" if scripts.get("start") else ("dev" if scripts.get("dev") else "")
+    if not build_script and not start_script:
+        return None
+    return {
+        "version": 2,
+        "buildOnly": bool(build_script and not start_script),
+        "build": {
+            "command": _package_script_command(package_manager, build_script) if build_script else "true",
+            "cwd": ".",
+            "env": {"CI": "true"},
+        },
+        "start": {
+            "command": _package_script_command(package_manager, start_script) if start_script else "",
+            "cwd": ".",
+            "env": {"HOST": "127.0.0.1"},
+            "port": {
+                "mode": "auto",
+                "host": "127.0.0.1",
+                "envVar": "PORT",
+                "range": {"min": 20000, "max": 29999},
+            },
+        },
+        "inspect": {"mode": "proxy", "url": "/"},
+    }
 
 
 def get_project_play_config_file_info(project_id: str) -> dict:
@@ -325,6 +500,17 @@ def get_project_play_config_file_info(project_id: str) -> dict:
         "parseError": None,
     }
     if not selected.exists():
+        auto_config = _auto_detect_play_config(project_path)
+        if not auto_config:
+            return payload
+        normalized = normalize_play_config(auto_config, project_path)
+        payload["configured"] = normalized["valid"]
+        payload["valid"] = normalized["valid"]
+        payload["missing"] = normalized["missing"]
+        payload["errors"] = normalized["errors"]
+        payload["buildOnly"] = normalized["config"].get("buildOnly") is True
+        payload["autoDetected"] = True
+        payload["autoSource"] = "package.json"
         return payload
     try:
         raw = json.loads(selected.read_text(encoding="utf-8") or "{}")
@@ -336,6 +522,7 @@ def get_project_play_config_file_info(project_id: str) -> dict:
     payload["configured"] = normalized["valid"]
     payload["missing"] = normalized["missing"]
     payload["errors"] = normalized["errors"]
+    payload["buildOnly"] = normalized["config"].get("buildOnly") is True
     return payload
 
 
@@ -344,6 +531,21 @@ def get_project_play_config(project_id: str) -> dict:
     project_path = _project_path(project)
     info = get_project_play_config_file_info(project_id)
     if not info["exists"]:
+        auto_config = _auto_detect_play_config(project_path)
+        if auto_config:
+            normalized = normalize_play_config(auto_config, project_path)
+            if normalized["valid"]:
+                return {
+                    "project": project,
+                    "projectPath": project_path,
+                    "path": info["path"],
+                    "branch": info["branch"],
+                    "config": normalized["config"],
+                    "autoDetected": True,
+                    "autoSource": "package.json",
+                }
+            missing = ", ".join(normalized["missing"])
+            raise PlayPipelineError(f"Auto-detected Play config is incomplete. Missing: {missing}.")
         raise PlayPipelineError("Play config file not found for this project.", 404)
     if info.get("parseError"):
         raise PlayPipelineError(info["parseError"])
@@ -501,19 +703,36 @@ def _terminate_process(proc: subprocess.Popen | None, timeout: float = 4.0) -> N
 def _run_build_stage(project_path: Path, config: dict, state: PlayPipelineState) -> None:
     command = config["build"]["command"]
     env = dict(config["build"].get("env") or {})
+    timeout_ms = _normalize_build_timeout_ms(config["build"].get("timeoutMs"))
     proc = _spawn_stage(project_path, command, config["build"].get("cwd") or ".", env)
     with _LOCK:
         state.build_process = proc
         state.build_pid = int(proc.pid)
         state.build_pgid = int(proc.pid)
     _append_log(state, stage="build", stream="system", message=f"Running: {command}")
+    _append_log(state, stage="build", stream="system", message=f"Build timeout: {round(timeout_ms / 1000)}s")
     threads = [
         threading.Thread(target=_reader_thread, args=(state, proc, "stdout", "build", None, None), daemon=True),
         threading.Thread(target=_reader_thread, args=(state, proc, "stderr", "build", None, None), daemon=True),
     ]
     for thread in threads:
         thread.start()
-    code = proc.wait()
+    deadline = time.time() + (timeout_ms / 1000)
+    timed_out = False
+    while True:
+        code = proc.poll()
+        if code is not None:
+            break
+        if state.stop_requested:
+            _terminate_process(proc)
+            code = proc.poll()
+            break
+        if time.time() >= deadline:
+            timed_out = True
+            _terminate_process(proc)
+            code = proc.poll()
+            break
+        time.sleep(0.2)
     _join_reader_threads(threads)
     with _LOCK:
         state.build_process = None
@@ -521,6 +740,8 @@ def _run_build_stage(project_path: Path, config: dict, state: PlayPipelineState)
         state.build_pgid = None
     if state.stop_requested:
         return
+    if timed_out:
+        raise PlayPipelineError(f"Build timeout after {round(timeout_ms / 1000)}s.", 500)
     if code != 0:
         raise PlayPipelineError(f"Build failed: process exited with code {code}.", 500)
     _append_log(state, stage="build", stream="system", message="Build stage completed successfully.")
@@ -632,6 +853,7 @@ def _pipeline_worker(play_config: dict, state: PlayPipelineState) -> None:
     project = play_config["project"]
     project_path = play_config["projectPath"]
     config = play_config["config"]
+    build_completed = False
     try:
         if state.status == "queued":
             _append_log(state, stage="build", stream="system", message="Waiting for another Play build to finish...")
@@ -640,7 +862,18 @@ def _pipeline_worker(play_config: dict, state: PlayPipelineState) -> None:
                 return
             _mark_state(state, "building", running=True, ready=False, message="Starting Play build stage...")
             _run_build_stage(project_path, config, state)
+            build_completed = True
         if state.stop_requested:
+            return
+        if config.get("buildOnly") is True:
+            _mark_state(
+                state,
+                "built",
+                running=False,
+                ready=False,
+                set_finished_at=True,
+                message=f"{_project_label(project)} package-script build completed.",
+            )
             return
         runtime = _prepare_start_runtime(state.project_id, config, state)
         if state.allocated_port:
@@ -655,12 +888,15 @@ def _pipeline_worker(play_config: dict, state: PlayPipelineState) -> None:
     except Exception as exc:
         if state.stop_requested:
             return
+        build_stage_failed = not build_completed and state.status == "building"
         _terminate_process(state.build_process)
         _terminate_process(state.start_process)
         _release_port(state.allocated_port_host, state.allocated_port)
         message = str(exc) or "Play pipeline failed."
         _append_log(state, stage="system", stream="stderr", message=f"Failure reason: {message}")
         _mark_state(state, "failed", running=False, ready=False, error=message, set_finished_at=True, message=message)
+        if build_stage_failed:
+            _request_build_failure_repair(state, message)
 
 
 def start_project_play_pipeline(project_id: str, body: dict | None = None) -> dict:
@@ -723,11 +959,7 @@ def stop_project_play_pipeline(project_id: str, *, purge: bool = False) -> dict 
 def _play_status_summary(config_info: dict, snapshot: dict) -> str:
     if config_info.get("parseError"):
         return str(config_info["parseError"])
-    if config_info.get("exists") is not True:
-        return "No Play config found for this project."
-    if config_info.get("valid") is not True:
-        missing = config_info.get("missing") or []
-        return f"Play config is incomplete. Missing: {', '.join(str(part) for part in missing)}"
+    build_only = config_info.get("buildOnly") is True
     state = str(snapshot.get("status") or "idle").strip().lower()
     if state == "queued":
         return "Play build is queued."
@@ -738,11 +970,44 @@ def _play_status_summary(config_info: dict, snapshot: dict) -> str:
     if state == "ready":
         inspect_url = str(snapshot.get("inspect_url") or "").strip()
         return f"Play app is ready at {inspect_url}." if inspect_url else "Play app is ready."
+    if state == "built":
+        return "Package-script build completed successfully."
     if state == "failed":
         return str(snapshot.get("error") or "Play pipeline failed.")
     if state == "stopped":
         return "Play pipeline is stopped."
-    return "Play config is ready. Start the pipeline to inspect the app."
+    if config_info.get("exists") is not True and config_info.get("autoDetected") is True:
+        if config_info.get("valid") is True:
+            if build_only:
+                return "Auto-detected package-script build workflow from package.json. Build the project to verify it."
+            return "Auto-detected Play workflow from package.json. Start the pipeline to inspect the app."
+        missing = config_info.get("missing") or []
+        return f"Auto-detected Play workflow is incomplete. Missing: {', '.join(str(part) for part in missing)}"
+    if config_info.get("exists") is not True:
+        return "No Play config found for this project."
+    if config_info.get("valid") is not True:
+        missing = config_info.get("missing") or []
+        return f"Play config is incomplete. Missing: {', '.join(str(part) for part in missing)}"
+    return "Package-script build workflow is ready." if build_only else "Play config is ready. Start the pipeline to inspect the app."
+
+
+def _play_build_available(config_info: dict) -> bool:
+    """Return whether the project has a runnable Build workflow.
+
+    Build eligibility comes from the normalized workflow, not from the
+    existence of a legacy per-project Play config file. A workflow may be
+    backed by a shared/modern Play config or by auto-detected package scripts.
+    """
+
+    return config_info.get("valid") is True
+
+
+def _play_workflow_source(config_info: dict) -> str:
+    if config_info.get("autoDetected") is True:
+        return str(config_info.get("autoSource") or "auto").strip() or "auto"
+    if config_info.get("exists") is True:
+        return "play-config"
+    return ""
 
 
 def build_project_play_status(project_id: str) -> dict:
@@ -752,8 +1017,31 @@ def build_project_play_status(project_id: str) -> dict:
         snapshot = dict(state.__dict__) if state else {}
     summary = _play_status_summary(config_info, snapshot)
     state_name = str(snapshot.get("status") or "idle").lower()
+    build_available = _play_build_available(config_info)
+    workflow_source = _play_workflow_source(config_info)
+    label_by_state = {
+        "idle": "Build ready" if build_available else "Build unavailable",
+        "queued": "Build queued",
+        "building": "Building",
+        "starting": "Starting",
+        "ready": "Play ready",
+        "built": "Built",
+        "failed": "Build failed",
+        "stopped": "Stopped",
+    }
+    kind_by_state = {
+        "queued": "warning",
+        "building": "warning",
+        "starting": "warning",
+        "ready": "ready",
+        "built": "ready",
+        "failed": "error",
+        "stopped": "idle",
+    }
     inspect_url = snapshot.get("inspect_url")
-    return {
+    raw_logs = snapshot.get("logs")
+    logs = list(raw_logs) if isinstance(raw_logs, list) else []
+    payload = {
         "projectId": project_id,
         "pipelineId": snapshot.get("pipeline_id"),
         "runId": snapshot.get("run_id"),
@@ -767,13 +1055,26 @@ def build_project_play_status(project_id: str) -> dict:
         },
         "configured": config_info.get("configured") is True,
         "valid": config_info.get("valid") is True,
+        "buildAvailable": build_available,
+        "canBuild": build_available,
+        "buildUnavailableReason": "" if build_available else summary,
+        "workflowSource": workflow_source,
         "configExists": config_info.get("exists") is True,
+        "configAvailable": build_available or config_info.get("exists") is True or config_info.get("autoDetected") is True,
+        "configValid": config_info.get("valid") is True,
+        "configAutoDetected": config_info.get("autoDetected") is True,
+        "configAutoSource": config_info.get("autoSource") or "",
+        "buildOnly": config_info.get("buildOnly") is True,
         "configPath": config_info.get("path"),
         "configBranch": config_info.get("branch"),
         "configMissing": config_info.get("missing") or [],
         "configErrors": config_info.get("errors") or [],
         "configParseError": config_info.get("parseError"),
         "status": snapshot.get("status") or "idle",
+        "kind": kind_by_state.get(state_name, "ready" if config_info.get("valid") is True else "idle"),
+        "label": label_by_state.get(state_name, "Play status"),
+        "title": summary,
+        "summary": summary,
         "statusSummary": summary,
         "failureSummary": summary if state_name == "failed" else None,
         "lastLogLine": _last_log_line(snapshot.get("logs") if isinstance(snapshot.get("logs"), list) else []),
@@ -788,8 +1089,15 @@ def build_project_play_status(project_id: str) -> dict:
         "readyAt": snapshot.get("ready_at"),
         "finishedAt": snapshot.get("finished_at"),
         "updatedAt": snapshot.get("updated_at"),
+        "repairRequestedAt": snapshot.get("repair_requested_at"),
+        "repairStreamId": snapshot.get("repair_stream_id"),
+        "repairError": snapshot.get("repair_error"),
         "logsAvailable": bool(snapshot.get("logs")),
     }
+    if state_name == "failed" and logs:
+        payload["playLogs"] = logs
+        payload["playLogText"] = "\n".join(_format_log(entry) for entry in logs)
+    return payload
 
 
 def build_project_play_logs(project_id: str, limit: int = 1000) -> dict:

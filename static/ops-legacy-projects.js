@@ -84,6 +84,33 @@
 
     let activeProjectsLoadToken=0;
 
+    function captureLogScrollState(container){
+      const snapshot={};
+      if(!container||typeof container.querySelectorAll!=='function')return snapshot;
+      container.querySelectorAll('[data-ops-log-scroll-key]').forEach(node=>{
+        const key=String(node&&node.dataset&&node.dataset.opsLogScrollKey||'').trim();
+        if(!key)return;
+        const maxScroll=Math.max(0,(node.scrollHeight||0)-(node.clientHeight||0));
+        snapshot[key]={top:Number(node.scrollTop)||0,atBottom:maxScroll-(Number(node.scrollTop)||0)<=8};
+      });
+      return snapshot;
+    }
+
+    function restoreLogScrollState(container,snapshot){
+      if(!container||!snapshot||typeof container.querySelectorAll!=='function')return;
+      const apply=()=>{
+        container.querySelectorAll('[data-ops-log-scroll-key]').forEach(node=>{
+          const key=String(node&&node.dataset&&node.dataset.opsLogScrollKey||'').trim();
+          const entry=key?snapshot[key]:null;
+          if(!entry)return;
+          const maxScroll=Math.max(0,(node.scrollHeight||0)-(node.clientHeight||0));
+          node.scrollTop=entry.atBottom?maxScroll:Math.min(Number(entry.top)||0,maxScroll);
+        });
+      };
+      apply();
+      if(windowRef&&typeof windowRef.requestAnimationFrame==='function')windowRef.requestAnimationFrame(apply);
+    }
+
     function syncStandaloneOpsHistory(view,projectId){
       if(!windowRef||typeof windowRef.__opsLegacySyncHistoryState!=='function')return;
       const current=typeof windowRef.__opsLegacyReadHistoryState==='function'
@@ -373,7 +400,7 @@
               </button>
             </div>
             <div class="quick-response-project-actions">
-              ${renderSessionWorkspaceActions({projectId:project.id,project})}
+              ${renderSessionWorkspaceActions({projectId:project.id,project},{showPlayAction:false})}
               ${renderProjectPlayControls(project,{projectCard:true})}
             </div>
           </div>
@@ -408,6 +435,7 @@
       const rows=OPS.projects.length?OPS.projects.map((project,index)=>renderProjectWorkspaceCard(project,index)).join(''):`<div class="repo-empty">No projects.</div>`;
       const el=root();
       if(!el)return '';
+      const logScrollState=captureLogScrollState(el);
       el.innerHTML=`
         <div class="ops-dashboard ops-projects-dashboard project-page-content">
           <h2>Projects</h2>
@@ -438,6 +466,7 @@
         </div>
       `;
       if(OPS.showCreate&&document.getElementById('opsProjectName'))document.getElementById('opsProjectName').focus();
+      restoreLogScrollState(el,logScrollState);
       return rows;
     }
 

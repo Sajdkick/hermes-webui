@@ -790,6 +790,27 @@
   .sm-btn:hover{background:rgba(255,255,255,0.09);color:var(--text);border-color:rgba(255,255,255,.15);}
   .sm-btn:disabled{opacity:.45;cursor:not-allowed;}
   .main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;min-height:0;background:var(--main-bg);}
+  .ops-session-inspect-back,
+  .ops-session-inspect-refresh{display:none;align-items:center;gap:6px;position:absolute;top:12px;z-index:30;padding:7px 12px;border-radius:999px;border:1px solid var(--border2);background:var(--surface);color:var(--text);font-size:12px;font-weight:700;box-shadow:0 6px 20px rgba(0,0,0,.16);cursor:pointer;}
+  .ops-session-inspect-back{left:16px;}
+  .ops-session-inspect-refresh{right:16px;}
+  .ops-session-inspect-back:hover,
+  .ops-session-inspect-refresh:hover{border-color:var(--accent-bg-strong);background:var(--accent-bg);color:var(--accent-text);}
+  .ops-session-inspect-refresh:disabled{opacity:.6;cursor:wait;}
+  body.ops-session-inspect .app-titlebar,
+  body.ops-session-inspect .rail,
+  body.ops-session-inspect .sidebar,
+  body.ops-session-inspect .rightpanel,
+  body.ops-session-inspect #sidebarResize,
+  body.ops-session-inspect #rightpanelResize{display:none!important;}
+  body.ops-session-inspect .layout{height:100vh;height:100dvh;}
+  body.ops-session-inspect .main{width:100%;background:var(--bg);}
+  body.ops-session-inspect main.main > #mainChat{display:flex!important;position:relative;}
+  body.ops-session-inspect main.main > .main-view:not(#mainChat){display:none!important;}
+  body.ops-session-inspect .ops-session-inspect-back:not([hidden]),
+  body.ops-session-inspect .ops-session-inspect-refresh:not([hidden]){display:inline-flex;}
+  body.ops-session-inspect .messages{padding-top:44px;}
+  body.ops-session-inspect .messages-inner{max-width:900px;padding-top:24px;}
   .topbar{padding:12px 20px;border-bottom:1px solid var(--border);background:var(--topbar-bg);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;position:relative;z-index:10;}
   .topbar-title{font-size:15px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .topbar-meta{font-size:11px;color:var(--muted);margin-top:3px;opacity:.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}

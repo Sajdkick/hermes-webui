@@ -8,6 +8,7 @@ tokens stay server-side and are persisted to the active Hermes profile's
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -69,7 +70,7 @@ def _clear_process_anthropic_env_values() -> None:
             os.environ.pop(key, None)
 
 
-def resolve_runtime_provider_with_anthropic_env_lock(resolver, *args, **kwargs):
+def resolve_runtime_provider_with_anthropic_env_lock(resolver, *args, hermes_home: str | Path | None = None, **kwargs):
     """Resolve runtime credentials under the Anthropic onboarding env lock.
 
     Request paths must resolve Anthropic env fallbacks per outbound request,
@@ -77,19 +78,40 @@ def resolve_runtime_provider_with_anthropic_env_lock(resolver, *args, **kwargs):
     the process-env lock prevents a chat stream from observing one stale
     Anthropic env value while onboarding has already cleared the other.
     """
+    old_hermes_home_before_import = os.environ.get("HERMES_HOME")
     from api.streaming import _ENV_LOCK
 
     with _ENV_LOCK:
-        requested = kwargs.get("requested")
-        if requested is None and args:
-            candidate = args[0]
-            if isinstance(candidate, str):
-                requested = candidate
+        old_hermes_home = old_hermes_home_before_import
+        if hermes_home is not None:
+            os.environ["HERMES_HOME"] = str(Path(hermes_home).expanduser())
         try:
-            _prime_runtime_oauth_state(str(requested or ""))
-        except Exception:
-            logger.debug("Failed to prime runtime OAuth state for %r", requested, exc_info=True)
-        return resolver(*args, **kwargs)
+            requested = kwargs.get("requested")
+            if requested is None and args:
+                candidate = args[0]
+                if isinstance(candidate, str):
+                    requested = candidate
+            try:
+                _prime_runtime_oauth_state(str(requested or ""), hermes_home=hermes_home)
+            except Exception:
+                logger.debug("Failed to prime runtime OAuth state for %r", requested, exc_info=True)
+            try:
+                return resolver(*args, **kwargs)
+            except Exception as exc:
+                if _repair_profile_codex_credentials_from_root(
+                    str(requested or ""),
+                    exc,
+                    hermes_home=hermes_home,
+                ):
+                    _prime_runtime_oauth_state(str(requested or ""), hermes_home=hermes_home)
+                    return resolver(*args, **kwargs)
+                raise
+        finally:
+            if hermes_home is not None:
+                if old_hermes_home is None:
+                    os.environ.pop("HERMES_HOME", None)
+                else:
+                    os.environ["HERMES_HOME"] = old_hermes_home
 
 
 def _normalize_onboarding_oauth_provider(provider: str) -> str:
@@ -260,11 +282,137 @@ def _sync_codex_provider_state_from_pool(hermes_home: Path | None = None) -> Pat
     return _write_auth_json(auth, auth_path)
 
 
-def _prime_runtime_oauth_state(provider: str) -> None:
+def _codex_entry_timestamp(entry: dict[str, Any] | None) -> str:
+    if not isinstance(entry, dict):
+        return ""
+    return str(entry.get("last_refresh") or entry.get("updated_at") or entry.get("created_at") or "")
+
+
+def _base_home_for_profile_home(hermes_home: Path) -> Path:
+    """Return the base Hermes home for either root or profiles/<name> home."""
+    home = Path(hermes_home).expanduser()
+    if home.parent.name == "profiles":
+        return home.parent.parent
+    return home
+
+
+def _is_named_profile_home(hermes_home: Path) -> bool:
+    home = Path(hermes_home).expanduser()
+    return home.parent.name == "profiles"
+
+
+def _codex_error_allows_root_repair(exc: Exception) -> bool:
+    text = str(exc or "").lower()
+    if any(marker in text for marker in ("rate limit", "usage", "quota", "plan limit", "429")):
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "openai-codex_api_key",
+            "no api key",
+            "no codex credential",
+            "codex refresh token",
+            "refresh token was already consumed",
+            "expired",
+            "revoked",
+            "auth",
+        )
+    )
+
+
+def _repair_profile_codex_credentials_from_root(
+    provider: str,
+    exc: Exception,
+    *,
+    hermes_home: str | Path | None = None,
+) -> bool:
+    """Repair stale named-profile Codex OAuth state from the root profile.
+
+    Named profiles intentionally shadow root credentials when they contain local
+    entries. That is useful isolation, but it can strand Ops task sessions when
+    an old profile-local Codex refresh token has been consumed while the root
+    profile has a newer browser/CLI login. In that specific credential-failure
+    case, copy only the root ``openai-codex`` credential state into the named
+    profile and let runtime resolution retry through the normal path.
+    """
+    if _normalize_onboarding_oauth_provider(provider) != "openai-codex":
+        return False
+    if hermes_home is None or not _codex_error_allows_root_repair(exc):
+        return False
+
+    profile_home = Path(hermes_home).expanduser()
+    if not _is_named_profile_home(profile_home):
+        return False
+    root_home = _base_home_for_profile_home(profile_home)
+    if root_home == profile_home:
+        return False
+
+    profile_auth_path = profile_home / "auth.json"
+    root_auth_path = root_home / "auth.json"
+    if not root_auth_path.exists():
+        return False
+
+    root_auth = _read_auth_json(root_auth_path)
+    root_pool = root_auth.get("credential_pool") if isinstance(root_auth.get("credential_pool"), dict) else {}
+    root_entries = root_pool.get("openai-codex") if isinstance(root_pool, dict) else None
+    if not isinstance(root_entries, list) or not root_entries:
+        return False
+    root_entry = _best_codex_pool_entry(root_auth)
+    if not root_entry:
+        return False
+
+    profile_auth = _read_auth_json(profile_auth_path)
+    profile_entry = _best_codex_pool_entry(profile_auth)
+    root_ts = _codex_entry_timestamp(root_entry)
+    profile_ts = _codex_entry_timestamp(profile_entry)
+    if profile_entry and root_ts and profile_ts and root_ts <= profile_ts:
+        return False
+
+    profile_auth.setdefault("version", 1)
+    profile_pool = profile_auth.setdefault("credential_pool", {})
+    if not isinstance(profile_pool, dict):
+        profile_pool = {}
+        profile_auth["credential_pool"] = profile_pool
+    profile_pool["openai-codex"] = copy.deepcopy(root_entries)
+
+    root_providers = root_auth.get("providers") if isinstance(root_auth.get("providers"), dict) else {}
+    root_state = root_providers.get("openai-codex") if isinstance(root_providers, dict) else None
+    providers = profile_auth.setdefault("providers", {})
+    if not isinstance(providers, dict):
+        providers = {}
+        profile_auth["providers"] = providers
+    if isinstance(root_state, dict):
+        providers["openai-codex"] = copy.deepcopy(root_state)
+    else:
+        _set_codex_provider_state(
+            profile_auth,
+            access_token=str(root_entry.get("access_token") or ""),
+            refresh_token=str(root_entry.get("refresh_token") or ""),
+            last_refresh=str(root_entry.get("last_refresh") or root_entry.get("updated_at") or _now_iso()),
+        )
+    profile_auth["updated_at"] = _now_iso()
+    _write_auth_json(profile_auth, profile_auth_path)
+
+    try:
+        from api.config import invalidate_credential_pool_cache
+
+        invalidate_credential_pool_cache("openai-codex")
+    except Exception:
+        logger.debug("Failed to invalidate Codex credential cache after profile repair", exc_info=True)
+
+    logger.info(
+        "Repaired stale openai-codex credentials for profile home %s from root auth after runtime failure: %s",
+        profile_home,
+        type(exc).__name__,
+    )
+    return True
+
+
+def _prime_runtime_oauth_state(provider: str, *, hermes_home: str | Path | None = None) -> None:
     normalized = _normalize_onboarding_oauth_provider(provider)
     if normalized != "openai-codex":
         return
-    _sync_codex_provider_state_from_pool(_get_active_hermes_home())
+    _sync_codex_provider_state_from_pool(Path(hermes_home) if hermes_home else _get_active_hermes_home())
 
 
 def _persist_codex_credentials(hermes_home: Path, token_data: dict[str, Any]) -> Path:

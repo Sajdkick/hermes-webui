@@ -67,6 +67,15 @@ def test_fetch_typeerror_is_gated_by_health_probe_not_blind_banner():
 def test_sse_network_error_defers_to_offline_banner_instead_of_inline_error():
     assert "function _deferStreamErrorIfOffline()" in MESSAGES_JS
     assert "t('offline_stream_waiting')" in MESSAGES_JS
-    assert "if(_deferStreamErrorIfOffline()) return;" in MESSAGES_JS
+    assert "if(_deferStreamErrorIfOffline()){\n        _scheduleReconnect(e&&e.error);\n        return;\n      }" in MESSAGES_JS
     error_handler = MESSAGES_JS.split("source.addEventListener('error',async e=>{", 1)[1].split("source.addEventListener('cancel'", 1)[0]
-    assert error_handler.find("_deferStreamErrorIfOffline()") < error_handler.rfind("_handleStreamError()")
+    assert "_deferStreamErrorIfOffline()" in error_handler
+    assert "_scheduleReconnect(e&&e.error)" in error_handler
+    assert "_handleStreamError()" not in error_handler
+
+
+def test_reconnect_success_status_waits_for_fresh_sse_open():
+    reconnect_block = MESSAGES_JS.split("async function _attemptReconnect(){", 1)[1].split("function _streamDisplay()", 1)[0]
+    assert "const reconnectSource=new EventSource" in reconnect_block
+    assert "reconnectSource.addEventListener('open',()=>setComposerStatus('Reconnected'),{once:true});" in reconnect_block
+    assert "setComposerStatus('Reconnected');\n          _wireSSE" not in reconnect_block

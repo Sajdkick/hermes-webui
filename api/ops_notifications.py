@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -264,6 +265,52 @@ def _recent_notification_time(value: Any, *, max_age_seconds: int = 24 * 60 * 60
     return stamp >= time.time() - max_age_seconds
 
 
+def _redact_play_log_text(value: Any, *, limit: int = 120000) -> str:
+    text = "" if value is None else str(value)
+    if not text:
+        return ""
+    text = re.sub(r"(?i)(password|passwd|token|api[_-]?key|secret|authorization|cookie)(\s*[:=]\s*)([^\s'\"]+)", r"\1\2[REDACTED]", text)
+    text = re.sub(r"(?i)(bearer\s+)[a-z0-9._~+/-]+=*", r"\1[REDACTED]", text)
+    return text[:limit]
+
+
+def _play_log_text_from_entries(entries: Any) -> str:
+    if not isinstance(entries, list):
+        return ""
+    lines: list[str] = []
+    for entry in entries:
+        if isinstance(entry, dict):
+            at = _text(entry.get("at"), limit=128)
+            stage = _text(entry.get("stage"), limit=64) or "system"
+            stream = _text(entry.get("stream"), limit=64) or "system"
+            message = _text(entry.get("message"), limit=4000)
+            lines.append(f"[{at}] [{stage}:{stream}] {message}" if at else f"[{stage}:{stream}] {message}")
+        else:
+            line = _text(entry, limit=4000)
+            if line:
+                lines.append(line)
+    return _redact_play_log_text("\n".join(lines))
+
+
+def _play_log_payload(source: dict) -> tuple[str, list]:
+    raw_text = _text(source.get("playLogText") or source.get("playLogsText") or source.get("logText"), limit=120000)
+    raw_logs = source.get("playLogs") if isinstance(source.get("playLogs"), list) else source.get("logs")
+    log_text = _redact_play_log_text(raw_text) or _play_log_text_from_entries(raw_logs)
+    log_entries = raw_logs if isinstance(raw_logs, list) else []
+    return log_text, log_entries
+
+
+def _with_play_logs(payload: dict, source: dict, *, attach: bool = True) -> dict:
+    if not attach:
+        return payload
+    log_text, log_entries = _play_log_payload(source)
+    if log_text:
+        payload["playLogText"] = log_text
+    if log_entries:
+        payload["playLogs"] = log_entries
+    return payload
+
+
 def _play_notification(project: dict, status: dict) -> dict | None:
     if not isinstance(status, dict):
         return None
@@ -285,7 +332,7 @@ def _play_notification(project: dict, status: dict) -> dict | None:
         play_fallback_error = ""
         message = status_summary or "Play app is ready for inspection."
     elif state in {"queued", "building", "starting"}:
-        status_at = _text(status.get("startedAt") or status.get("updatedAt") or status.get("readyAt"), limit=128)
+        status_at = _text(status.get("startedAt") or status.get("createdAt") or status.get("updatedAt") or status.get("readyAt"), limit=128)
         if not status_at:
             return None
         play_status = state
@@ -298,6 +345,14 @@ def _play_notification(project: dict, status: dict) -> dict | None:
             message = status_summary or "Play build is complete and the app is starting."
         else:
             message = status_summary or "Play build in progress."
+    elif state == "built":
+        status_at = _text(status.get("finishedAt") or status.get("updatedAt") or status.get("startedAt"), limit=128)
+        if not status_at:
+            return None
+        play_status = "built"
+        play_needs_repair = False
+        play_fallback_error = ""
+        message = status_summary or "Package-script build completed successfully."
     elif state == "failed":
         status_at = _text(status.get("finishedAt") or status.get("updatedAt") or status.get("startedAt"), limit=128)
         if not status_at:
@@ -331,8 +386,18 @@ def _play_notification(project: dict, status: dict) -> dict | None:
     key_parts = ["play", project_id]
     if key_target:
         key_parts.append(key_target)
-    key_parts.extend([play_status, status_at])
-    return {
+    if play_locked:
+        # Active Play build notifications stay stable while the same pipeline is
+        # still updating, but a restart gets a fresh pipeline id.  Include it in
+        # the key so dismissing an older build notification cannot hide the next
+        # rebuild for the same run/session.
+        pipeline_id = _text(status.get("pipelineId") or status.get("pipeline_id"), limit=256)
+        if pipeline_id:
+            key_parts.append(pipeline_id)
+        key_parts.append(play_status)
+    else:
+        key_parts.extend([play_status, status_at])
+    payload = {
         "notificationKey": ":".join(key_parts),
         "kind": "play",
         "message": message,
@@ -355,12 +420,14 @@ def _play_notification(project: dict, status: dict) -> dict | None:
         "createdAt": status_at,
         "updatedAt": status_at,
     }
+    return _with_play_logs(payload, status, attach=play_status == "failed" or play_needs_repair)
 
 
 def _play_handoff_fallback_notification(project: dict, run: dict) -> dict | None:
     if not isinstance(run, dict):
         return None
-    metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    raw_metadata = run.get("metadata")
+    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
     triggered_at = _text(metadata.get("playPipelineTriggeredAt"), limit=128)
     attempted_at = _text(metadata.get("playPipelineAttemptedAt"), limit=128)
     status_at = triggered_at or attempted_at
@@ -403,7 +470,8 @@ def _play_handoff_fallback_notification(project: dict, run: dict) -> dict | None
             f"Last recorded status: {play_pipeline_status}."
         )
         message = "Play handoff needs attention. Open the project to restart or inspect Play."
-    return {
+    fallback_source = metadata
+    return _with_play_logs({
         "notificationKey": ":".join(["play", project_id, run_id, play_status, status_at]),
         "kind": "play",
         "message": message,
@@ -424,7 +492,7 @@ def _play_handoff_fallback_notification(project: dict, run: dict) -> dict | None
         "playFallbackError": fallback_error,
         "createdAt": status_at,
         "updatedAt": status_at,
-    }
+    }, fallback_source)
 
 
 def _play_handoff_fallback_notifications(project: dict, status: dict) -> list[dict]:

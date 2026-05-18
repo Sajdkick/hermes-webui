@@ -66,6 +66,34 @@
     const TASK_QA_STATUS_VALUES=Array.isArray(ctx&&ctx.taskQaStatusValues)&&ctx.taskQaStatusValues.length
       ? ctx.taskQaStatusValues.slice()
       : ['ready-for-test','needs-more-work','not-synced'];
+
+    function captureLogScrollState(container){
+      const snapshot={};
+      if(!container||typeof container.querySelectorAll!=='function')return snapshot;
+      container.querySelectorAll('[data-ops-log-scroll-key]').forEach(node=>{
+        const key=String(node&&node.dataset&&node.dataset.opsLogScrollKey||'').trim();
+        if(!key)return;
+        const maxScroll=Math.max(0,(node.scrollHeight||0)-(node.clientHeight||0));
+        snapshot[key]={top:Number(node.scrollTop)||0,atBottom:maxScroll-(Number(node.scrollTop)||0)<=8};
+      });
+      return snapshot;
+    }
+
+    function restoreLogScrollState(container,snapshot){
+      if(!container||!snapshot||typeof container.querySelectorAll!=='function')return;
+      const apply=()=>{
+        container.querySelectorAll('[data-ops-log-scroll-key]').forEach(node=>{
+          const key=String(node&&node.dataset&&node.dataset.opsLogScrollKey||'').trim();
+          const entry=key?snapshot[key]:null;
+          if(!entry)return;
+          const maxScroll=Math.max(0,(node.scrollHeight||0)-(node.clientHeight||0));
+          node.scrollTop=entry.atBottom?maxScroll:Math.min(Number(entry.top)||0,maxScroll);
+        });
+      };
+      apply();
+      if(windowRef&&typeof windowRef.requestAnimationFrame==='function')windowRef.requestAnimationFrame(apply);
+    }
+
     const TASK_FILTER_STATUS_VALUES=Array.isArray(ctx&&ctx.taskFilterStatusValues)&&ctx.taskFilterStatusValues.length
       ? ctx.taskFilterStatusValues.slice()
       : ['active','ready','in-progress','ready-for-test','needs-more-work','not-synced','blocked','done','archived'];
@@ -910,6 +938,8 @@
       rememberTaskFilterFocus();
       rememberTaskFormFocus();
       const localState=rememberProjectDetailLocalState();
+      const rootEl=root();
+      const logScrollState=captureLogScrollState(rootEl);
       setDashboardTopbar(nameOf(project),`${counts.active} active | ${counts.done} done | ${OPS.taskData.branch||project.coreBranch||'main'}`);
       const edit=OPS.editingTask;
       const showCreateBand=!OPS.taskCreateCollapsed||!!edit;
@@ -991,7 +1021,7 @@
       const activeScopedTotal=Math.max(0,Number(filterSummary.total||0)-archivedCount);
       const heroCount=archived?`${archivedCount} archived`:`${Math.min(doneCount,activeScopedTotal)}/${activeScopedTotal} done`;
 
-      root().innerHTML=`
+      rootEl.innerHTML=`
         <div class="ops-dashboard ops-project-detail project-page-content">
           <div class="tasks-wrapper show" aria-label="Project epics">
             <div class="tasks-hero">
@@ -1080,6 +1110,7 @@
       restoreTaskFilterFocus();
       restoreTaskFormFocus();
       restoreProjectDetailLocalState(localState);
+      restoreLogScrollState(rootEl,logScrollState);
     }
 
     function renderEpic(project,epic,tasks,taskById,index){

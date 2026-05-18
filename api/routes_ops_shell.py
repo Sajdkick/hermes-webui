@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import re
 from pathlib import Path
 from urllib.parse import quote
 
-from api.helpers import j, t
+from api.helpers import _security_headers, j, t
 from api.updates import WEBUI_VERSION
 
 
 _STATIC_DIR = (Path(__file__).parent.parent / "static").resolve()
 _OPS_SHELL_PATH = (_STATIC_DIR / "ops-shell.html").resolve()
 _LEGACY_OPS_SHELL_PATH = (_STATIC_DIR / "ops-legacy.html").resolve()
+_SESSION_PREFIXED_OPS_ROUTE_RE = re.compile(r"^/session/[^/]+/(ops|ops-phase)/?$")
+_OPS_PAGE_DEBUG_LOG_PATH = Path(
+    os.environ.get("HERMES_WEBUI_STATE_DIR")
+    or (Path.home() / ".hermes" / "webui")
+) / "ops-page-debug.jsonl"
 logger = logging.getLogger(__name__)
 
 
@@ -77,6 +85,20 @@ def _legacy_ops_shell_html() -> str:
     return _LEGACY_OPS_SHELL_PATH.read_text(encoding="utf-8").replace("__WEBUI_VERSION__", version_token)
 
 
+def redirect_session_prefixed_ops_shell(handler, parsed) -> bool:
+    if not _SESSION_PREFIXED_OPS_ROUTE_RE.match(parsed.path or ""):
+        return False
+    target = "/ops-phase"
+    if parsed.query:
+        target += "?" + parsed.query
+    handler.send_response(302)
+    handler.send_header("Location", target)
+    handler.send_header("Cache-Control", "no-store")
+    _security_headers(handler, allow_same_origin_frame=True)
+    handler.end_headers()
+    return True
+
+
 def serve_legacy_ops_shell(handler) -> bool:
     try:
         html = _legacy_ops_shell_html()
@@ -84,6 +106,25 @@ def serve_legacy_ops_shell(handler) -> bool:
         return _serve_ops_shell_unavailable(handler, exc)
     t(handler, html, content_type="text/html; charset=utf-8")
     return True
+
+
+def handle_post(handler, parsed, body: dict) -> bool:
+    if parsed.path != "/api/ops/page-debug":
+        return False
+    payload = body if isinstance(body, dict) else {}
+    entry = {
+        "receivedAt": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        "path": parsed.path,
+        "payload": payload,
+    }
+    try:
+        _OPS_PAGE_DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _OPS_PAGE_DEBUG_LOG_PATH.open("a", encoding="utf-8") as fh:
+          fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        logger.warning("Failed to write ops page debug event: %s", exc)
+        return j(handler, {"error": "Failed to store ops page debug event."}, status=500)
+    return j(handler, {"ok": True})
 
 
 def handle_get(handler, parsed) -> bool:

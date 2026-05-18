@@ -3139,6 +3139,16 @@ def handle_get(handler, parsed) -> bool:
 
         return serve_legacy_ops_shell(handler)
 
+    if parsed.path.startswith("/session/"):
+        # Stale frontend bundles or embedded session pages can still navigate to
+        # /session/<id>/ops. Redirect those requests to the canonical site-root
+        # ops shell before the generic /session/<id> chat-shell catch-all below
+        # turns them into index.html and reproduces the unstyled white page.
+        from api.routes_ops_shell import redirect_session_prefixed_ops_shell
+
+        if redirect_session_prefixed_ops_shell(handler, parsed):
+            return True
+
     # Firefox Android resolves <link rel="manifest"> against the page URL
     # before the dynamic <base href> script runs when installing from
     # /session/<id>, producing requests like /session/manifest.json.
@@ -3160,6 +3170,7 @@ def handle_get(handler, parsed) -> bool:
                 handler,
                 inject_extension_tags(html),
                 content_type="text/html; charset=utf-8",
+                allow_same_origin_frame=parsed.path.startswith("/session/"),
             )
         except Exception as exc:
             return _serve_shell_unavailable(handler, exc)
@@ -5365,10 +5376,25 @@ def handle_post(handler, parsed) -> bool:
                 s.thread_id = cli_meta.get("thread_id")
                 s.session_key = cli_meta.get("session_key")
                 s.platform = cli_meta.get("platform")
+        archive = bool(body.get("archived", True))
+        active_stream_id = str(getattr(s, "active_stream_id", None) or "").strip()
+        cancelled_stream = False
+        if archive and active_stream_id:
+            try:
+                from api.streaming import cancel_stream
+
+                cancelled_stream = bool(cancel_stream(active_stream_id))
+            except Exception:
+                logger.debug("Failed to cancel stream %s while archiving session %s", active_stream_id, sid, exc_info=True)
         with _get_session_agent_lock(sid):
-            s.archived = bool(body.get("archived", True))
+            s.archived = archive
+            if archive and active_stream_id and not cancelled_stream and getattr(s, "active_stream_id", None) == active_stream_id:
+                s.active_stream_id = None
+                s.pending_user_message = None
+                s.pending_attachments = None
+                s.pending_started_at = None
             s.save(touch_updated_at=False)
-        return j(handler, {"ok": True, "session": s.compact(), **_worktree_retained_payload(s)})
+        return j(handler, {"ok": True, "session": s.compact(), "cancelled_stream": cancelled_stream, **_worktree_retained_payload(s)})
 
     # ── Session move to project (POST) ──
     if parsed.path == "/api/session/move":
@@ -7395,6 +7421,46 @@ def _start_chat_stream_for_session(
     if model_provider:
         response["effective_model_provider"] = model_provider
     return response
+
+
+def start_play_build_failure_repair_turn(session_id: str, prompt: str, metadata: dict | None = None) -> dict:
+    """Start an automatic repair turn when a task-linked Play build fails."""
+    try:
+        s = get_session(session_id)
+    except KeyError:
+        return {"ok": False, "error": "Session not found"}
+    current_stream_id = getattr(s, "active_stream_id", None)
+    if current_stream_id:
+        with STREAMS_LOCK:
+            stream_running = current_stream_id in STREAMS
+        if stream_running:
+            return {"ok": False, "error": "Session already has an active stream", "active_stream_id": current_stream_id}
+        _clear_stale_stream_state(s)
+    workspace_value = getattr(s, "workspace", None) or get_last_workspace()
+    try:
+        workspace = str(resolve_trusted_workspace(workspace_value))
+    except Exception as exc:
+        return {"ok": False, "error": str(exc) or "Session workspace is unavailable"}
+    try:
+        model, model_provider, normalized_model = _resolve_compatible_session_model_state(
+            getattr(s, "model", None),
+            getattr(s, "model_provider", None),
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc) or "Session model is unavailable"}
+    response = _start_chat_stream_for_session(
+        s,
+        msg=str(prompt or ""),
+        attachments=[],
+        workspace=workspace,
+        model=model,
+        model_provider=model_provider,
+        normalized_model=normalized_model,
+    )
+    status = int(response.pop("_status", 200) or 200)
+    if status >= 400:
+        return {"ok": False, "error": response.get("error") or "Could not start repair turn", **response}
+    return {"ok": True, **response}
 
 
 def _handle_goal_command(handler, body):

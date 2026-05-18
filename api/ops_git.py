@@ -100,14 +100,59 @@ def _status_args() -> list[str]:
     ]
 
 
-def _stage_args() -> list[str]:
-    return [
-        "add",
-        "-A",
-        "--",
-        ".",
-        *[f":(exclude){path}" for path in STATUS_EXCLUDED_PATHS],
-    ]
+def _is_status_excluded_path(path: str) -> bool:
+    normalized = str(path or "").replace("\\", "/").lstrip("./")
+    if not normalized:
+        return False
+    for excluded in STATUS_EXCLUDED_PATHS:
+        clean = excluded.strip("/")
+        if normalized == clean or normalized.startswith(f"{clean}/"):
+            return True
+    return False
+
+
+def _parse_z_paths(raw: str) -> list[str]:
+    if not raw:
+        return []
+    return [part for part in raw.split("\x00") if part]
+
+
+def _git_z_paths(repo_path: Path, args: list[str], *, timeout: float = 8.0) -> list[str]:
+    result = _run_git(repo_path, args, timeout=timeout)
+    if result.returncode != 0:
+        raise OpsGitError(_git_failure_detail(result) or f"Git {' '.join(args[:1] or ['operation'])} failed.", 409)
+    return _parse_z_paths(result.stdout)
+
+
+def _paths_to_stage(repo_path: Path) -> list[str]:
+    paths: list[str] = []
+    seen: set[str] = set()
+    for path in [
+        *_git_z_paths(repo_path, ["diff", "--name-only", "-z"], timeout=8.0),
+        *_git_z_paths(repo_path, ["ls-files", "-o", "--exclude-standard", "-z"], timeout=8.0),
+    ]:
+        if not path or path in seen or _is_status_excluded_path(path):
+            continue
+        seen.add(path)
+        paths.append(path)
+    return paths
+
+
+def _unstage_status_excluded_paths(repo_path: Path) -> None:
+    # The project page intentionally hides these local Hermes/Cloud Terminal
+    # artifacts from status. Keep the push button consistent by ensuring an
+    # already-staged artifact is not silently included in the auto-commit.
+    _checked_git(repo_path, ["reset", "-q", "--", *STATUS_EXCLUDED_PATHS], timeout=30.0)
+
+
+def _stage_project_changes(repo_path: Path) -> None:
+    _unstage_status_excluded_paths(repo_path)
+    paths = _paths_to_stage(repo_path)
+    if not paths:
+        return
+    batch_size = 100
+    for index in range(0, len(paths), batch_size):
+        _checked_git(repo_path, ["add", "-A", "--", *paths[index : index + batch_size]], timeout=30.0)
 
 
 def _project_repo_path(project_id: str) -> tuple[dict, Path]:
@@ -381,7 +426,7 @@ def _commit_project_changes_if_needed(repo_path: Path, commit_message: str | Non
     status_output = _git_stdout(repo_path, _status_args(), timeout=8.0) or ""
     if not status_output.strip():
         return False
-    _checked_git(repo_path, _stage_args(), timeout=30.0)
+    _stage_project_changes(repo_path)
     message = str(commit_message or "").strip() or _default_push_commit_message()
     _checked_git(
         repo_path,

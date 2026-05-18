@@ -118,6 +118,8 @@
       const playNeedsRepair=source.playNeedsRepair===true;
       const playLocked=source.playLocked===true;
       const playFallbackError=String(source.playFallbackError||'').trim();
+      const playLogText=String(source.playLogText||source.playLogsText||'').trim();
+      const playLogs=Array.isArray(source.playLogs)?cloneCompat(source.playLogs):[];
       const playPrimaryAction=String(source.playPrimaryAction||'').trim();
       const playRepairAvailable=source.playRepairAvailable===true;
       const terminalTarget=source.terminalTarget&&typeof source.terminalTarget==='object'
@@ -144,6 +146,8 @@
         playNeedsRepair:playNeedsRepair,
         playLocked:playLocked,
         playFallbackError:playFallbackError,
+        playLogText:playLogText,
+        playLogs:playLogs,
         playPrimaryAction:playPrimaryAction,
         playRepairAvailable:playRepairAvailable,
         terminalTarget:terminalTarget,
@@ -792,7 +796,7 @@
     },
     play:{
       status(projectId){
-        return api(compatProjectUrl(projectId,'/play/status'));
+        return api(compatProjectUrl(projectId,'/play/status'),{allowErrorPayload:true});
       },
       logs(projectId, limit=1000){
         return api(compatProjectUrl(projectId,`/play/logs${q({limit})}`));

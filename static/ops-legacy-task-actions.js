@@ -47,6 +47,7 @@
     const sendTurn=ctx&&ctx.sendTurn;
     const autoResize=ctx&&ctx.autoResize;
     const clearQuickTaskImages=ctx&&ctx.clearQuickTaskImages;
+    const enterOpsSessionInspectMode=ctx&&ctx.enterOpsSessionInspectMode;
     if(
       !OPS
       || !AgentBridgeRef
@@ -387,6 +388,35 @@
       return activeProfile||'default';
     }
 
+    function setActiveProfileForOpsSession(profile){
+      const profileName=String(profile||'').trim();
+      if(!profileName)return '';
+      const state=stateRef();
+      if(state){
+        state.activeProfile=profileName;
+        if(state.session&&!state.session.profile)state.session.profile=profileName;
+      }
+      const profileLabel=domLookup('profileChipLabel');
+      if(profileLabel)profileLabel.textContent=profileName;
+      const compactProfileLabel=domLookup('profileChipCompactLabel');
+      if(compactProfileLabel)compactProfileLabel.textContent=profileName;
+      return profileName;
+    }
+
+    function selectLoadedOpsSessionProfile(fallbackProfile){
+      const state=stateRef();
+      const sessionProfile=String(state&&state.session&&state.session.profile||'').trim();
+      return setActiveProfileForOpsSession(sessionProfile||fallbackProfile);
+    }
+
+    function openLoadedOpsSession(sessionRef){
+      selectLoadedOpsSessionProfile('');
+      closeOpsDashboard();
+      if(typeof enterOpsSessionInspectMode==='function'){
+        enterOpsSessionInspectMode({source:'ops-dashboard',sessionId:sessionRef});
+      }
+    }
+
     async function newChatInProject(projectOverride){
       const project=projectOverride||OPS.currentProject;
       if(!project)return;
@@ -405,7 +435,7 @@
         await AgentBridgeRef.sessions.rename(data.session,`${nameOf(project)} session`);
         await loadSession(data.session);
         await renderSessionList();
-        closeOpsDashboard();
+        openLoadedOpsSession(sessionRefValue(data.session)||data.session.session_id);
         showToast('Opened '+nameOf(project),2600);
       }
     }
@@ -414,9 +444,9 @@
       const sessionRef=sessionRefValue(sessionId);
       if(!sessionRef)return;
       try{
-        await loadSession(sessionRef);
+        await loadSession(sessionRef,{force:true});
         await renderSessionList();
-        closeOpsDashboard();
+        openLoadedOpsSession(sessionRef);
       }catch(error){
         showToast(error&&error.message?error.message:'Unable to open session',3600);
         throw error;
@@ -452,7 +482,7 @@
     async function deleteOpsSessionRecord(sessionId){
       const sid=sessionRefValue(sessionId);
       if(!sid)return false;
-      await AgentBridgeRef.sessions.remove(sid);
+      await AgentBridgeRef.sessions.archive(sid,true);
       OPS.sessions=(OPS.sessions||[]).filter(session=>sessionRefValue(session)!==sid);
       await clearDeletedSessionFromMainView(sid);
       return true;
@@ -484,6 +514,33 @@
         renderHome();
       }else{
         renderProjects();
+      }
+    }
+
+    function sessionActionRefValue(sessionLike){
+      if(!sessionLike)return '';
+      if(typeof sessionLike==='string')return String(sessionLike).trim();
+      const direct=String(sessionLike.session_id||sessionLike.sessionId||sessionLike.id||'').trim();
+      if(direct)return direct;
+      return String(sessionLike.sessionKey||sessionLike.session_key||sessionRefValue(sessionLike)||'').trim();
+    }
+
+    function normalizeClosedSessionIds(value){
+      const raw=Array.isArray(value)?value:[value];
+      const ids=new Set();
+      raw.forEach(entry=>{
+        const sid=sessionActionRefValue(entry)||String(entry||'').trim();
+        if(sid)ids.add(sid);
+      });
+      return ids;
+    }
+
+    function removeClosedSessionRefs(sessionIds){
+      const ids=normalizeClosedSessionIds(sessionIds);
+      if(!ids.size)return;
+      OPS.sessions=(OPS.sessions||[]).filter(session=>!ids.has(sessionActionRefValue(session)));
+      if(Array.isArray(OPS.sessionActivity)){
+        OPS.sessionActivity=OPS.sessionActivity.filter(session=>!ids.has(sessionActionRefValue(session)));
       }
     }
 
@@ -527,6 +584,7 @@
       });
       if(!ok)return;
       const previousSessions=Array.isArray(OPS.sessions)?OPS.sessions.slice():[];
+      const previousActivity=Array.isArray(OPS.sessionActivity)?OPS.sessionActivity.slice():null;
       const previousTaskState=linked&&linked.task?{
         inProgress:linked.task.inProgress,
         sessionId:linked.task.sessionId,
@@ -534,7 +592,7 @@
         lastSessionAt:linked.task.lastSessionAt,
         startedAt:linked.task.startedAt,
       }:null;
-      OPS.sessions=previousSessions.filter(session=>sessionRefValue(session)!==sessionRef);
+      removeClosedSessionRefs([sessionRef]);
       if(linked&&linked.task){
         linked.task.inProgress=false;
         delete linked.task.sessionId;
@@ -543,7 +601,8 @@
       renderAfterSessionCloseMutation(project);
       try{
         if(project&&linked){
-          await AgentBridgeRef.sessions.closeTask(project.id,linked.task.id,{sessionId:sessionRef});
+          const closeResult=await AgentBridgeRef.sessions.closeTask(project.id,linked.task.id,{sessionId:sessionRef});
+          removeClosedSessionRefs([sessionRef,closeResult&&closeResult.sessionId,...(Array.isArray(closeResult&&closeResult.closedSessionIds)?closeResult.closedSessionIds:[])]);
           await refreshOpsSessions().catch(()=>OPS.sessions||[]);
         }else{
           await deleteOpsSessionRecord(sessionRef);
@@ -559,6 +618,7 @@
         showToast('Session closed',2200);
       }catch(error){
         OPS.sessions=previousSessions;
+        if(previousActivity)OPS.sessionActivity=previousActivity;
         if(previousTaskState&&linked&&linked.task){
           Object.assign(linked.task,previousTaskState);
         }
@@ -604,7 +664,7 @@
       return {
         sessionId:session.session_id,
         sessionKey:sessionRefValue(session),
-        alreadyRunning:!!session.active_stream_id,
+        alreadyRunning:!!(data&&data.reused)||!!session.active_stream_id,
         epic,
         task,
       };
@@ -615,16 +675,19 @@
       const opts=options&&typeof options==='object'?options:{};
       const pendingQuickTaskFiles=Array.isArray(opts.files)?opts.files.filter(Boolean):[];
       const goalMode=!!opts.goalMode;
+      const openInspectAfterStart=opts.openInspectAfterStart===true;
+      let openedInspectBeforeSend=false;
       setBusy(true);
       try{
         const {sessionId,sessionKey,alreadyRunning,epic,task}=await ensureTaskSession(match,project);
-        await loadSession(sessionKey||sessionId);
+        await loadSession(sessionKey||sessionId,{force:true});
+        selectLoadedOpsSessionProfile(currentOpsProfile(project));
         await renderSessionList();
         const state=stateRef();
         const sessionRunning=!!(state&&state.session&&sessionRefValue(state.session)===(sessionKey||sessionId)&&(state.session.active_stream_id||state.activeStreamId));
         if(alreadyRunning||sessionRunning){
           showToast('Opened running task session',2600);
-          closeOpsDashboard();
+          openLoadedOpsSession(sessionKey||sessionId);
           return;
         }
         const msg=domLookup('msg');
@@ -643,12 +706,19 @@
           // Remove this once upstream Hermes WebUI ships native goal-mode support.
           msg.value=goalMode?`/goal ${taskPrompt}`:taskPrompt;
           if(typeof autoResize==='function')autoResize();
+          if(openInspectAfterStart){
+            openLoadedOpsSession(sessionKey||sessionId);
+            openedInspectBeforeSend=true;
+          }
           await sendTurn();
           await recordOpsRun(project,epic,task,sessionId,'running',goalMode?'Task goal execution was started from the ops dashboard.':'Task execution was started from the ops dashboard.');
           showToast(goalMode?'Task goal started':'Task execution started',2400);
+          if(openInspectAfterStart&&!openedInspectBeforeSend){
+            openLoadedOpsSession(sessionKey||sessionId);
+          }
         }else{
           showToast('Opened task session',2400);
-          closeOpsDashboard();
+          openLoadedOpsSession(sessionKey||sessionId);
         }
       }finally{
         setBusy(false);
@@ -776,7 +846,7 @@
         OPS.quickTaskStatusKind='info';
         if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
         try{
-          await executeTaskMatch(project,match,{files:pendingQuickTaskFiles,goalMode});
+          await executeTaskMatch(project,match,{files:pendingQuickTaskFiles,goalMode,openInspectAfterStart:true});
           OPS.quickTaskStatus=goalMode?'Quick task created and goal started.':'Quick task created and execution started.';
           OPS.quickTaskStatusKind='success';
         }catch(execErr){

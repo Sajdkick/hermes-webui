@@ -321,6 +321,8 @@
   </aside>
   <main class="main">
     <div id="mainChat" class="main-view">
+    <button id="opsSessionInspectBack" class="ops-session-inspect-back" type="button" onclick="exitOpsSessionInspectMode({openDashboard:true})" hidden aria-label="Back to Ops dashboard">← Back to Ops dashboard</button>
+    <button id="opsSessionInspectRefresh" class="ops-session-inspect-refresh" type="button" onclick="forceRefreshOpsSessionInspectMode()" hidden aria-label="Refresh session chat" title="Refresh session chat"><span aria-hidden="true">↻</span><span>Refresh</span></button>
     <div class="messages-shell">
       <button id="jumpToSessionStartBtn" class="session-jump-btn session-jump-btn--start" aria-label="Jump to beginning of session" data-i18n-aria-label="session_jump_start_label" data-i18n-title="session_jump_start_label" onclick="jumpToSessionStart()" style="display:none"><span aria-hidden="true">↑</span><span data-i18n="session_jump_start">Start</span></button>
       <button id="scrollToBottomBtn" class="scroll-to-bottom-btn" style="display:none" onclick="scrollToBottom()" aria-label="Scroll to bottom" data-i18n-aria-label="session_jump_end_label" data-i18n-title="session_jump_end_label"><span aria-hidden="true">↓</span><span class="session-jump-btn__text" data-i18n="session_jump_end">End</span></button>

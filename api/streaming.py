@@ -1952,6 +1952,28 @@ def _merge_display_messages_after_agent_result(previous_display, previous_contex
     current_user_in_candidates = any(
         _message_identity(m) == current_user_key for m in candidates
     )
+    if current_user_key is not None and current_user_in_candidates:
+        current_user_idx = next(
+            (idx for idx, m in enumerate(candidates) if _message_identity(m) == current_user_key),
+            None,
+        )
+        if current_user_idx is not None:
+            first_response_idx = next(
+                (
+                    idx for idx, m in enumerate(candidates[:current_user_idx])
+                    if isinstance(m, dict) and m.get('role') in ('assistant', 'tool')
+                ),
+                None,
+            )
+            if first_response_idx is not None:
+                # Some provider/result replay paths return the current assistant
+                # delta before the user prompt that produced it. If persisted as-is,
+                # the chat shows the user's message under the answer after done.
+                # Keep any leading compaction markers in front, but make the
+                # current user turn the boundary before assistant/tool output.
+                current_user_msg = candidates[current_user_idx]
+                candidates = candidates[:current_user_idx] + candidates[current_user_idx + 1:]
+                candidates = candidates[:first_response_idx] + [current_user_msg] + candidates[first_response_idx:]
     current_user_already_checkpointed = bool(
         merged and _message_identity(merged[-1]) == current_user_key
     )
@@ -2199,7 +2221,7 @@ def _last_resort_sync_from_core(session, stream_id, agent_lock):
 
 
 def _attempt_credential_self_heal(
-    provider_id, session_id, _agent_lock_ref,
+    provider_id, session_id, _agent_lock_ref, hermes_home=None,
 ):
     """Try to silently refresh credentials after a 401/auth error (#1401).
 
@@ -2244,6 +2266,7 @@ def _attempt_credential_self_heal(
         _new_rt = resolve_runtime_provider_with_anthropic_env_lock(
             resolve_runtime_provider,
             requested=provider_id,
+            hermes_home=hermes_home,
         )
 
         logger.info(
@@ -2513,6 +2536,7 @@ def _run_agent_streaming(
             _profile_runtime_env = get_profile_runtime_env(_profile_home_path)
         except ImportError:
             _profile_home = os.environ.get('HERMES_HOME', '')
+            _profile_home_path = Path(_profile_home).expanduser() if _profile_home else None
             _profile_runtime_env = {}
             patch_skill_home_modules = None
 
@@ -2955,6 +2979,7 @@ def _run_agent_streaming(
                 _rt = resolve_runtime_provider_with_anthropic_env_lock(
                     resolve_runtime_provider,
                     requested=resolved_provider,
+                    hermes_home=_profile_home_path,
                 )
                 resolved_api_key = _rt.get("api_key")
                 if not resolved_provider:
@@ -3547,7 +3572,7 @@ def _run_agent_streaming(
                         # and retrying once with a fresh agent.
                         _heal_result = None
                         _heal_rt = _attempt_credential_self_heal(
-                            resolved_provider or '', session_id, _agent_lock,
+                            resolved_provider or '', session_id, _agent_lock, _profile_home_path,
                         )
                         if _heal_rt is not None:
                             logger.info('[webui] self-heal: retrying stream after credential refresh')
@@ -3707,9 +3732,11 @@ def _run_agent_streaming(
                 # see the same Lock object until they release it.
                 _agent_sid = getattr(agent, 'session_id', None)
                 _compressed = False
+                _compression_old_sid = None
                 if _agent_sid and _agent_sid != session_id:
                     old_sid = session_id
                     new_sid = _agent_sid
+                    _compression_old_sid = old_sid
                     old_path = SESSION_DIR / f'{old_sid}.json'
                     new_path = SESSION_DIR / f'{new_sid}.json'
                     s.session_id = new_sid
@@ -4037,6 +4064,18 @@ def _run_agent_streaming(
                     put('cancel', {'message': 'Cancelled by user'})
                     return
                 s.save()
+                if _compressed and _compression_old_sid and _compression_old_sid != s.session_id:
+                    try:
+                        from api import session_sidecars as _session_sidecars
+
+                        _session_sidecars.inherit_session_linkage(_compression_old_sid, s.session_id)
+                    except Exception:
+                        logger.debug(
+                            "Failed to inherit Ops session linkage from %s to %s after compression",
+                            _compression_old_sid,
+                            s.session_id,
+                            exc_info=True,
+                        )
                 if cancel_event.is_set():
                     _finalize_cancelled_turn(s, ephemeral=False)
                     try:
@@ -4070,6 +4109,11 @@ def _run_agent_streaming(
                         )
                     except Exception:
                         logger.debug("Failed to append completed turn journal event", exc_info=True)
+                    try:
+                        from api.ops_runs import complete_ops_runs_for_session
+                        complete_ops_runs_for_session(session_id, resolved_session_id=s.session_id)
+                    except Exception:
+                        logger.debug("Failed to complete Ops run for session %s", session_id, exc_info=True)
             # Sync to state.db for /insights (opt-in setting)
             try:
                 from api.config import load_settings as _load_settings
@@ -4355,7 +4399,7 @@ def _run_agent_streaming(
             if not _self_healed:
                 # ── Credential self-heal on 401 (#1401) ──
                 _heal_rt = _attempt_credential_self_heal(
-                    resolved_provider or '', session_id, _agent_lock,
+                    resolved_provider or '', session_id, _agent_lock, _profile_home_path,
                 )
                 if _heal_rt is not None:
                     logger.info('[webui] self-heal (except path): retrying stream after credential refresh')

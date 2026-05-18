@@ -148,6 +148,22 @@ def test_ops_phase_shell_back_link_resolves_to_main_app_under_trailing_slash_rou
     assert completed.stdout.strip() == "ok"
 
 
+def test_session_prefixed_ops_routes_redirect_to_site_root_ops_phase():
+    from api.routes import handle_get
+
+    stale_ops = _FakeHandler()
+    assert handle_get(stale_ops, urlparse("http://example.com/session/demo/ops")) is True
+    assert stale_ops.status == 302
+    assert stale_ops.header("Location") == "/ops-phase"
+    assert stale_ops.header("Cache-Control") == "no-store"
+
+    stale_ops_phase = _FakeHandler()
+    assert handle_get(stale_ops_phase, urlparse("http://example.com/session/demo/ops-phase?via=cache")) is True
+    assert stale_ops_phase.status == 302
+    assert stale_ops_phase.header("Location") == "/ops-phase?via=cache"
+    assert stale_ops_phase.header("Cache-Control") == "no-store"
+
+
 def test_ops_shell_bootstrap_api_is_registered():
     from api.routes import handle_get
 
@@ -204,6 +220,19 @@ def test_legacy_ops_shell_keeps_restart_compatibility_contract():
     assert "async function renderProjectPlayQuickAction(project){" not in dashboard_source
     assert "function renderProjectPlayQuickAction(project){" in quick_actions_source
     assert "async function renderProjectPlayQuickAction(project){" not in quick_actions_source
+    home_source = Path("static/ops-legacy-home.js").read_text(encoding="utf-8")
+    projects_source = Path("static/ops-legacy-projects.js").read_text(encoding="utf-8")
+    play_source = Path("static/ops-legacy-play.js").read_text(encoding="utf-8")
+    notifications_source = Path("static/ops-legacy-notifications.js").read_text(encoding="utf-8")
+    assert "settings.showPlayAction===false?'':renderProjectPlayQuickAction(project)" in home_source
+    assert "renderSessionWorkspaceActions({projectId:project.id,project},{showPlayAction:false})" in projects_source
+    assert "data-ops-log-scroll-key=\"play-logs:${esc(projectId)}\"" in play_source
+    assert "data-ops-log-scroll-key=\"play-notification:${esc(note&&note.id||'')}\"" in notifications_source
+    assert "function captureLogScrollState(container){" in home_source
+    assert "function restoreLogScrollState(container,snapshot){" in projects_source
+    assert "function restoreLogScrollState(container,snapshot){" in Path("static/ops-legacy-project-detail.js").read_text(encoding="utf-8")
+    assert "data-ops-log-scroll-key=\"runtime-play-logs:" in Path("static/ops-runtime.js").read_text(encoding="utf-8")
+    assert "restoreLogScrollState(root,logScrollState);" in Path("static/ops-projects.js").read_text(encoding="utf-8")
     assert "if(!capabilities.dependencyHealth){" in health_source
     assert "if(!capabilities.deployment){" in deployments_source
     assert "function currentOpsModelState(){" in task_actions_source
@@ -739,6 +768,114 @@ def test_play_notification_click_starts_build_and_opens_inspect_url():
     assert completed.stdout.strip() == "ok"
 
 
+def test_ops_host_api_allows_domain_error_payloads_when_requested():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        const source = fs.readFileSync('static/ops-legacy-host.js', 'utf8');
+        let fetchOptions = null;
+        const context = {
+          console,
+          URL,
+          URLSearchParams,
+          Headers,
+          setTimeout,
+          clearTimeout,
+          window: {
+            location: { href: 'http://example.test/ops' },
+            addEventListener: () => {},
+            localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+            sessionStorage: { setItem: () => {}, removeItem: () => {} },
+          },
+          document: {
+            baseURI: 'http://example.test/ops',
+            addEventListener: () => {},
+            getElementById: () => null,
+            createElement: () => ({ className: '', classList: { add: () => {}, remove: () => {} } }),
+            body: { appendChild: () => {} },
+          },
+          fetch: async (url, options) => {
+            fetchOptions = options || {};
+            return {
+              ok: true,
+              status: 200,
+              headers: { get: () => 'application/json' },
+              json: async () => ({ status: 'failed', error: 'Build failed: process exited with code 1.' }),
+              text: async () => '',
+            };
+          },
+        };
+        context.window.window = context.window;
+        vm.createContext(context);
+        vm.runInContext(source, context);
+
+        (async () => {
+          let threw = false;
+          try {
+            await context.window.api('/api/ops/projects/project-1/play/status');
+          } catch (error) {
+            threw = /Build failed/.test(String(error && error.message || error));
+          }
+          if (!threw) throw new Error('Default api() call should still reject 200 payload.error responses.');
+          const payload = await context.window.api('/api/ops/projects/project-1/play/status', { allowErrorPayload: true });
+          if (payload.status !== 'failed' || !payload.error) throw new Error('Allowed domain error payload was not returned.');
+          if (fetchOptions && Object.prototype.hasOwnProperty.call(fetchOptions, 'allowErrorPayload')){
+            throw new Error('Internal allowErrorPayload option leaked into fetch options.');
+          }
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+    assert completed.stdout.strip() == "ok"
+
+
+def test_play_status_bridge_allows_failed_pipeline_error_payload():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        const source = fs.readFileSync('static/ops-legacy-agent-bridge.js', 'utf8');
+        const calls = [];
+        const context = {
+          console,
+          URLSearchParams,
+          window: {},
+          JSON,
+          api: (path, options) => {
+            calls.push({ path, options: options || {} });
+            return Promise.resolve({ status: 'failed', error: 'Build failed: process exited with code 1.' });
+          },
+          projectUrl: (projectId, suffix) => `/api/ops/projects/${projectId}${suffix}`,
+          localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+          fetch: async () => ({ ok: true, status: 200, json: async () => ({}) }),
+        };
+        context.window.window = context.window;
+        vm.createContext(context);
+        vm.runInContext(source, context);
+
+        (async () => {
+          const payload = await context.window.AgentBridge.play.status('project-1');
+          if (payload.status !== 'failed' || !payload.error) throw new Error('Failed Play status payload was not returned.');
+          if (!calls.length || calls[0].path !== '/api/ops/projects/project-1/play/status') throw new Error('Play status route was not requested.');
+          if (calls[0].options.allowErrorPayload !== true) throw new Error('Play status bridge did not opt into domain error payloads.');
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+    assert completed.stdout.strip() == "ok"
+
+
 def test_play_quick_action_accepts_backend_status_fields():
     script = textwrap.dedent(
         """
@@ -771,6 +908,48 @@ def test_play_quick_action_accepts_backend_status_fields():
         if (!html.includes('data-ops-action="open-play"')) throw new Error('Quick action did not switch to Play.');
         if (html.includes('disabled')) throw new Error('Quick action Play button should not be disabled.');
         if (!html.includes('<span>Play</span>')) throw new Error('Quick action did not render Play label.');
+        console.log('ok');
+        """
+    )
+    completed = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+    assert completed.stdout.strip() == "ok"
+
+
+def test_play_quick_action_uses_build_capability_not_config_file_existence():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        const source = fs.readFileSync('static/ops-legacy-dashboard-quick-actions.js', 'utf8');
+        const context = { window: { HermesOpsModules: {} } };
+        vm.createContext(context);
+        vm.runInContext(source, context);
+        const dashboard = context.window.HermesOpsModules.dashboardQuickActions.bindDashboard({
+          OPS: { playBusyByProject: {} },
+          esc: (value) => String(value ?? ''),
+          svg: { play: '' },
+          playStatusFor: () => ({
+            status: 'idle',
+            configured: false,
+            valid: true,
+            configExists: false,
+            configAvailable: true,
+            buildAvailable: true,
+            canBuild: true,
+            ready: false,
+            inspectUrl: '',
+            title: 'Auto-detected package-script build workflow from package.json.',
+            label: 'Build ready',
+          }),
+          isPlayRunning: () => false,
+          playStatusTitle: (status) => status.title || '',
+          playStatusLabel: (status) => status.label || '',
+        });
+        const html = dashboard.renderProjectPlayQuickAction({ id: 'project-1' });
+        if (!html.includes('data-ops-action="start-play"')) throw new Error('Quick action did not render Build action.');
+        if (html.includes('disabled')) throw new Error('Build should not be disabled when buildAvailable=true and configExists=false.');
+        if (!html.includes('<span>Build</span>')) throw new Error('Quick action did not render Build label.');
         console.log('ok');
         """
     )

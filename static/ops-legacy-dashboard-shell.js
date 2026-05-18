@@ -159,6 +159,7 @@
         && windowRef.S.session.session_id
         && typeof windowRef.__opsLegacySessionUrlForSid==='function'
       ){
+        try{windowRef.sessionStorage.setItem('hermes-webui-ops-session-inspect', String(windowRef.S.session.session_id));}catch(_){}
         windowRef.location.assign(windowRef.__opsLegacySessionUrlForSid(windowRef.S.session.session_id));
         return;
       }

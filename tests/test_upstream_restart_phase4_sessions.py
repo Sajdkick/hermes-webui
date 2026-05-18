@@ -119,7 +119,74 @@ def test_phase4_launch_task_session_creates_persisted_linked_session(monkeypatch
     assert legacy_launch.status == 201
     legacy_payload = _response_json(legacy_launch)
     assert legacy_payload["session"]["source_tag"] == "ops_task"
+    assert legacy_payload["session"]["session_id"] == payload["session"]["session_id"]
+    assert legacy_payload["reused"] is True
     assert legacy_payload["sessionUrl"].endswith(legacy_payload["session"]["session_id"])
+
+    tasks_after_relaunch = _RouteHandler()
+    assert handle_get(tasks_after_relaunch, urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks")) is True
+    relaunched_task = next(epic["tasks"][0] for epic in _route_response_json(tasks_after_relaunch)["epics"] if epic["id"] == epic_id)
+    assert [link["sessionId"] for link in relaunched_task["linkedSessions"]] == [payload["session"]["session_id"]]
+
+    repeat_launch = _FakeHandler()
+    assert handle_post(
+        repeat_launch,
+        urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks/{task['id']}/sessions/launch"),
+    ) is True
+    assert repeat_launch.status == 201
+    repeat_payload = _response_json(repeat_launch)
+    assert repeat_payload["session"]["session_id"] == payload["session"]["session_id"]
+    assert repeat_payload["reused"] is True
+
+
+
+def test_phase4_ops_sessions_dedupes_historic_duplicate_task_sessions(monkeypatch, tmp_path, git_available):
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
+
+    repo = init_project_repo(tmp_path)
+
+    from api.routes import handle_post
+    from api import ops_sessions, session_sidecars
+    from api.models import new_session
+
+    create = _FakeHandler({"name": "Duplicate Session Project", "path": str(repo), "coreBranch": "main"})
+    assert handle_post(create, urlparse("http://example.com/api/ops/projects")) is True
+    project = _response_json(create)["project"]
+
+    epic_create = _FakeHandler({"title": "Phase 4"})
+    assert handle_post(epic_create, urlparse(f"http://example.com/api/ops/projects/{project['id']}/epics")) is True
+    epic_id = _response_json(epic_create)["epic"]["id"]
+
+    task_create = _FakeHandler({"epicId": epic_id, "text": "Do not show duplicate active sessions"})
+    assert handle_post(task_create, urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks")) is True
+    task = _response_json(task_create)["task"]
+
+    launch = _FakeHandler()
+    assert handle_post(
+        launch,
+        urlparse(f"http://example.com/api/ops/projects/{project['id']}/tasks/{task['id']}/sessions/launch"),
+    ) is True
+    original_session_id = _response_json(launch)["session"]["session_id"]
+
+    duplicate = new_session(workspace=str(repo.resolve()), project_id=project["id"])
+    duplicate.title = "Duplicate Session Project: Do not show duplicate active sessions"
+    duplicate.source_tag = "ops_task"
+    duplicate.source_label = "Ops task"
+    duplicate.active_stream_id = "stream-duplicate"
+    duplicate.save()
+    session_sidecars.set_session_linkage(duplicate.session_id, project["id"], task["id"])
+
+    payload = ops_sessions.list_ops_sessions(project["id"])
+    task_sessions = [
+        session["session_id"]
+        for session in payload["sessions"]
+        if session.get("ops_project_id") == project["id"] and session.get("ops_task_id") == task["id"]
+    ]
+
+    assert original_session_id not in task_sessions
+    assert task_sessions == [duplicate.session_id]
+    assert payload["groups"][0]["sessionCount"] == 1
+
 
 
 def test_phase4_ops_sessions_route_enriches_latest_task_session_tip(monkeypatch, tmp_path, git_available):
@@ -299,6 +366,24 @@ def test_phase4_close_task_session_archives_linked_session_and_stops_run(monkeyp
     session_id = launch_payload["session"]["session_id"]
     run_id = launch_payload["run"]["id"]
 
+    cancelled_streams = []
+
+    def fake_cancel_stream(stream_id):
+        cancelled_streams.append(stream_id)
+        live_session = get_session(session_id)
+        live_session.active_stream_id = None
+        live_session.pending_user_message = None
+        live_session.pending_attachments = None
+        live_session.pending_started_at = None
+        live_session.save()
+        return True
+
+    live_session = get_session(session_id)
+    live_session.active_stream_id = "stream-close-1"
+    live_session.pending_user_message = "Close while the task is running"
+    live_session.save()
+    monkeypatch.setattr("api.streaming.cancel_stream", fake_cancel_stream)
+
     close = _FakeHandler({"sessionId": session_id})
     assert handle_post(
         close,
@@ -310,6 +395,8 @@ def test_phase4_close_task_session_archives_linked_session_and_stops_run(monkeyp
     assert close_payload["sessionId"] == session_id
     assert close_payload["run"]["id"] == run_id
     assert close_payload["run"]["status"] == "stopped"
+    assert close_payload["cancelledStream"] is True
+    assert cancelled_streams == ["stream-close-1"]
     assert get_session(session_id).archived is True
 
     tasks = _FakeHandler()

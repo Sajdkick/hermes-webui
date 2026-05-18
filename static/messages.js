@@ -737,8 +737,9 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
         const st=await api(`/api/chat/stream/status?stream_id=${encodeURIComponent(streamId)}`);
         if(st&&st.active){
           _applyStreamSnapshot(st);
-          setComposerStatus('Reconnected');
-          _wireSSE(new EventSource(new URL(`api/chat/stream?stream_id=${encodeURIComponent(streamId)}`,document.baseURI||location.href).href,{withCredentials:true}));
+          const reconnectSource=new EventSource(new URL(`api/chat/stream?stream_id=${encodeURIComponent(streamId)}`,document.baseURI||location.href).href,{withCredentials:true});
+          reconnectSource.addEventListener('open',()=>setComposerStatus('Reconnected'),{once:true});
+          _wireSSE(reconnectSource);
           return;
         }
       }
@@ -1779,7 +1780,10 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
 
     source.addEventListener('error',async e=>{
       source.close();
-      if(_deferStreamErrorIfOffline()) return;
+      if(_deferStreamErrorIfOffline()){
+        _scheduleReconnect(e&&e.error);
+        return;
+      }
       if(_terminalStateReached || _streamFinalized){
         _closeSource();
         return;

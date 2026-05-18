@@ -4977,7 +4977,7 @@ function _siteRootUrl(path){
 
 function openOpsDashboard(){
   if(typeof window==='undefined' || !window.location) return;
-  const target=_appRelativeUrl('ops');
+  const target=_siteRootUrl('ops-phase');
   if(typeof window.location.assign==='function'){
     window.location.assign(target);
     return;

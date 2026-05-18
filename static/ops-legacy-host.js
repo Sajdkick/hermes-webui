@@ -38,6 +38,8 @@
 
   async function api(path, options){
     const opts = options && typeof options === 'object' ? {...options} : {};
+    const allowErrorPayload = opts.allowErrorPayload === true;
+    delete opts.allowErrorPayload;
     const headers = new Headers(opts.headers || {});
     if(opts.body != null && typeof opts.body === 'string' && !headers.has('Content-Type')){
       headers.set('Content-Type', 'application/json');
@@ -55,7 +57,7 @@
       const text = await response.text().catch(() => '');
       payload = text ? {error: text} : {};
     }
-    if(!response.ok || (payload && payload.error)){
+    if(!response.ok || (payload && payload.error && !allowErrorPayload)){
       throw new Error((payload && payload.error) || ('Request failed (' + response.status + ')'));
     }
     return payload;
@@ -413,6 +415,7 @@
 
   function closeOpsDashboard(){
     if(S.session && S.session.session_id){
+      try{window.sessionStorage.setItem('hermes-webui-ops-session-inspect', String(S.session.session_id));}catch(_){}
       window.location.assign(sessionUrlForSid(S.session.session_id));
       return;
     }

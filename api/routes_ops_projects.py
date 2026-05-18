@@ -20,6 +20,7 @@ _PROJECT_EPICS_RE = re.compile(r"^/api/ops/projects/([^/]+)/epics/?$")
 _PROJECT_EPIC_DELETE_RE = re.compile(r"^/api/ops/projects/([^/]+)/epics/([^/]+)/delete/?$")
 _PROJECT_TASK_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/([^/]+)/?$")
 _PROJECT_TASK_UPDATE_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/([^/]+)/update/?$")
+_PROJECT_TASK_IMAGE_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/([^/]+)/images/?$")
 _PROJECT_TASK_DELETE_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/([^/]+)/delete/?$")
 _PROJECT_TASK_COMPLETE_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/([^/]+)/complete/?$")
 _PROJECT_TASK_ARCHIVE_COMPLETED_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/archive-completed/?$")
@@ -106,6 +107,11 @@ def handle_post(handler, parsed, body: dict) -> bool:
         match = _PROJECT_TASK_UPDATE_RE.match(parsed.path)
         if match:
             j(handler, ops_projects.update_ops_project_task(match.group(1), match.group(2), body))
+            return True
+
+        match = _PROJECT_TASK_IMAGE_RE.match(parsed.path)
+        if match:
+            j(handler, ops_projects.add_ops_project_task_image(match.group(1), match.group(2), body), status=201)
             return True
 
         match = _PROJECT_TASK_DELETE_RE.match(parsed.path)

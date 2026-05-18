@@ -28,25 +28,35 @@
         projectId,
         status:'idle',
         configured:false,
+        valid:false,
+        buildAvailable:false,
+        canBuild:false,
         configValid:false,
         configAvailable:false,
         running:false,
         ready:false,
         logsAvailable:false,
         kind:'idle',
-        label:'No Play config',
-        title:'Play status unavailable.',
-        summary:'Play status unavailable.',
+        label:'Checking build status',
+        title:'Checking whether this project has a Build workflow.',
+        summary:'Checking whether this project has a Build workflow.',
       };
       return mergeStatusWithReadyNotification(projectId,status);
     }
 
+    function playStatusCanBuild(status){
+      if(!status)return false;
+      if(status.canBuild===true||status.buildAvailable===true||status.playBuildAvailable===true)return true;
+      if(status.canBuild===false||status.buildAvailable===false||status.playBuildAvailable===false)return false;
+      return !!(status&&(status.configAvailable===true||status.configExists===true||status.configured===true)&&(status.configValid===true||status.valid===true));
+    }
+
     function playStatusConfigured(status){
-      return !!(status&&(status.configAvailable===true||status.configExists===true||status.configured===true));
+      return playStatusCanBuild(status);
     }
 
     function playStatusValid(status){
-      return !!(status&&(status.configValid===true||status.valid===true));
+      return playStatusCanBuild(status)||!!(status&&(status.configValid===true||status.valid===true));
     }
 
     function playNotificationProjectId(note){
@@ -68,11 +78,31 @@
       OPS.notifications=OPS.notifications.filter(note=>!(note&&note.kind==='play'&&playNotificationProjectId(note)===id));
     }
 
+    function projectPlayNotifications(projectId){
+      const id=String(projectId||'').trim();
+      if(!id||!Array.isArray(OPS.notifications))return [];
+      return OPS.notifications.filter(note=>note&&note.kind==='play'&&playNotificationProjectId(note)===id);
+    }
+
+    function isLockedPlayNotification(note){
+      if(!note||note.kind!=='play')return false;
+      if(note.playLocked===true)return true;
+      return ['queued','building','starting'].includes(String(note.playStatus||'').trim().toLowerCase());
+    }
+
     async function refreshProjectPlayNotifications(projectId){
       const id=String(projectId||'').trim();
       if(!id||typeof loadNotifications!=='function')return [];
-      clearProjectPlayNotifications(id);
+      const previousProjectPlayNotes=projectPlayNotifications(id);
       const notes=await loadNotifications().catch(()=>[]);
+      const hasFreshProjectPlay=Array.isArray(notes)&&notes.some(note=>note&&note.kind==='play'&&playNotificationProjectId(note)===id);
+      if(!hasFreshProjectPlay&&shouldPollPlayStatus(OPS.playStatusByProject[id])){
+        const lockedPrevious=previousProjectPlayNotes.find(isLockedPlayNotification);
+        if(lockedPrevious){
+          clearProjectPlayNotifications(id);
+          OPS.notifications=[lockedPrevious].concat(Array.isArray(OPS.notifications)?OPS.notifications:[]);
+        }
+      }
       renderCurrentOpsView();
       return notes;
     }
@@ -101,6 +131,8 @@
         summary:current.summary||current.statusSummary||message,
         configured:true,
         valid:true,
+        buildAvailable:true,
+        canBuild:true,
         configExists:true,
         configAvailable:true,
         configValid:true,
@@ -228,7 +260,7 @@
       const blockClass=detail||projectCard?'ops-play-block detail':'ops-play-block';
       const primaryButtonClass=detail||projectCard?'menu-action-btn small':'ops-btn primary';
       const secondaryButtonClass=detail||projectCard?'menu-action-btn secondary small':'ops-btn';
-      const startTitle=configured?playStatusTitle(status):'Add project_play.json or .cloud-terminal/play.json to enable Build.';
+      const startTitle=canStart?playStatusTitle(status):(status.buildUnavailableReason||playStatusTitle(status)||'Build is not available for this project yet.');
       const summary=playStatusSummary(status);
       const startLabel=busy&&OPS.playBusyByProject[project.id]==='start'?'Building...':'Build';
       const openLabel='Play';
@@ -266,7 +298,7 @@
             </div>
           </div>
           <div class="tasks-card-body">
-            <pre class="ops-play-logs">${esc(text||'No Play logs yet.')}</pre>
+            <pre class="ops-play-logs" data-ops-log-scroll-key="play-logs:${esc(projectId)}">${esc(text||'No Play logs yet.')}</pre>
           </div>
         </section>
       `;
@@ -435,11 +467,6 @@
       return url&&(status&&status.ready===true||state==='ready')?url:'';
     }
 
-    function playStatusCanBuild(status){
-      if(!status)return false;
-      return playStatusConfigured(status)&&playStatusValid(status);
-    }
-
     function playNotificationStartPayload(note,target){
       const cleanTarget={
         projectId:String(target&&target.projectId||''),
@@ -501,7 +528,7 @@
       }
       if(!playStatusCanBuild(status)){
         if(typeof openProjectDetail==='function')await openProjectDetail(projectId);
-        showToast('Play is not configured correctly for this project. Add or fix the project Play config in the repository, then try Build again.',4200);
+        showToast((status&&status.buildUnavailableReason)||playStatusSummary(status)||'No runnable Build workflow was found for this project yet.',4200);
         return;
       }
       const state=String(status&&status.status||'').toLowerCase();

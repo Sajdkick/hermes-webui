@@ -304,6 +304,165 @@ def test_runtime_provider_wrapper_backfills_codex_singleton_from_pool(monkeypatc
     assert provider_state["auth_mode"] == "chatgpt"
 
 
+def test_runtime_provider_wrapper_backfills_explicit_profile_home(monkeypatch, tmp_path):
+    """Task/profile streams must prime Codex tokens in the session profile home.
+
+    Ops task sessions run in a background streaming thread where active-profile
+    TLS is unavailable and process-global profile state can point at the default
+    profile. The runtime-provider wrapper therefore needs an explicit
+    ``hermes_home`` override; otherwise the Codex credential_pool mirror can be
+    written to the wrong auth.json and the task session fails with the familiar
+    ``OPENAI-CODEX_API_KEY`` error despite a browser OAuth login.
+    """
+    import api.oauth as oauth
+
+    default_home = tmp_path / "default"
+    profile_home = tmp_path / "profiles" / "hermes"
+    default_home.mkdir(parents=True)
+    profile_home.mkdir(parents=True)
+    (default_home / "auth.json").write_text(json.dumps({"version": 1}), encoding="utf-8")
+    profile_auth_path = profile_home / "auth.json"
+    profile_auth_path.write_text(json.dumps({
+        "version": 1,
+        "credential_pool": {
+            "openai-codex": [{
+                "id": "codex-oauth-profile",
+                "label": "Codex OAuth",
+                "auth_type": "oauth",
+                "source": "manual:device_code",
+                "access_token": "profile-access-secret",
+                "refresh_token": "profile-refresh-secret",
+                "base_url": "https://chatgpt.com/backend-api/codex",
+                "last_refresh": "2026-05-15T01:00:00Z",
+            }]
+        }
+    }), encoding="utf-8")
+
+    fake_streaming = types.ModuleType("api.streaming")
+    fake_streaming._ENV_LOCK = threading.Lock()
+    monkeypatch.setitem(sys.modules, "api.streaming", fake_streaming)
+    monkeypatch.setattr(oauth, "_get_active_hermes_home", lambda: default_home)
+    monkeypatch.setenv("HERMES_HOME", str(default_home))
+
+    def _resolver(*, requested):
+        assert os.environ["HERMES_HOME"] == str(profile_home)
+        store = json.loads(profile_auth_path.read_text(encoding="utf-8"))
+        return {
+            "requested": requested,
+            "provider_state": store["providers"]["openai-codex"],
+        }
+
+    payload = oauth.resolve_runtime_provider_with_anthropic_env_lock(
+        _resolver,
+        requested="openai-codex",
+        hermes_home=profile_home,
+    )
+
+    assert payload["requested"] == "openai-codex"
+    assert payload["provider_state"]["tokens"] == {
+        "access_token": "profile-access-secret",
+        "refresh_token": "profile-refresh-secret",
+    }
+    default_store = json.loads((default_home / "auth.json").read_text(encoding="utf-8"))
+    assert "providers" not in default_store
+    assert os.environ["HERMES_HOME"] == str(default_home)
+
+
+def test_runtime_provider_wrapper_repairs_stale_profile_codex_from_root(monkeypatch, tmp_path):
+    """Stale named-profile Codex tokens should not strand Ops task sessions.
+
+    A named profile with local Codex entries shadows the root profile. If those
+    local tokens are older/stale but root has a newer successful login, the
+    WebUI runtime wrapper should repair the profile-specific auth.json and retry
+    the shared runtime provider resolution instead of falling through to the
+    generic ``OPENAI-CODEX_API_KEY`` failure path.
+    """
+    import api.oauth as oauth
+
+    root_home = tmp_path / "home"
+    profile_home = root_home / "profiles" / "hermes"
+    root_home.mkdir(parents=True)
+    profile_home.mkdir(parents=True)
+
+    root_auth = {
+        "version": 1,
+        "credential_pool": {
+            "openai-codex": [{
+                "id": "root-codex",
+                "label": "Codex OAuth",
+                "auth_type": "oauth",
+                "priority": 0,
+                "source": "manual:device_code",
+                "access_token": "root-access-secret",
+                "refresh_token": "root-refresh-secret",
+                "base_url": "https://chatgpt.com/backend-api/codex",
+                "last_refresh": "2026-05-15T05:28:50Z",
+            }]
+        },
+        "providers": {
+            "openai-codex": {
+                "tokens": {"access_token": "root-access-secret", "refresh_token": "root-refresh-secret"},
+                "last_refresh": "2026-05-15T05:28:50Z",
+                "auth_mode": "chatgpt",
+            }
+        },
+    }
+    profile_auth = {
+        "version": 1,
+        "credential_pool": {
+            "openai-codex": [{
+                "id": "profile-codex-old",
+                "label": "Codex OAuth",
+                "auth_type": "oauth",
+                "priority": 0,
+                "source": "manual:device_code",
+                "access_token": "old-profile-access-secret",
+                "refresh_token": "old-profile-refresh-secret",
+                "base_url": "https://chatgpt.com/backend-api/codex",
+                "last_refresh": "2026-05-02T03:02:01Z",
+            }]
+        },
+        "providers": {
+            "openai-codex": {
+                "tokens": {
+                    "access_token": "old-profile-access-secret",
+                    "refresh_token": "old-profile-refresh-secret",
+                },
+                "last_refresh": "2026-05-02T03:02:01Z",
+                "auth_mode": "chatgpt",
+            }
+        },
+    }
+    (root_home / "auth.json").write_text(json.dumps(root_auth), encoding="utf-8")
+    (profile_home / "auth.json").write_text(json.dumps(profile_auth), encoding="utf-8")
+
+    fake_streaming = types.ModuleType("api.streaming")
+    fake_streaming._ENV_LOCK = threading.Lock()
+    monkeypatch.setitem(sys.modules, "api.streaming", fake_streaming)
+
+    calls = []
+
+    def _resolver(*, requested):
+        calls.append(requested)
+        store = json.loads((profile_home / "auth.json").read_text(encoding="utf-8"))
+        token = store["providers"]["openai-codex"]["tokens"]["access_token"]
+        if token != "root-access-secret":
+            raise RuntimeError("Codex refresh token was already consumed by another client")
+        return {"requested": requested, "access_token": token}
+
+    payload = oauth.resolve_runtime_provider_with_anthropic_env_lock(
+        _resolver,
+        requested="openai-codex",
+        hermes_home=profile_home,
+    )
+
+    assert payload == {"requested": "openai-codex", "access_token": "root-access-secret"}
+    assert calls == ["openai-codex", "openai-codex"]
+    repaired = json.loads((profile_home / "auth.json").read_text(encoding="utf-8"))
+    assert repaired["credential_pool"]["openai-codex"][0]["access_token"] == "root-access-secret"
+    assert repaired["providers"]["openai-codex"]["tokens"]["refresh_token"] == "root-refresh-secret"
+
+
 def test_frontend_uses_onboarding_oauth_endpoints_and_no_secret_poll_url():
     js = (REPO / "static" / "onboarding.js").read_text(encoding="utf-8")
     assert "/api/onboarding/oauth/start" in js
@@ -638,6 +797,7 @@ def test_runtime_provider_reads_use_anthropic_env_lock():
 
     assert "resolve_runtime_provider_with_anthropic_env_lock" in streaming_src
     assert "resolve_runtime_provider_with_anthropic_env_lock" in routes_src
+    assert "hermes_home=_profile_home_path" in streaming_src
 
 
 def test_anthropic_onboarding_setup_allows_linked_oauth_without_api_key(monkeypatch, tmp_path):

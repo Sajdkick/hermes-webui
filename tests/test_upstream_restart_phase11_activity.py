@@ -292,6 +292,10 @@ def test_phase11_home_session_activity_overview_matches_cloud_terminal_shape():
 
           const html = dashboard.renderHomeSessionOverview();
           if (!html.includes('menu-session-activity-list')) throw new Error('Missing Cloud Terminal session activity list.');
+          if (html.includes('menu-session-activity-state')) throw new Error('Legacy verbose Active-session Codex status labels should not render in task rows.');
+          if (html.includes('Codex needs approval') || html.includes('Codex is working')) throw new Error('Active-session task rows should omit verbose Codex status label text.');
+          if (!html.includes('menu-session-activity-status approval') || !html.includes('Session status: Approval')) throw new Error('Missing compact approval status badge.');
+          if (!html.includes('menu-session-activity-status active') || !html.includes('Session status: Working')) throw new Error('Missing compact working status badge.');
           if (!html.includes('menu-session-activity-group')) throw new Error('Missing Cloud Terminal session activity groups.');
           if (!html.includes('data-ops-session-group-select="true"')) throw new Error('Missing group assignment select.');
           if (!html.includes('Unread output')) throw new Error('Missing readable-output badge.');
@@ -1835,6 +1839,27 @@ def test_phase11_project_side_panels_match_cloud_terminal_card_shape():
           OPS.playStatusByProject['project-1'] = {
             status: 'idle',
             configured: false,
+            valid: true,
+            configExists: false,
+            configAvailable: true,
+            buildAvailable: true,
+            canBuild: true,
+            ready: false,
+            inspectUrl: '',
+            title: 'Auto-detected package-script build workflow from package.json.',
+            label: 'Build ready',
+          };
+          const buildCapControls = play.renderProjectPlayControls(project, { detail: true });
+          if (!buildCapControls.includes('data-ops-action="start-play"')){
+            throw new Error('Build capability without a config file did not render Build action.');
+          }
+          if (/data-ops-action="start-play"[^>]*disabled/.test(buildCapControls)){
+            throw new Error('Build capability without a config file rendered a disabled Build action.');
+          }
+
+          OPS.playStatusByProject['project-1'] = {
+            status: 'idle',
+            configured: false,
             valid: false,
             configExists: false,
             ready: false,
@@ -1958,6 +1983,188 @@ def test_phase11_ops_active_session_click_loads_target_before_closing_dashboard(
           if (JSON.stringify(calls) !== JSON.stringify(expected)) {
             throw new Error(`Unexpected open order: ${JSON.stringify(calls)}`);
           }
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_phase11_open_ops_session_enters_simplified_inspect_mode_after_dashboard_close():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (async () => {
+          const source = fs.readFileSync('static/ops-legacy-task-actions.js', 'utf8');
+          const windowRef = { HermesOpsModules: {}, _opsDashboardOpen: true };
+          const context = { console, window: windowRef, document: {} };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const calls = [];
+          const dashboard = context.window.HermesOpsModules.taskActions.bindDashboard({
+            OPS: { sessions: [] },
+            AgentBridge: { sessions: {}, runs: {} },
+            api: async () => ({}),
+            projectUrl: () => '',
+            projectPath: () => '',
+            nameOf: () => 'Project',
+            findProject: () => null,
+            findTask: () => null,
+            findTaskInData: () => null,
+            allTasks: () => [],
+            findSession: () => null,
+            sessionTaskId: () => '',
+            latestSessionForTask: () => null,
+            sessionRefValue: (entry) => typeof entry === 'string' ? entry : (entry && (entry.session_id || entry.id)) || '',
+            normalizeTaskGrade: () => 'green',
+            getTaskQaStatus: () => '',
+            getTaskMoreWork: () => '',
+            actionableTaskCount: () => 0,
+            summarizeTaskFilters: () => '',
+            renderProjectDetail: () => {},
+            loadProjectDetail: async () => ({}),
+            refreshOpsSessions: async () => [],
+            reloadProjectTasks: async () => ({}),
+            loadProjects: async () => [],
+            renderProjects: () => {},
+            renderHome: () => {},
+            loadSession: async (sid) => { calls.push(`load:${sid}`); },
+            renderSessionList: async () => { calls.push('render-list'); },
+            closeOpsDashboard: () => { calls.push('close-dashboard'); },
+            enterOpsSessionInspectMode: (payload) => { calls.push(`inspect:${payload && payload.sessionId}`); },
+            showToast: () => {},
+            showPromptDialog: async () => null,
+            showConfirmDialog: async () => false,
+            setBusy: () => {},
+            domLookup: () => ({ value: '', files: [] }),
+            documentRef: context.document,
+            windowRef,
+            FileReaderRef: function(){},
+            SRef: () => ({ session: { session_id: 'current-session' }, messages: [], entries: [] }),
+            addFiles: () => {},
+            renderTray: () => {},
+            clearSessionReadableOutput: () => {},
+            clearPersistedSessionId: () => {},
+            sendTurn: async () => {},
+            autoResize: () => {},
+            clearQuickTaskImages: () => {},
+          });
+
+          await dashboard.openOpsSession('target-session');
+          const expected = ['load:target-session', 'render-list', 'close-dashboard', 'inspect:target-session'];
+          if (JSON.stringify(calls) !== JSON.stringify(expected)) {
+            throw new Error(`Unexpected simplified inspect order: ${JSON.stringify(calls)}`);
+          }
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_phase11_ops_task_execution_selects_project_profile_before_sending_turn():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (async () => {
+          const source = fs.readFileSync('static/ops-legacy-task-actions.js', 'utf8');
+          const windowRef = { HermesOpsModules: {}, _opsDashboardOpen: true, localStorage: { getItem: () => null } };
+          const documentRef = {};
+          const context = { console, window: windowRef, document: documentRef };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const project = { id: 'project-1', name: 'Project One', profile: 'project-profile', resolvedPath: '/tmp/project-1' };
+          const epic = { id: 'epic-1', title: 'Epic' };
+          const task = { id: 'task-1', text: 'Run task', done: false };
+          const state = { session: null, activeProfile: 'default', messages: [], entries: [] };
+          const calls = [];
+          const labels = { profileChipLabel: { textContent: '' }, profileChipCompactLabel: { textContent: '' } };
+
+          const dashboard = context.window.HermesOpsModules.taskActions.bindDashboard({
+            OPS: { currentProject: project, sessions: [], projects: [project] },
+            AgentBridge: {
+              sessions: {
+                ensureTask: async (projectId, taskId, payload) => {
+                  calls.push(`ensure:${payload.profile}`);
+                  return { session: { session_id: 'session-1', profile: payload.profile }, task: { ...task, inProgress: true } };
+                },
+              },
+              runs: { create: async (payload) => ({ id: 'run-1', ...payload }) },
+            },
+            api: async () => ({}),
+            projectUrl: (projectId, suffix) => `/projects/${projectId}${suffix}`,
+            projectPath: (entry) => entry.resolvedPath,
+            nameOf: (entry) => entry.name,
+            findProject: () => project,
+            findTask: () => ({ epic, task }),
+            findTaskInData: () => ({ epic, task }),
+            allTasks: () => [task],
+            findSession: () => null,
+            sessionTaskId: () => '',
+            latestSessionForTask: () => null,
+            sessionRefValue: (entry) => typeof entry === 'string' ? entry : (entry && (entry.session_id || entry.id)) || '',
+            normalizeTaskGrade: () => 'green',
+            getTaskQaStatus: () => '',
+            getTaskMoreWork: () => '',
+            actionableTaskCount: () => 1,
+            summarizeTaskFilters: () => '',
+            renderProjectDetail: () => {},
+            loadProjectDetail: async () => ({}),
+            refreshOpsSessions: async () => [],
+            reloadProjectTasks: async () => ({ epics: [{ ...epic, tasks: [task] }] }),
+            loadProjects: async () => [project],
+            renderProjects: () => {},
+            renderHome: () => {},
+            loadSession: async (sid) => { state.session = { session_id: sid, profile: 'project-profile' }; calls.push(`load:${sid}`); },
+            renderSessionList: async () => { calls.push('render-list'); },
+            closeOpsDashboard: () => {},
+            showToast: () => {},
+            showPromptDialog: async () => null,
+            showConfirmDialog: async () => false,
+            setBusy: (value) => { calls.push(`busy:${value}`); },
+            domLookup: (id) => id === 'msg' ? { value: '', files: [] } : (labels[id] || null),
+            documentRef,
+            windowRef,
+            FileReaderRef: function(){},
+            SRef: () => state,
+            addFiles: () => {},
+            renderTray: () => {},
+            clearSessionReadableOutput: () => {},
+            clearPersistedSessionId: () => {},
+            sendTurn: async () => { calls.push(`send-profile:${state.activeProfile}`); },
+            autoResize: () => {},
+            clearQuickTaskImages: () => {},
+          });
+
+          await dashboard.executeTaskMatch(project, { epic, task }, {});
+          if (!calls.includes('ensure:project-profile')) throw new Error(`Task session was not created for project profile: ${JSON.stringify(calls)}`);
+          if (!calls.includes('send-profile:project-profile')) throw new Error(`Send turn did not use project profile: ${JSON.stringify(calls)}`);
+          if (state.activeProfile !== 'project-profile') throw new Error(`Active profile was not selected: ${state.activeProfile}`);
+          if (labels.profileChipLabel.textContent !== 'project-profile') throw new Error(`Profile chip was not updated: ${labels.profileChipLabel.textContent}`);
           console.log('ok');
         })().catch((error) => {
           console.error(error && error.stack ? error.stack : error);

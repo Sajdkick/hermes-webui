@@ -1,6 +1,7 @@
 (function(){
   window.HermesOpsModules=window.HermesOpsModules||{};
   let notificationPollTimer=null;
+  const locallyDismissedNotificationIds=new Set();
 
   function bindDashboard(ctx){
     const OPS=ctx&&ctx.OPS;
@@ -54,9 +55,20 @@
       notificationPollTimer=null;
     }
 
+    function notificationIdValue(note){
+      return String(note&&note.id||note&&note.notificationKey||'').trim();
+    }
+
+    function visibleNotificationsFrom(items){
+      return (Array.isArray(items)?items:[]).filter(note=>{
+        const id=notificationIdValue(note);
+        return !id||!locallyDismissedNotificationIds.has(id);
+      });
+    }
+
     async function loadNotifications(){
       const data=await AgentBridgeRef.notifications.list();
-      OPS.notifications=Array.isArray(data.notifications)?data.notifications:[];
+      OPS.notifications=visibleNotificationsFrom(data.notifications);
       return OPS.notifications;
     }
 
@@ -409,6 +421,22 @@
       return String(note&&note.playFallbackError||'').replace(/\s+/g,' ').trim();
     }
 
+    function playNotificationLogText(note){
+      const direct=String(note&&note.playLogText||note&&note.playLogsText||'').trim();
+      if(direct)return direct;
+      const entries=Array.isArray(note&&note.playLogs)?note.playLogs:[];
+      return entries.map(entry=>{
+        if(entry&&typeof entry==='object'){
+          const at=String(entry.at||'').trim();
+          const stage=String(entry.stage||'system').trim()||'system';
+          const stream=String(entry.stream||'system').trim()||'system';
+          const message=String(entry.message||'').trim();
+          return `${at?`[${at}] `:''}[${stage}:${stream}] ${message}`;
+        }
+        return String(entry||'').trim();
+      }).filter(Boolean).join('\n').trim();
+    }
+
     function playNotificationNeedsRepair(note){
       if(note&&typeof note.playNeedsRepair==='boolean')return note.playNeedsRepair;
       const status=playNotificationStatus(note).toLowerCase();
@@ -651,6 +679,7 @@
       const inspectUrl=playNotificationInspectUrl(note);
       const playStatus=playNotificationStatus(note);
       const fallbackError=playNotificationFallbackError(note);
+      const playLogText=playNotificationLogText(note);
       const needsRepair=playNotificationNeedsRepair(note);
       const target=notificationTarget(note);
       const repairAvailable=!!(note&&note.playRepairAvailable);
@@ -676,6 +705,7 @@
             extra:needsRepair&&fallbackError?`<div class="menu-notification-fallback-error">${esc(`Play handoff error: ${fallbackError}`)}</div>`:'',
             meta,
           })}
+            ${needsRepair&&playLogText?`<div class="menu-notification-play-log-panel"><div class="menu-notification-play-log-title">Play logs</div><pre class="menu-notification-play-log-scroll" data-ops-log-scroll-key="play-notification:${esc(note&&note.id||'')}">${esc(playLogText)}</pre></div>`:''}
           </div>
           <div class="menu-notification-actions">
             ${needsRepair&&repairAvailable&&target.projectId?`<button class="menu-action-btn secondary small menu-notification-repair-btn" type="button" data-ops-action="repair-play-notification" data-notification-id="${esc(note.id)}">Repair Play</button>`:''}
@@ -832,13 +862,44 @@
       showToast('Notification answered',2200);
     }
 
+    function removeNotificationOptimistically(id){
+      const notifications=Array.isArray(OPS.notifications)?OPS.notifications:[];
+      const index=notifications.findIndex(item=>notificationIdValue(item)===id);
+      if(index<0)return null;
+      const note=notifications[index];
+      OPS.notifications=[...notifications.slice(0,index),...notifications.slice(index+1)];
+      locallyDismissedNotificationIds.add(id);
+      renderCurrentOpsView();
+      return {note,index};
+    }
+
+    function restoreOptimisticNotification(id,snapshot){
+      locallyDismissedNotificationIds.delete(id);
+      if(!snapshot||!snapshot.note)return;
+      const notifications=Array.isArray(OPS.notifications)?OPS.notifications:[];
+      if(notifications.some(item=>notificationIdValue(item)===id))return;
+      const index=Math.max(0,Math.min(snapshot.index,notifications.length));
+      OPS.notifications=[...notifications.slice(0,index),snapshot.note,...notifications.slice(index)];
+      renderCurrentOpsView();
+    }
+
     async function dismissNotification(notificationId){
       const id=String(notificationId||'').trim();
       if(!id)return;
-      await AgentBridgeRef.notifications.dismiss(id);
-      await loadNotifications();
-      if(OPS.selectedRunId)await reloadSelectedRunDetail(OPS.selectedRunId);
-      renderCurrentOpsView();
+      const snapshot=removeNotificationOptimistically(id);
+      if(!snapshot){
+        locallyDismissedNotificationIds.add(id);
+        renderCurrentOpsView();
+      }
+      try{
+        await AgentBridgeRef.notifications.dismiss(id);
+        locallyDismissedNotificationIds.delete(id);
+        await loadNotifications().catch(()=>OPS.notifications);
+        renderCurrentOpsView();
+      }catch(error){
+        restoreOptimisticNotification(id,snapshot);
+        throw error;
+      }
     }
 
     function notificationById(notificationId){
@@ -946,6 +1007,7 @@
       playInspectOverlayUrl,
       playNotificationStatus,
       playNotificationFallbackError,
+      playNotificationLogText,
       playNotificationNeedsRepair,
       respondNotification,
       dismissNotification,

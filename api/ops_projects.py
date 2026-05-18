@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 import os
 from pathlib import Path
+import re
 import subprocess
 from urllib.parse import quote
 import uuid
@@ -21,6 +24,14 @@ TASK_GRADE_VALUES = {"green", "orange", "red"}
 TASK_QA_STATUS_VALUES = {"ready-for-test", "needs-more-work", "not-synced"}
 TASKS_DIR_NAME = "project_tasks"
 LEGACY_TASKS_FILE_NAME = "project_tasks.json"
+TASK_IMAGE_MAX_BYTES = 20 * 1024 * 1024
+TASK_IMAGE_MIME_EXTENSIONS = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/bmp": ".bmp",
+}
 LEGACY_OPS_CAPABILITIES = {
     "ensureWorkspace": True,
     "projectSettings": True,
@@ -281,6 +292,80 @@ def _normalize_string_list(value) -> list[str]:
     result = []
     seen = set()
     for item in value:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
+
+def _safe_task_image_filename(filename: str, mime_type: str) -> str:
+    raw_name = Path(str(filename or "").replace("\\", "/")).name.strip()
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", raw_name).strip(".-")
+    if not safe:
+        safe = "task-image"
+    suffix = Path(safe).suffix.lower()
+    expected_suffix = TASK_IMAGE_MIME_EXTENSIONS.get(mime_type, "")
+    allowed_suffixes = {expected_suffix}
+    if expected_suffix == ".jpg":
+        allowed_suffixes.add(".jpeg")
+    if expected_suffix and suffix not in allowed_suffixes:
+        safe = f"{Path(safe).stem or 'task-image'}{expected_suffix}"
+    return safe[:120]
+
+
+def _decode_task_image_upload(body: dict) -> tuple[bytes, str, str]:
+    body = body if isinstance(body, dict) else {}
+    declared_mime = str(body.get("mimeType") or body.get("mime") or "").strip().lower()
+    content = str(body.get("content") or "").strip()
+    if not content:
+        raise OpsProjectError("Image content is required.")
+
+    mime_type = declared_mime
+    encoded = content
+    data_url_match = re.match(r"^data:([^;,]+)(;base64)?,(.*)$", content, flags=re.IGNORECASE | re.DOTALL)
+    if data_url_match:
+        mime_type = str(data_url_match.group(1) or "").strip().lower() or mime_type
+        if not data_url_match.group(2):
+            raise OpsProjectError("Task image uploads must be base64 encoded.")
+        encoded = data_url_match.group(3)
+
+    if mime_type not in TASK_IMAGE_MIME_EXTENSIONS:
+        guessed_mime = mimetypes.guess_type(str(body.get("filename") or ""))[0] or ""
+        if guessed_mime.lower() in TASK_IMAGE_MIME_EXTENSIONS:
+            mime_type = guessed_mime.lower()
+    if mime_type not in TASK_IMAGE_MIME_EXTENSIONS:
+        raise OpsProjectError("Task image type is not supported.")
+
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except Exception as exc:
+        raise OpsProjectError("Task image content is not valid base64.") from exc
+    if not raw:
+        raise OpsProjectError("Task image content is empty.")
+    if len(raw) > TASK_IMAGE_MAX_BYTES:
+        raise OpsProjectError("Task image is too large.")
+    return raw, mime_type, _safe_task_image_filename(str(body.get("filename") or ""), mime_type)
+
+
+def _task_image_root(project_id: str, task_id: str) -> Path:
+    home = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+    safe_project = re.sub(r"[^A-Za-z0-9._-]+", "-", str(project_id or "project")).strip(".-") or "project"
+    safe_task = re.sub(r"[^A-Za-z0-9._-]+", "-", str(task_id or "task")).strip(".-") or "task"
+    return home / "ops-task-images" / safe_project / safe_task
+
+
+def _normalize_task_image_refs(value) -> list[str]:
+    if isinstance(value, str):
+        raw_items = value.replace("\n", ",").split(",")
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        raw_items = []
+    result = []
+    seen = set()
+    for item in raw_items:
         text = str(item or "").strip()
         if not text or text in seen:
             continue
@@ -653,6 +738,54 @@ def get_ops_project_task(project_id: str, task_id: str) -> dict:
     return {"project": project, "epicId": epic.get("id"), "task": task}
 
 
+def add_ops_project_task_image(project_id: str, task_id: str, body: dict | None) -> dict:
+    project = get_ops_project(project_id)
+    task_key = str(task_id or "").strip()
+    if not task_key:
+        raise OpsProjectError("Task id is required.")
+
+    data, _, _ = _read_tasks_data(project)
+    epics = list(data.get("epics") or [])
+    epic_index, task_index = _find_task(epics, task_key)
+    if epic_index < 0:
+        raise OpsProjectError("Task not found.", 404)
+
+    raw, mime_type, filename = _decode_task_image_upload(body or {})
+    image_dir = _task_image_root(project["id"], task_key)
+    image_dir.mkdir(parents=True, exist_ok=True)
+    candidate = image_dir / filename
+    stem = candidate.stem or "task-image"
+    suffix = candidate.suffix or TASK_IMAGE_MIME_EXTENSIONS[mime_type]
+    counter = 2
+    while candidate.exists():
+        candidate = image_dir / f"{stem}-{counter}{suffix}"
+        counter += 1
+    candidate.write_bytes(raw)
+
+    source_epic = dict(epics[epic_index])
+    updated_task = dict((source_epic.get("tasks") or [])[task_index])
+    existing_images = _normalize_task_image_refs(updated_task.get("images"))
+    image_path = str(candidate)
+    if image_path not in existing_images:
+        existing_images.append(image_path)
+    updated_task["images"] = ", ".join(existing_images)
+    tasks = list(source_epic.get("tasks") or [])
+    tasks[task_index] = updated_task
+    source_epic["tasks"] = tasks
+    epics[epic_index] = source_epic
+    _write_tasks_data(project, {**data, "epics": epics})
+
+    return {
+        "image": {
+            "name": candidate.name,
+            "path": image_path,
+            "mime": mime_type,
+            "size": len(raw),
+        },
+        "task": updated_task,
+    }
+
+
 def update_ops_project_task(project_id: str, task_id: str, updates: dict) -> dict:
     project = get_ops_project(project_id)
     task_key = str(task_id or "").strip()
@@ -717,7 +850,7 @@ def update_ops_project_task(project_id: str, task_id: str, updates: dict) -> dic
             continue
         value = updates.get(field)
         if field == "images":
-            normalized = ", ".join(_normalize_string_list(value))
+            normalized = ", ".join(_normalize_task_image_refs(value))
             if normalized:
                 updated_task[field] = normalized
             else:
