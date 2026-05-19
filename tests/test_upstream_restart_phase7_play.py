@@ -463,7 +463,11 @@ def test_phase7_play_proxy_dispatch_rewrites_html_and_locations(monkeypatch, tmp
     assert 'data-hermes-play-session-id="session-1"' in html
     assert 'data-hermes-play-session-url="/session/session-1"' in html
     assert f'src="/play-project/{project_id}/assets/logo.png"' in html
-    assert dict(html_handler.sent_headers)["Content-Security-Policy"] == "default-src 'self'; frame-src 'self'"
+    csp = dict(html_handler.sent_headers)["Content-Security-Policy"]
+    assert "default-src 'self'" in csp
+    assert "frame-src 'self'" in csp
+    assert "script-src 'self'" in csp
+    assert "style-src 'self' 'unsafe-inline'" in csp
 
     post_handler = _FakeHandler({"ok": True}, command="POST")
     assert handle_post(post_handler, urlparse(f"http://example.com/play-project/{project_id}/api/run")) is True
@@ -480,11 +484,34 @@ def test_phase7_play_session_overlay_embeds_simplified_session_view():
 
     assert "opsSessionInspect" in overlay
     assert "opsSessionInspectSource" in overlay
-    assert 'href="${escapeHtml(fullSessionUrl)}"' in overlay
+    assert 'data-hermes-play-full-session href="${escapeHtml(fullSessionUrl)}"' in overlay
     assert 'src="${escapeHtml(sessionUrl)}"' in overlay
+    assert "querySelectorAll('script[data-hermes-play-overlay]')" in overlay
+    assert "root.dataset.hermesPlayOverlayKey=overlayKey" in overlay
+    assert "existing.classList.remove('is-collapsed')" in overlay
+    assert "Session preview did not finish loading here." in overlay
+    assert "sessionStorage.setItem(storageKey" not in overlay
     assert "requestedByUrl=qs.get('opsSessionInspect')==='1'||qs.get('opsSessionInspect')==='true'" in sessions
     assert "allow_same_origin_frame=parsed.path.startswith(\"/session/\")" in routes
     assert "'X-Frame-Options', 'SAMEORIGIN' if allow_same_origin_frame else 'DENY'" in helpers
+
+
+def test_phase7_play_proxy_csp_allows_injected_session_overlay():
+    from api import play_pipeline
+
+    rewritten = play_pipeline._rewrite_proxy_csp(
+        "default-src 'none'; script-src 'none'; script-src-elem 'none'; "
+        "style-src 'self'; frame-src 'none'; child-src 'none'"
+    )
+
+    assert "frame-src 'self'" in rewritten
+    assert "child-src 'self'" in rewritten
+    assert "script-src 'self'" in rewritten
+    assert "script-src-elem 'self'" in rewritten
+    assert "style-src 'self' 'unsafe-inline'" in rewritten
+    assert "style-src-elem 'self' 'unsafe-inline'" in rewritten
+    assert "script-src 'none'" not in rewritten
+    assert "frame-src 'none'" not in rewritten
 
 
 def test_phase7_text_helper_can_allow_same_origin_session_iframe():

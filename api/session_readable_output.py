@@ -11,12 +11,48 @@ from api.models import get_session
 
 MAX_READABLE_OUTPUT_BYTES = 512 * 1024
 READABLE_OUTPUT_SCOPE_DIRS = (".hermes", ".cloud-terminal")
+HERMES_READABLE_OUTPUT_ENV_KEYS = (
+    "HERMES_READABLE_OUTPUT_PATH",
+    "HERMES_READABLE_OUTPUT_DIR",
+    "HERMES_READABLE_OUTPUT_ASSET_DIR",
+    # Legacy compatibility for older Cloud Terminal-port skills that have not
+    # learned the Hermes-native variable names yet.
+    "CLOUD_TERMINAL_READABLE_OUTPUT_PATH",
+    "CLOUD_TERMINAL_READABLE_OUTPUT_DIR",
+    "CLOUD_TERMINAL_READABLE_OUTPUT_ASSET_DIR",
+    "CLOUD_TERMINAL_SESSION_ID",
+)
 
 
 class SessionReadableOutputError(Exception):
     def __init__(self, message: str, status: int = 400):
         super().__init__(message)
         self.status = status
+
+
+def build_session_readable_output_env(session_id: str) -> dict[str, str]:
+    """Return Hermes-native readable-output env vars for an agent run.
+
+    The WebUI owns a session-scoped state directory so the agent does not have
+    to guess a project fallback path. Cloud Terminal-compatible aliases are
+    included intentionally; old shared skills can keep working while new skills
+    prefer the ``HERMES_READABLE_OUTPUT_*`` names.
+    """
+    key = str(session_id or "").strip()
+    if not key:
+        return {}
+    readable_dir = (STATE_DIR / "readable-output" / key).resolve()
+    message_path = readable_dir / "message.md"
+    asset_dir = readable_dir / "assets"
+    return {
+        "HERMES_READABLE_OUTPUT_PATH": str(message_path),
+        "HERMES_READABLE_OUTPUT_DIR": str(readable_dir),
+        "HERMES_READABLE_OUTPUT_ASSET_DIR": str(asset_dir),
+        "CLOUD_TERMINAL_READABLE_OUTPUT_PATH": str(message_path),
+        "CLOUD_TERMINAL_READABLE_OUTPUT_DIR": str(readable_dir),
+        "CLOUD_TERMINAL_READABLE_OUTPUT_ASSET_DIR": str(asset_dir),
+        "CLOUD_TERMINAL_SESSION_ID": key,
+    }
 
 
 def _workspace_root_for_session(session) -> Path | None:

@@ -170,6 +170,17 @@ def _project_profile(project: dict) -> str | None:
     return profile or None
 
 
+def _project_execution_profile(project: dict) -> str:
+    """Return the Hermes profile that owns Ops task execution for *project*.
+
+    Ops projects are profile-owned resources.  A missing/blank stored profile is
+    the root/default profile, not "whatever profile the browser currently has
+    selected".  Keep that distinction here so task launches cannot inherit the
+    global WebUI profile cookie or a stale client payload.
+    """
+    return _project_profile(project) or "default"
+
+
 def _profile_config_defaults(profile: str | None) -> tuple[str | None, str | None]:
     if not profile:
         return None, None
@@ -205,12 +216,13 @@ def _profile_config_defaults(profile: str | None) -> tuple[str | None, str | Non
 def _project_session_defaults(project: dict) -> tuple[str | None, str | None]:
     explicit_model = str(project.get("defaultModel") or "").strip() or None
     explicit_provider = str(project.get("defaultModelProvider") or "").strip().lower() or None
+    profile = _project_execution_profile(project)
     if explicit_model:
         if explicit_provider:
             return explicit_model, explicit_provider
-        _profile_model, profile_provider = _profile_config_defaults(_project_profile(project))
+        _profile_model, profile_provider = _profile_config_defaults(profile)
         return explicit_model, profile_provider
-    return _profile_config_defaults(_project_profile(project))
+    return _profile_config_defaults(profile)
 
 
 def _payload_session_defaults(body: dict | None) -> tuple[str | None, str | None]:
@@ -578,13 +590,17 @@ def launch_task_session(project_id: str, task_id: str, body: dict | None = None)
         }
 
     requested_profile = _payload_profile(body)
-    profile = requested_profile or _project_profile(project)
+    profile = _project_execution_profile(project)
+    if requested_profile and requested_profile != profile:
+        logger.info(
+            "Ignoring task-launch request profile %r for project %s; using project profile %r",
+            requested_profile,
+            project.get("id"),
+            profile,
+        )
     model, model_provider = _payload_session_defaults(body)
     if not model:
-        if requested_profile:
-            model, model_provider = _profile_config_defaults(requested_profile)
-        else:
-            model, model_provider = _project_session_defaults(project)
+        model, model_provider = _project_session_defaults(project)
 
     session = new_session(
         workspace=_task_workspace(project),

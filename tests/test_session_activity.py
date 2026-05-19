@@ -81,7 +81,8 @@ def test_session_activity_keeps_live_non_ops_stream(monkeypatch):
     assert payload["sessionCount"] == 1
     [item] = payload["sessions"]
     assert item["id"] == "live_general_session"
-    assert item["activityStatus"]["key"] == "connecting"
+    assert item["activityStatus"]["key"] == "active"
+    assert item["activityStatus"]["labelText"] == "Codex is working"
 
 
 def test_session_activity_requests_activity_only_ops_source(monkeypatch):

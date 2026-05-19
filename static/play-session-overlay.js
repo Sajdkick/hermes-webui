@@ -1,5 +1,16 @@
 (function(){
-  const script=document.currentScript;
+  function overlayScript(){
+    const current=document.currentScript;
+    if(current&&current.dataset&&current.dataset.hermesPlayOverlay)return current;
+    try{
+      const scripts=Array.from(document.querySelectorAll('script[data-hermes-play-overlay]'));
+      return scripts[scripts.length-1]||current||null;
+    }catch(_error){
+      return current||null;
+    }
+  }
+
+  const script=overlayScript();
   if(!script||script.dataset.hermesPlayOverlay==='disabled')return;
 
   function text(value){
@@ -35,7 +46,7 @@
   const runId=text(script.dataset.hermesPlayRunId);
   const fullSessionUrl=appUrl(script.dataset.hermesPlaySessionUrl||('/session/'+encodeURIComponent(sessionId)));
   const sessionUrl=sessionInspectUrl(fullSessionUrl);
-  const storageKey='hermes-play-session-overlay:'+[projectId,runId,taskId,sessionId].filter(Boolean).join(':');
+  const overlayKey=[projectId,runId,taskId,sessionId].filter(Boolean).join(':')||sessionId;
 
   function escapeHtml(value){
     return text(value).replace(/[&<>"']/g,(char)=>({
@@ -48,17 +59,13 @@
   }
 
   function readCollapsed(){
-    try{
-      return window.sessionStorage.getItem(storageKey)==='collapsed';
-    }catch(_error){
-      return false;
-    }
+    return false;
   }
 
-  function writeCollapsed(collapsed){
-    try{
-      window.sessionStorage.setItem(storageKey,collapsed?'collapsed':'open');
-    }catch(_error){}
+  function writeCollapsed(_collapsed){
+    // Collapse state is intentionally page-local. Persisting it in sessionStorage
+    // made desktop notification opens look like the popup never appeared after a
+    // previous hide, while fresh mobile browsers still showed it.
   }
 
   function installStyles(){
@@ -79,7 +86,12 @@
       .hermes-play-session-actions{display:flex;align-items:center;gap:8px;}
       .hermes-play-session-action{border:1px solid rgba(148,163,184,.35);border-radius:999px;background:rgba(15,23,42,.72);color:#f8fafc;padding:7px 10px;font:700 12px/1 inherit;text-decoration:none;cursor:pointer;}
       .hermes-play-session-action:hover{background:rgba(79,70,229,.42);}
+      .hermes-play-session-frame-wrap{position:relative;display:flex;flex:1;min-height:0;background:#fff;}
       .hermes-play-session-frame{flex:1;width:100%;border:0;background:#fff;}
+      .hermes-play-session-frame-status{position:absolute;inset:auto 12px 12px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid rgba(148,163,184,.28);border-radius:12px;background:rgba(15,23,42,.92);color:#f8fafc;padding:10px 12px;font-size:12px;box-shadow:0 14px 30px rgba(15,23,42,.28);}
+      .hermes-play-session-frame-status[hidden]{display:none;}
+      .hermes-play-session-frame-status a{color:#bfdbfe;font-weight:800;text-decoration:none;white-space:nowrap;}
+      .hermes-play-session-frame-status a:hover{text-decoration:underline;}
       .hermes-play-session-overlay.is-collapsed .hermes-play-session-panel{display:none;}
       .hermes-play-session-overlay.is-collapsed .hermes-play-session-toggle{display:inline-flex;}
       @media (max-width:760px){
@@ -92,11 +104,23 @@
   }
 
   function createOverlay(){
-    if(document.getElementById('hermes-play-session-overlay'))return;
+    const existing=document.getElementById('hermes-play-session-overlay');
+    if(existing){
+      if(existing.dataset&&existing.dataset.hermesPlayOverlayKey===overlayKey){
+        existing.classList.remove('is-collapsed');
+        const frame=existing.querySelector('.hermes-play-session-frame');
+        if(frame&&frame.getAttribute('src')!==sessionUrl)frame.setAttribute('src',sessionUrl);
+        const fullLink=existing.querySelector('[data-hermes-play-full-session]');
+        if(fullLink)fullLink.setAttribute('href',fullSessionUrl);
+        return;
+      }
+      existing.remove();
+    }
     installStyles();
     const root=document.createElement('aside');
     root.id='hermes-play-session-overlay';
     root.className='hermes-play-session-overlay';
+    root.dataset.hermesPlayOverlayKey=overlayKey;
     root.setAttribute('aria-label','Hermes session access for this Play inspection');
     if(readCollapsed())root.classList.add('is-collapsed');
 
@@ -116,15 +140,46 @@
             <span>${escapeHtml(summary||sessionId)}</span>
           </div>
           <div class="hermes-play-session-actions">
-            <a class="hermes-play-session-action open-label" href="${escapeHtml(fullSessionUrl)}" target="_blank" rel="noopener noreferrer">Open full</a>
+            <a class="hermes-play-session-action open-label" data-hermes-play-full-session href="${escapeHtml(fullSessionUrl)}" target="_blank" rel="noopener noreferrer">Open full</a>
             <button class="hermes-play-session-action" type="button" data-hermes-play-collapse>Hide</button>
           </div>
         </div>
-        <iframe class="hermes-play-session-frame" src="${escapeHtml(sessionUrl)}" title="Hermes session ${escapeHtml(sessionId)}" loading="lazy"></iframe>
+        <div class="hermes-play-session-frame-wrap">
+          <iframe class="hermes-play-session-frame" src="${escapeHtml(sessionUrl)}" title="Hermes session ${escapeHtml(sessionId)}" loading="lazy"></iframe>
+          <div class="hermes-play-session-frame-status" data-hermes-play-session-loading>Loading linked Hermes session…</div>
+          <div class="hermes-play-session-frame-status" data-hermes-play-session-frame-fallback hidden>
+            <span>Session preview did not finish loading here.</span>
+            <a href="${escapeHtml(fullSessionUrl)}" target="_blank" rel="noopener noreferrer">Open full session</a>
+          </div>
+        </div>
       </section>
     `;
     const toggle=root.querySelector('.hermes-play-session-toggle');
     const collapse=root.querySelector('[data-hermes-play-collapse]');
+    const frame=root.querySelector('.hermes-play-session-frame');
+    const loading=root.querySelector('[data-hermes-play-session-loading]');
+    const fallback=root.querySelector('[data-hermes-play-session-frame-fallback]');
+    let loaded=false;
+    let fallbackTimer=null;
+    function hideLoading(){
+      if(loading)loading.hidden=true;
+    }
+    function showFallback(){
+      hideLoading();
+      if(fallback)fallback.hidden=false;
+    }
+    if(frame){
+      frame.addEventListener('load',()=>{
+        loaded=true;
+        hideLoading();
+        if(fallback)fallback.hidden=true;
+        if(fallbackTimer)clearTimeout(fallbackTimer);
+      });
+      frame.addEventListener('error',showFallback);
+      fallbackTimer=setTimeout(()=>{
+        if(!loaded)showFallback();
+      },8000);
+    }
     function setCollapsed(collapsed){
       root.classList.toggle('is-collapsed',collapsed);
       if(toggle)toggle.setAttribute('aria-expanded',collapsed?'false':'true');

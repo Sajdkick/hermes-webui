@@ -255,6 +255,25 @@
       }
     }
 
+    function snapshotTaskFields(task,fields){
+      const snapshot={};
+      fields.forEach(field=>{
+        snapshot[field]={
+          exists:Object.prototype.hasOwnProperty.call(task,field),
+          value:task[field],
+        };
+      });
+      return snapshot;
+    }
+
+    function restoreTaskFieldSnapshot(task,snapshot){
+      Object.keys(snapshot||{}).forEach(field=>{
+        const entry=snapshot[field]||{};
+        if(entry.exists)task[field]=entry.value;
+        else delete task[field];
+      });
+    }
+
     async function markTaskNeedsMoreWork(taskId){
       const match=findTask(taskId);
       if(!match||!OPS.currentProject)return;
@@ -272,26 +291,29 @@
         showToast('Needs-more-work feedback is required.',2600);
         return;
       }
-      const previous={
-        done:match.task.done,
-        qaStatus:match.task.qaStatus,
-        moreWork:match.task.moreWork,
-        inProgress:match.task.inProgress,
-      };
+      const projectKey=String(OPS.currentProject.id||'').trim();
+      const previous=snapshotTaskFields(match.task,['done','qaStatus','moreWork','inProgress']);
       Object.assign(match.task,{done:false,qaStatus:'needs-more-work',moreWork,inProgress:false});
       renderProjectDetail();
-      try{
-        await api(projectUrl(OPS.currentProject.id,`/tasks/${encodeURIComponent(taskId)}`),{
-          method:'POST',
-          body:JSON.stringify({qaStatus:'needs-more-work',moreWork}),
-        });
-        showToast('Task marked as needing more work',2400);
-        await refreshDetail();
-      }catch(error){
-        Object.assign(match.task,previous);
-        await refreshDetail().catch(()=>renderProjectDetail());
-        throw error;
-      }
+      showToast('Task marked as needing more work',1800);
+      (async function persistNeedsMoreWorkFeedback(){
+        try{
+          await api(projectUrl(projectKey,`/tasks/${encodeURIComponent(taskId)}`),{
+            method:'POST',
+            body:JSON.stringify({qaStatus:'needs-more-work',moreWork}),
+          });
+        }catch(error){
+          restoreTaskFieldSnapshot(match.task,previous);
+          if(OPS.currentProject&&String(OPS.currentProject.id||'').trim()===projectKey){
+            await refreshDetail().catch(()=>renderProjectDetail());
+          }
+          showToast(error&&error.message?error.message:'Could not save needs-more-work feedback.',4200);
+          return;
+        }
+        if(OPS.currentProject&&String(OPS.currentProject.id||'').trim()===projectKey){
+          await refreshDetail().catch(()=>renderProjectDetail());
+        }
+      })();
     }
 
     function buildTaskExecutionPrompt(prompt){
@@ -300,15 +322,37 @@
       return `${TASK_EXECUTION_PREFACE} '${trimmed}', ${TASK_EXECUTION_INSTRUCTIONS}`;
     }
 
+    function splitTaskImageRefs(value){
+      const rawItems=Array.isArray(value)
+        ? value
+        : String(value||'').split(/[\n,]+/);
+      const seen=new Set();
+      const refs=[];
+      rawItems.forEach(item=>{
+        const ref=String(item||'').trim();
+        if(!ref||seen.has(ref))return;
+        seen.add(ref);
+        refs.push(ref);
+      });
+      return refs;
+    }
+
+    function appendTaskImageContext(prompt,task){
+      const refs=splitTaskImageRefs(task&&task.images);
+      if(!refs.length)return prompt;
+      const base=String(prompt||'').replace(/[\r\n]+$/g,'');
+      return `${base}\n\nAttached task screenshots/images:\n${refs.map(ref=>`- ${ref}`).join('\n')}`;
+    }
+
     function buildTaskPrompt(project,epic,task){
       if(!task)return '';
       const basePrompt=typeof task.text==='string'?task.text.replace(/[\r\n]+$/g,''):'';
       if(getTaskQaStatus(task)!=='needs-more-work'){
-        return buildTaskExecutionPrompt(basePrompt);
+        return buildTaskExecutionPrompt(appendTaskImageContext(basePrompt,task));
       }
       const moreWork=getTaskMoreWork(task)||'No details provided.';
       const retryPrompt=`I have tried to implement this feature '${basePrompt}' but when it went through QA we got this comment '${moreWork}' analyze all this in depth and fix all the comments`;
-      return buildTaskExecutionPrompt(retryPrompt);
+      return buildTaskExecutionPrompt(appendTaskImageContext(retryPrompt,task));
     }
 
     function providerFromModelValue(modelId){
@@ -702,7 +746,8 @@
             }
           }
           const taskPrompt=buildTaskPrompt(project,epic,task);
-          // Targeted WebUI /goal bridge: prefix only when the user opted in.
+          // Targeted WebUI /goal bridge: prefix when the originating task flow
+          // asks for standing goal execution.
           // Remove this once upstream Hermes WebUI ships native goal-mode support.
           msg.value=goalMode?`/goal ${taskPrompt}`:taskPrompt;
           if(typeof autoResize==='function')autoResize();
@@ -780,8 +825,8 @@
         if(!created.task||!created.task.id)throw new Error('Unable to create the AI batch execution task.');
         const data=await reloadProjectTasks(projectKey);
         const match=findTaskInData(data,created.task.id)||{epic,task:created.task};
-        showToast('AI batch execution task created. Starting session...',2400);
-        await executeTaskMatch(project,match);
+        showToast('AI batch execution task created. Starting goal session...',2400);
+        await executeTaskMatch(project,match,{goalMode:true});
       }finally{
         delete OPS.taskAutomationBusyByProject[projectKey];
         if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='project-detail'&&OPS.currentProject&&OPS.currentProject.id===projectKey){

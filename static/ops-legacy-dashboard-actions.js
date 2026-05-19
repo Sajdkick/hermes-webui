@@ -176,7 +176,7 @@
             if(sid)return await openOpsSession(sid);
             return showToast('No session linked to this task yet.',2600);
           }
-          if(mode==='new-session'||mode==='execute')return await executeTask(taskId);
+          if(mode==='new-session'||mode==='execute')return await executeTask(taskId,{goalMode:true});
           return null;
         }
         if(action==='task-needs-more-work')return await markTaskNeedsMoreWork(taskId);
@@ -239,7 +239,7 @@
           if(session&&sessionRefValue(session))return await openOpsSession(sessionRefValue(session));
           return showToast('No session linked to this task yet.',2600);
         }
-        if(action==='execute-task')return await executeTask(taskId);
+        if(action==='execute-task')return await executeTask(taskId,{goalMode:true});
         if(action==='complete-task'){
           const projectKey=OPS.currentProject&&OPS.currentProject.id;
           const match=findTask(taskId);

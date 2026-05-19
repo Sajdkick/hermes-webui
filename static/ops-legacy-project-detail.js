@@ -601,11 +601,30 @@
       return 'No active tasks yet.';
     }
 
+    const TASK_FORM_SELECTOR='form[data-ops-submit="save-task"], form[data-ops-submit="create-epic"]';
+
     function clearTaskFormFocusState(){
       OPS.taskFormFocusedForm='';
       OPS.taskFormFocusedField='';
       OPS.taskFormSelectionStart=null;
       OPS.taskFormSelectionEnd=null;
+    }
+
+    function captureTaskFormFocus(field,form){
+      if(!field||!form)return false;
+      OPS.taskFormFocusedForm=form.dataset.opsSubmit||'';
+      OPS.taskFormFocusedField=field.getAttribute('name')||'';
+      OPS.taskFormSelectionStart=typeof field.selectionStart==='number'?field.selectionStart:null;
+      OPS.taskFormSelectionEnd=typeof field.selectionEnd==='number'?field.selectionEnd:null;
+      return !!(OPS.taskFormFocusedForm&&OPS.taskFormFocusedField);
+    }
+
+    function isTransientProjectDetailFocus(active){
+      if(!documentRef)return false;
+      if(!active)return true;
+      if(active===documentRef.body||active===documentRef.documentElement)return true;
+      if(active.isConnected===false)return true;
+      return false;
     }
 
     function rememberTaskFormFocus(){
@@ -614,20 +633,20 @@
         return;
       }
       const active=documentRef.activeElement;
-      if(!active||typeof active.closest!=='function'){
-        clearTaskFormFocusState();
-        return;
+      if(active&&typeof active.closest==='function'){
+        const form=active.closest(TASK_FORM_SELECTOR);
+        const field=active.closest('[name]');
+        if(form&&field&&root()&&root().contains(form)){
+          captureTaskFormFocus(field,form);
+          return;
+        }
       }
-      const form=active.closest('form[data-ops-submit="save-task"], form[data-ops-submit="create-epic"]');
-      const field=active.closest('[name]');
-      if(!form||!field||!root()||!root().contains(form)){
-        clearTaskFormFocusState();
-        return;
-      }
-      OPS.taskFormFocusedForm=form.dataset.opsSubmit||'';
-      OPS.taskFormFocusedField=field.getAttribute('name')||'';
-      OPS.taskFormSelectionStart=typeof field.selectionStart==='number'?field.selectionStart:null;
-      OPS.taskFormSelectionEnd=typeof field.selectionEnd==='number'?field.selectionEnd:null;
+      // Some project-detail refresh paths briefly clear the old DOM before this
+      // renderer runs, leaving document.activeElement on <body>. Keep the last
+      // explicit task-form focus in that transient state so the 5s refresh loop
+      // does not deselect the new-task input while the user is typing.
+      if(isTransientProjectDetailFocus(active))return;
+      clearTaskFormFocusState();
     }
 
     function restoreTaskFormFocus(){
@@ -1242,11 +1261,27 @@
       updateTaskGrade(taskId,grade).catch(showError);
     }
 
+    function handleTaskFormFocus(event){
+      const target=event&&event.target;
+      const form=target&&typeof target.closest==='function'
+        ? target.closest(TASK_FORM_SELECTOR)
+        : null;
+      const field=target&&typeof target.closest==='function'
+        ? target.closest('[name]')
+        : null;
+      if(!form||!field||!root()||!root().contains(form)||OPS.view!=='project-detail')return;
+      captureTaskFormFocus(field,form);
+    }
+
     function handleTaskFormField(event){
       const form=event.target&&typeof event.target.closest==='function'
-        ? event.target.closest('form[data-ops-submit="save-task"], form[data-ops-submit="create-epic"]')
+        ? event.target.closest(TASK_FORM_SELECTOR)
         : null;
       if(!form||!root()||!root().contains(form)||OPS.view!=='project-detail')return;
+      const field=event.target&&typeof event.target.closest==='function'
+        ? event.target.closest('[name]')
+        : null;
+      if(field)captureTaskFormFocus(field,form);
       const data=Object.fromEntries(new FormData(form).entries());
       if(form.dataset.opsSubmit==='create-epic'){
         OPS.createEpicDraftTitle=String(data.title||'');
@@ -1314,6 +1349,7 @@
       toggleTaskFormDictation,
       handleTaskFilterField,
       handleTaskRowField,
+      handleTaskFormFocus,
       handleTaskFormField,
     };
   }

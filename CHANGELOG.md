@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+### Added
+
+- Hermes WebUI now includes a native gather-report helper (`scripts/hermes-gather.py` plus `/api/gather/<id>/events`) for temporary instrumentation workflows where agents ask users to reproduce a browser/runtime issue and then inspect captured structured events directly.
+- The workspace file panel now accepts local file/folder drops, uploading files into the dropped-on directory (or current workspace directory) while preserving nested subfolders and showing per-file upload progress.
+
+### Changed
+
+- Ops Quick Task and Epic task executions now start linked task prompts as standing `/goal` turns by default, including execute-ready batch sessions, so long task queues can continue through goal-mode continuation instead of stopping at the first tool-call ceiling.
+- Hermes WebUI agent runs now register the repository `.agents/skills` directory through each active profile's `skills.external_dirs`, so shared Cloud Terminal-port skills can be discovered across profiles without per-profile copies.
+- Workspace creation from the Spaces panel now asks the server to create missing folders before saving the new workspace, while preserving the existing rejection for missing paths submitted without the explicit create intent.
+- The bundled readable-output skill is now Hermes-native: it tells agents to prefer `HERMES_READABLE_OUTPUT_*` session env vars, keeps legacy Cloud Terminal aliases for compatibility, and includes a direct shell helper for writing Markdown reports.
+
+### Fixed
+
+- Play notification inspection now reopens the linked Hermes session popup on every Play preview load instead of preserving a stale collapsed desktop state, replaces stale overlay instances when a different run/session opens, and keeps an in-panel full-session fallback if the iframe preview is blocked or slow.
+- Proxied Play HTML now rewrites restrictive app CSP directives enough for Hermes' injected proxy/session overlay scripts, inline overlay styles, and same-origin session iframe to run consistently.
+- Hermes WebUI agent runs now inject session-scoped readable-output paths into both thread-local and process fallback env so the readable-output skill has a reliable target file and asset directory.
+- Workspace panel local file uploads no longer fail on a missing auth-redirect helper; browser-style multipart route coverage now verifies the workspace upload endpoint directly, and all-failed upload toasts/indicators include the first underlying error.
+- Ops project task rows now switch to "Needs more work" immediately after feedback is saved, while the slower task-file persistence and detail refresh finish in the background.
+- Quick Task runner screenshots now reach immediately-started sessions via persisted task image paths as well as the composer upload handoff.
+- Ops simplified session refresh now guards same-session reloads against stale responses and keeps the Back/Refresh controls fixed above the chat surface.
+- Ops Active Sessions badges now show live streams as working immediately instead of leaving running turns stuck in the connecting state.
+- Ops project-detail task forms now preserve draft focus and selection through the periodic refresh loop so the New task input no longer deselects while typing.
+- Existing chats now keep using and displaying their session-scoped profile for queued turns, goal continuations, status cards, and optimistic sidebar rows even after another profile becomes active in the same browser tab.
+- Ops project task launches now treat the project-owned profile as authoritative: stale/global UI profile payloads are ignored, blank project profiles resolve to the root default profile, and empty Ops/project sessions cannot be retagged by `/api/chat/start` before the first turn.
+
 ## [v0.51.89] — 2026-05-18 — Release BM (stage-382 — 6-PR full sweep batch — runtime adapter approval/clarify seam + SOUL.md memory panel + #1855 resolve_model_provider fast-path + PWA sidebar spinner fix + /model active-provider preference + contributor contract docs index)
 
 ### Changed

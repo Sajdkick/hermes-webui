@@ -362,6 +362,258 @@ function renderFileBreadcrumb(filePath) {
   }
 }
 
+function _workspaceDragHasLocalFiles(e){
+  const dt=e&&e.dataTransfer;if(!dt)return false;
+  const types=Array.from(dt.types||[]);
+  return types.includes('Files')&&!types.includes('application/ws-path');
+}
+
+function _workspaceParentPath(path){
+  const raw=String(path||'.');
+  const idx=raw.lastIndexOf('/');
+  return idx>0?raw.slice(0,idx):'.';
+}
+
+function _workspaceUploadTargetDir(e){
+  const target=e&&e.target;
+  const row=target&&target.closest?target.closest('.file-item[data-ws-path]'):null;
+  if(row&&row.closest('.rightpanel')){
+    const path=row.dataset.wsPath||'.';
+    return row.dataset.wsType==='dir'?path:_workspaceParentPath(path);
+  }
+  const preview=$('previewArea');
+  if(preview&&preview.classList.contains('visible')&&target&&preview.contains(target)&&_previewCurrentPath){
+    return _workspaceParentPath(_previewCurrentPath);
+  }
+  return S.currentDir||'.';
+}
+
+function _workspaceCleanDroppedRelPath(path,name){
+  const raw=String(path||name||'').replace(/\\/g,'/').replace(/^\/+/, '');
+  const parts=[];
+  for(const part of raw.split('/')){
+    const p=part.trim();
+    if(!p||p==='.')continue;
+    if(p==='..')return '';
+    parts.push(p);
+  }
+  return parts.join('/');
+}
+
+function _workspaceJoinDroppedPath(base,rel){
+  const b=_workspaceCleanDroppedRelPath(base,'.')||'.';
+  const r=_workspaceCleanDroppedRelPath(rel,'');
+  return b==='.'?r:(r?b+'/'+r:b);
+}
+
+function _workspaceFormatBytes(bytes){
+  const n=Number(bytes||0);
+  if(n>=1024*1024)return `${(n/1024/1024).toFixed(n>=10*1024*1024?0:1)} MB`;
+  if(n>=1024)return `${Math.ceil(n/1024)} KB`;
+  return `${n} B`;
+}
+
+function _workspaceUploadIndicatorUpdate(title,detail,percent,state='active'){
+  const el=$('workspaceUploadIndicator');if(!el)return;
+  const titleEl=$('workspaceUploadTitle'),detailEl=$('workspaceUploadDetail'),percentEl=$('workspaceUploadPercent'),fill=$('workspaceUploadFill');
+  const pct=Math.max(0,Math.min(100,Math.round(Number(percent)||0)));
+  el.hidden=false;el.dataset.state=state;
+  if(titleEl)titleEl.textContent=title||t('workspace_upload_indicator_title');
+  if(detailEl)detailEl.textContent=detail||'';
+  if(percentEl)percentEl.textContent=`${pct}%`;
+  if(fill)fill.style.width=`${pct}%`;
+}
+
+function _workspaceUploadIndicatorFinish(title,detail,state){
+  _workspaceUploadIndicatorUpdate(title,detail,100,state);
+  const el=$('workspaceUploadIndicator');if(!el)return;
+  const token=Date.now()+Math.random();
+  S._workspaceUploadIndicatorToken=token;
+  setTimeout(()=>{if(S._workspaceUploadIndicatorToken===token)el.hidden=true;},state==='error'?12000:3500);
+}
+
+function _readDroppedFileEntry(entry){
+  return new Promise((resolve,reject)=>entry.file(resolve,reject));
+}
+
+function _readDroppedDirectoryEntries(reader){
+  return new Promise((resolve,reject)=>{
+    const all=[];
+    const read=()=>reader.readEntries(batch=>{
+      if(!batch.length){resolve(all);return;}
+      all.push(...batch);read();
+    },reject);
+    read();
+  });
+}
+
+async function _collectDroppedWorkspaceEntry(entry,prefix=''){
+  if(entry.isFile){
+    const file=await _readDroppedFileEntry(entry);
+    const relPath=_workspaceCleanDroppedRelPath(prefix+file.name,file.name);
+    return relPath?{files:[{file,relPath}],dirs:[]}:{files:[],dirs:[]};
+  }
+  if(entry.isDirectory){
+    const dirPath=_workspaceCleanDroppedRelPath(prefix+entry.name,entry.name);
+    const children=await _readDroppedDirectoryEntries(entry.createReader());
+    const result={files:[],dirs:dirPath?[dirPath]:[]};
+    for(const child of children){
+      const nested=await _collectDroppedWorkspaceEntry(child,dirPath?dirPath+'/':prefix);
+      result.files.push(...nested.files);result.dirs.push(...nested.dirs);
+    }
+    return result;
+  }
+  return {files:[],dirs:[]};
+}
+
+async function _workspaceDroppedPayload(dt){
+  const items=Array.from((dt&&dt.items)||[]);
+  const entries=items.map(item=>item&&item.webkitGetAsEntry?item.webkitGetAsEntry():null).filter(Boolean);
+  const result={files:[],dirs:[]};
+  if(entries.length){
+    for(const entry of entries){
+      const nested=await _collectDroppedWorkspaceEntry(entry,'');
+      result.files.push(...nested.files);result.dirs.push(...nested.dirs);
+    }
+  }else{
+    for(const file of Array.from((dt&&dt.files)||[])){
+      const relPath=_workspaceCleanDroppedRelPath(file.webkitRelativePath||file.name,file.name);
+      if(relPath)result.files.push({file,relPath});
+    }
+  }
+  const seenFiles=new Set();
+  result.files=result.files.filter(item=>{if(seenFiles.has(item.relPath))return false;seenFiles.add(item.relPath);return true;});
+  result.dirs=[...new Set(result.dirs)].sort((a,b)=>a.length-b.length);
+  return result;
+}
+
+async function _workspaceCreateDroppedDir(targetDir,relDir){
+  const path=_workspaceJoinDroppedPath(targetDir,relDir);
+  if(!path)return false;
+  try{
+    await api('/api/file/create-dir',{method:'POST',body:JSON.stringify({session_id:S.session.session_id,path})});
+    return true;
+  }catch(e){
+    if(e&&/already exists/i.test(e.message||''))return false;
+    throw e;
+  }
+}
+
+async function _workspaceUploadDroppedFile(targetDir,item,onProgress){
+  if(item.file&&item.file.size>MAX_UPLOAD_BYTES)throw new Error(_uploadTooLargeMessage(item.file));
+  const fd=new FormData();
+  fd.append('session_id',S.session.session_id);
+  fd.append('dir',targetDir||'.');
+  fd.append('rel_path',item.relPath);
+  fd.append('file',item.file,item.file.name);
+  const url=new URL('api/file/upload',document.baseURI||location.href).href;
+  return new Promise((resolve,reject)=>{
+    const xhr=new XMLHttpRequest();
+    xhr.open('POST',url,true);
+    xhr.withCredentials=true;
+    const csrf=window.__HERMES_CONFIG__&&window.__HERMES_CONFIG__.csrfToken;
+    if(csrf)xhr.setRequestHeader('X-Hermes-CSRF-Token',csrf);
+    xhr.upload.onprogress=(ev)=>{
+      if(typeof onProgress==='function')onProgress(ev.lengthComputable?ev.loaded:0,ev.lengthComputable?ev.total:((item.file&&item.file.size)||0));
+    };
+    xhr.onerror=()=>reject(new Error('Network error while uploading'));
+    xhr.ontimeout=()=>reject(new Error('Upload timed out'));
+    xhr.onload=()=>{
+      const text=xhr.responseText||'';let data=null;
+      try{data=text?JSON.parse(text):{};}catch(_e){}
+      if(xhr.status===401){window.location.href='login?next='+encodeURIComponent(window.location.pathname+window.location.search);reject(new Error('Authentication required'));return;}
+      if(xhr.status<200||xhr.status>=300){reject(new Error((data&&(data.error||data.message))||text||`HTTP ${xhr.status}`));return;}
+      if(data&&data.error){reject(new Error(data.error));return;}
+      resolve(data||{});
+    };
+    xhr.send(fd);
+  });
+}
+
+async function _handleWorkspacePanelFileDrop(e){
+  if(!S.session||!S.session.session_id){showToast(t('no_workspace'),4000,'error');return;}
+  const targetDir=_workspaceUploadTargetDir(e);
+  let payload;
+  try{payload=await _workspaceDroppedPayload(e.dataTransfer);}catch(err){showToast(t('upload_failed')+(err.message||err),6000,'error');return;}
+  if(!payload.files.length&&!payload.dirs.length){showToast(t('workspace_upload_no_files'),4000,'warning');return;}
+  const displayDir=targetDir==='.'?'~':targetDir;
+  const uploadTitle=t('workspace_uploading',payload.files.length,displayDir);
+  const totalBytes=payload.files.reduce((sum,item)=>sum+((item.file&&item.file.size)||0),0);
+  let completedBytes=0;
+  setStatus(uploadTitle);
+  _workspaceUploadIndicatorUpdate(uploadTitle,t('workspace_upload_preparing',payload.files.length,payload.dirs.length,displayDir),0);
+  let createdDirs=0,uploaded=0,failures=0,firstFailure='';
+  for(let d=0;d<payload.dirs.length;d++){
+    const dir=payload.dirs[d];
+    _workspaceUploadIndicatorUpdate(uploadTitle,t('workspace_upload_creating_dirs',d+1,payload.dirs.length),0);
+    try{if(await _workspaceCreateDroppedDir(targetDir,dir))createdDirs++;}
+    catch(err){failures++;if(!firstFailure)firstFailure=`${dir}: ${err.message||err}`;console.warn('workspace create dropped dir failed',dir,err);}
+  }
+  for(let i=0;i<payload.files.length;i++){
+    const item=payload.files[i];
+    const fileSize=(item.file&&item.file.size)||0;
+    const updateProgress=(loaded,total)=>{
+      const currentTotal=total||fileSize||1;
+      const filePct=Math.max(0,Math.min(1,(loaded||0)/currentTotal));
+      const overallPct=totalBytes?((completedBytes+(loaded||0))/totalBytes*100):(((i+filePct)/Math.max(1,payload.files.length))*100);
+      const detail=t('workspace_upload_progress',i+1,payload.files.length,item.relPath,Math.round(overallPct),`${_workspaceFormatBytes(loaded||0)} / ${_workspaceFormatBytes(currentTotal)}`);
+      _workspaceUploadIndicatorUpdate(uploadTitle,detail,Math.min(99,overallPct));
+    };
+    updateProgress(0,fileSize);
+    try{await _workspaceUploadDroppedFile(targetDir,item,updateProgress);uploaded++;}
+    catch(err){failures++;if(!firstFailure)firstFailure=`${item.relPath}: ${err.message||err}`;setStatus(`\u274c ${t('upload_failed')}${item.relPath} \u2014 ${err.message||err}`);}
+    finally{completedBytes+=fileSize;}
+  }
+  if((uploaded||createdDirs)&&targetDir&&targetDir!=='.'){
+    if(S._expandedDirs){S._expandedDirs.add(targetDir);if(typeof _saveExpandedDirs==='function')_saveExpandedDirs();}
+    delete S._dirCache[targetDir];
+    try{
+      const data=await api(`/api/list?session_id=${encodeURIComponent(S.session.session_id)}&path=${encodeURIComponent(targetDir)}`);
+      S._dirCache[targetDir]=data.entries||[];
+    }catch(_err){}
+  }
+  if(uploaded||createdDirs)await loadDir(S.currentDir||'.');
+  if((uploaded||createdDirs)&&!failures){
+    const msg=t('workspace_upload_complete',uploaded,createdDirs,displayDir);
+    _workspaceUploadIndicatorFinish(msg,'', 'success');
+    showToast(msg,4000,'success');
+  }else if(uploaded||createdDirs){
+    const msg=t('workspace_upload_partial',uploaded,createdDirs,failures);
+    _workspaceUploadIndicatorFinish(msg,firstFailure||'', failures?'error':'success');
+    showToast(msg+(firstFailure?`: ${firstFailure}`:''),6000,failures?'warning':'success');
+  }else if(failures){
+    const msg=t('all_uploads_failed',failures);
+    _workspaceUploadIndicatorFinish(msg,firstFailure||'', 'error');
+    showToast(`${msg}${firstFailure?`: ${firstFailure}`:''}`,6000,'error');
+  }
+}
+
+function _setupWorkspacePanelUploadDrop(){
+  const panel=document.querySelector('.rightpanel');
+  if(!panel||panel.dataset.workspaceUploadDropBound)return;
+  panel.dataset.workspaceUploadDropBound='1';
+  const clear=()=>{panel.classList.remove('workspace-drop-over');panel.querySelectorAll('.workspace-drop-target').forEach(el=>el.classList.remove('workspace-drop-target'));};
+  const mark=e=>{
+    if(!_workspaceDragHasLocalFiles(e))return;
+    e.preventDefault();e.stopPropagation();
+    if(e.dataTransfer)e.dataTransfer.dropEffect='copy';
+    panel.classList.add('workspace-drop-over');
+    panel.querySelectorAll('.workspace-drop-target').forEach(el=>el.classList.remove('workspace-drop-target'));
+    const row=e.target&&e.target.closest?e.target.closest('.file-item[data-ws-path]'):null;
+    if(row&&row.closest('.rightpanel')&&row.dataset.wsType==='dir')row.classList.add('workspace-drop-target');
+  };
+  panel.addEventListener('dragenter',mark);
+  panel.addEventListener('dragover',mark);
+  panel.addEventListener('dragleave',e=>{if(!panel.contains(e.relatedTarget))clear();});
+  panel.addEventListener('drop',async e=>{
+    if(!_workspaceDragHasLocalFiles(e))return;
+    e.preventDefault();e.stopPropagation();clear();
+    await _handleWorkspacePanelFileDrop(e);
+  });
+}
+
+_setupWorkspacePanelUploadDrop();
+
 function openInBrowser(){
   if(!_previewCurrentPath||!S.session) return;
   const url=`api/file/raw?session_id=${encodeURIComponent(S.session.session_id)}&path=${encodeURIComponent(_previewCurrentPath)}`;

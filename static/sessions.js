@@ -16,6 +16,25 @@ const ICONS={
 // responses from in-flight requests when the user switches sessions again
 // before the first request completes (#1060).
 let _loadingSessionId = null;
+let _loadingSessionSeq = 0;
+
+function _beginSessionLoad(sid){
+  _loadingSessionId = sid;
+  _loadingSessionSeq += 1;
+  return _loadingSessionSeq;
+}
+
+function _isCurrentSessionLoad(sid, token){
+  return _loadingSessionId === sid && _loadingSessionSeq === token;
+}
+
+function _isStaleSessionLoad(sid, token){
+  return !_isCurrentSessionLoad(sid, token);
+}
+
+function _clearSessionLoad(sid, token){
+  if(_isCurrentSessionLoad(sid, token)) _loadingSessionId = null;
+}
 
 function _activeSessionPaneNeedsRecovery(sid){
   if(!sid||!S.session||S.session.session_id!==sid) return false;
@@ -603,7 +622,9 @@ async function loadSession(sid){
   if(currentSid===sid && !forceReload) return;
   // Mark this session as the in-flight load. Subsequent loadSession() calls
   // will overwrite this; stale awaits use the mismatch to bail out (#1060).
-  _loadingSessionId = sid;
+  // Same-session inspect refreshes also need a sequence token so a slower
+  // previous refresh cannot overwrite the latest reopened transcript.
+  const loadToken = _beginSessionLoad(sid);
   stopApprovalPolling();hideApprovalCard();
   _yoloEnabled=false;_updateYoloPill();
   if(typeof stopClarifyPolling==='function') stopClarifyPolling();
@@ -639,7 +660,7 @@ async function loadSession(sid){
     }
     if(typeof setComposerStatus==='function') setComposerStatus('Reconnecting…');
     const retry=()=>{
-      if(_loadingSessionId!==sid) return;
+      if(_isStaleSessionLoad(sid, loadToken)) return;
       if(typeof document!=='undefined'&&document.visibilityState==='hidden') return;
       loadSession(sid,{force:true});
     };
@@ -666,7 +687,7 @@ async function loadSession(sid){
         // the empty-state instead of sticking to a broken "Session not available" view.
         if(!currentSid&&localStorage.getItem('hermes-webui-session')===sid){
           localStorage.removeItem('hermes-webui-session');
-          if (_loadingSessionId === sid) _loadingSessionId = null;
+          _clearSessionLoad(sid, loadToken);
           throw e;
         }
       } else {
@@ -674,17 +695,17 @@ async function loadSession(sid){
         if(typeof showToast==='function') showToast('Failed to load session',3000,'error');
       }
     }
-    if (_loadingSessionId === sid) _loadingSessionId = null;
+    _clearSessionLoad(sid, loadToken);
     return;
   }
   // Guard: api() may have redirected (401) and returned undefined; in that case
   // the browser is already navigating away, so abort the rest of this flow.
   if (!data) {
-    if (_loadingSessionId === sid) _loadingSessionId = null;
+    _clearSessionLoad(sid, loadToken);
     return;
   }
   // Stale response? A newer loadSession() call has already started (#1060).
-  if (_loadingSessionId !== sid) return;
+  if (_isStaleSessionLoad(sid, loadToken)) return;
   S.session=data.session;
   S.session._modelResolutionDeferred=true;
   S.lastUsage={...(data.session.last_usage||{})};
@@ -749,6 +770,7 @@ async function loadSession(sid){
     } catch(e) {
       S.messages=inflightMessages;
     }
+    if (_isStaleSessionLoad(sid, loadToken)) return;
     S.messages=_mergeInflightTailMessages(S.messages,inflightMessages);
     S.toolCalls=(INFLIGHT[sid].toolCalls||[]);
     if(_mergePendingSessionMessage(S.session,S.messages)){
@@ -776,7 +798,7 @@ async function loadSession(sid){
     if(typeof _fetchYoloState==='function') _fetchYoloState(sid);
     if(INFLIGHT[sid].reattach&&activeStreamId&&typeof attachLiveStream==='function'){
       INFLIGHT[sid].reattach=false;
-      if (_loadingSessionId !== sid) return;
+      if (_isStaleSessionLoad(sid, loadToken)) return;
       attachLiveStream(sid, activeStreamId, S.session.pending_attachments||[], {reconnecting:true});
     }
   }else{
@@ -798,11 +820,11 @@ async function loadSession(sid){
         _msgInner.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:14px;padding:40px;text-align:center;">Failed to load messages. Try switching sessions or refreshing.</div>';
       }
       if (typeof showToast === 'function') showToast('Failed to load conversation messages', 3000, 'error');
-      if (_loadingSessionId === sid) _loadingSessionId = null;
+      _clearSessionLoad(sid, loadToken);
       return;
     }
     // Stale? A newer loadSession() call has already started (#1060).
-    if (_loadingSessionId !== sid) return;
+    if (_isStaleSessionLoad(sid, loadToken)) return;
 
     // Restore any queued message that survived page refresh via sessionStorage.
     if(typeof queueSessionMessage==='function'){
@@ -894,7 +916,7 @@ async function loadSession(sid){
 
   _resolveSessionModelForDisplaySoon(sid);
   // Clear the in-flight session marker now that this load has completed (#1060).
-  if (_loadingSessionId === sid) _loadingSessionId = null;
+  _clearSessionLoad(sid, loadToken);
 
   // ── Cross-channel handoff hint ──
   // After session fully loaded, check if this is a messaging session with
@@ -2656,7 +2678,7 @@ function upsertActiveSessionForLocalTurn({title='', messageCount=0, timestampMs=
     message_count:count,
     last_message_at:nowSec,
     updated_at:nowSec,
-    profile:S.session.profile||S.activeProfile||'default',
+    profile:currentSessionProfileForTurn(S.session),
     is_streaming:true,
   };
   if(existingIdx>=0) _allSessions[existingIdx]={..._allSessions[existingIdx],...row};

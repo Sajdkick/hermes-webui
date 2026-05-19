@@ -415,6 +415,10 @@ Production data and real cron jobs are never touched. Current snapshot:
 - rAF-throttled token streaming for smoother rendering during long responses
 - Context usage indicator in composer footer -- token count, cost, and fill bar (model-aware)
 
+### Project task workflows
+- Quick task runner creates project tasks, forwards screenshots, and can immediately start the linked Hermes session.
+- Execute-ready and Epic task run actions submit task prompts as standing `/goal` turns so long task batches can continue through goal-mode continuation instead of stopping at the first tool-call ceiling.
+
 ### Sessions
 - Create, rename, duplicate, delete, search by title and message content
 - Session actions via `⋯` dropdown per session — pin, move to project, archive, duplicate, delete
@@ -434,6 +438,7 @@ Production data and real cron jobs are never touched. Current snapshot:
 - Breadcrumb navigation with clickable path segments
 - Preview text, code, Markdown (rendered), and images inline
 - Edit, create, delete, and rename files; create folders
+- Drag files or folders from your local file browser into the workspace panel to upload them, preserving nested subfolders
 - Binary file download (auto-detected from server)
 - File preview auto-closes on directory navigation (with unsaved-edit guard)
 - Git detection -- branch name and dirty file count badge in workspace header

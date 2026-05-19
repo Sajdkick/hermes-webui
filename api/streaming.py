@@ -625,6 +625,12 @@ def _build_agent_thread_env(profile_runtime_env: dict | None, workspace: str, se
     agent starts, so merge into one dict first and let the active workspace win.
     """
     env = dict(profile_runtime_env or {})
+    try:
+        from api.session_readable_output import build_session_readable_output_env
+
+        env.update(build_session_readable_output_env(session_id))
+    except Exception:
+        logger.debug("Failed to build readable-output environment for %s", session_id, exc_info=True)
     env.update({
         'TERMINAL_CWD': str(workspace),
         'HERMES_EXEC_ASK': '1',
@@ -3142,6 +3148,13 @@ def _run_agent_streaming(
             _profile_home,
         )
         _set_thread_env(**_thread_env)
+        _readable_output_process_env = {
+            key: value
+            for key, value in _thread_env.items()
+            if key.startswith('HERMES_READABLE_OUTPUT_')
+            or key.startswith('CLOUD_TERMINAL_READABLE_OUTPUT_')
+            or key == 'CLOUD_TERMINAL_SESSION_ID'
+        }
         # Prewarm skill-tool imports *before* acquiring the lock so that
         # first-time module initialisation (which can be slow) does not
         # block other concurrent sessions waiting on _ENV_LOCK (#2024).
@@ -3151,7 +3164,8 @@ def _run_agent_streaming(
         # The finally block re-acquires to restore — keeping critical sections short
         # and preventing a deadlock where the restore would re-enter the same lock.
         with _ENV_LOCK:
-            old_profile_env = {key: os.environ.get(key) for key in _profile_runtime_env}
+            _profile_and_readable_env_keys = set(_profile_runtime_env) | set(_readable_output_process_env)
+            old_profile_env = {key: os.environ.get(key) for key in _profile_and_readable_env_keys}
             old_cwd = os.environ.get('TERMINAL_CWD')
             old_exec_ask = os.environ.get('HERMES_EXEC_ASK')
             old_session_key = os.environ.get('HERMES_SESSION_KEY')
@@ -3159,6 +3173,7 @@ def _run_agent_streaming(
             old_session_platform = os.environ.get('HERMES_SESSION_PLATFORM')
             old_hermes_home = os.environ.get('HERMES_HOME')
             os.environ.update(_profile_runtime_env)
+            os.environ.update(_readable_output_process_env)
             os.environ['TERMINAL_CWD'] = str(s.workspace)
             os.environ['HERMES_EXEC_ASK'] = '1'
             os.environ['HERMES_SESSION_KEY'] = session_id

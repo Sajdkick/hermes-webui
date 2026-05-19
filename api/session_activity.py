@@ -210,19 +210,19 @@ def _activity_status(session: dict) -> dict | None:
             "labelText": "Codex needs input",
             "title": "Codex is waiting for input in this session.",
         }
-    if session.get("pending_user_message") and has_live_stream:
+    if has_live_stream:
+        return {
+            "key": "active",
+            "toneClass": "active",
+            "labelText": "Codex is working",
+            "title": "Codex is actively processing this session.",
+        }
+    if session.get("pending_user_message") or run_status in {"queued", "starting"}:
         return {
             "key": "connecting",
             "toneClass": "connecting",
             "labelText": "Connecting to Codex",
             "title": "Connecting to Codex for live session state.",
-        }
-    if has_live_stream or run_status in {"queued", "starting"}:
-        return {
-            "key": "connecting" if run_status in {"queued", "starting"} else "active",
-            "toneClass": "connecting" if run_status in {"queued", "starting"} else "active",
-            "labelText": "Connecting to Codex" if run_status in {"queued", "starting"} else "Codex is working",
-            "title": "Codex is actively processing this session." if run_status not in {"queued", "starting"} else "Connecting to Codex for live session state.",
         }
     if run_status == "running":
         return {

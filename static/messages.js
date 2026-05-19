@@ -237,7 +237,7 @@ async function send(){
   if (_sendInProgress) {
     const _text=$('msg').value.trim();
     if(_text && S.session && S.session.session_id){
-      queueSessionMessage(S.session.session_id,{text:_text,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',model_provider:S.session&&S.session.model_provider||null,profile:S.activeProfile||'default'});
+      queueSessionMessage(S.session.session_id,{text:_text,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',model_provider:S.session&&S.session.model_provider||null,profile:currentSessionProfileForTurn()});
       $('msg').value='';autoResize();
       S.pendingFiles=[];renderTray();
       updateQueueBadge(S.session.session_id);
@@ -295,7 +295,7 @@ async function send(){
         S.pendingFiles=[];renderTray();
       } else if(busyMode==='interrupt'){
         // Queue the message, then cancel so drain re-sends it.
-        queueSessionMessage(S.session.session_id,{text,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',model_provider:S.session&&S.session.model_provider||null,profile:S.activeProfile||'default'});
+        queueSessionMessage(S.session.session_id,{text,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',model_provider:S.session&&S.session.model_provider||null,profile:currentSessionProfileForTurn()});
         updateQueueBadge(S.session.session_id);
         $('msg').value='';autoResize();
         S.pendingFiles=[];renderTray();
@@ -308,7 +308,7 @@ async function send(){
       } else {
         // Default: queue mode (current behavior). Also the fallback for
         // 'steer' mode when no stream is active or _trySteer is unavailable.
-        queueSessionMessage(S.session.session_id,{text,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',model_provider:S.session&&S.session.model_provider||null,profile:S.activeProfile||'default'});
+        queueSessionMessage(S.session.session_id,{text,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',model_provider:S.session&&S.session.model_provider||null,profile:currentSessionProfileForTurn()});
         $('msg').value='';autoResize();
         S.pendingFiles=[];renderTray();
         updateQueueBadge(S.session.session_id);
@@ -380,6 +380,8 @@ async function send(){
   if(!S.session){await newSession();await renderSessionList();}
 
   const activeSid=S.session.session_id;
+  const turnProfile=currentSessionProfileForTurn(S.session);
+  if(S.session&&!sessionHasLockedProfile(S.session))S.session.profile=turnProfile;
 
   setComposerStatus(S.pendingFiles&&S.pendingFiles.length?'Uploading…':'');
   let uploaded=[];
@@ -445,7 +447,7 @@ async function send(){
       session_id:activeSid,message:msgText,
       model:S.session.model||$('modelSelect').value,workspace:S.session.workspace,
       model_provider:S.session.model_provider||null,
-      profile:S.activeProfile||S.session.profile||'default',
+      profile:turnProfile,
       attachments:uploaded.length?uploaded:undefined
     })});
 
@@ -499,7 +501,7 @@ async function send(){
       stopApprovalPolling();
       stopClarifyPolling();
       // Keep the user's attempted turn by queueing it for after the current run.
-      queueSessionMessage(activeSid,{text:msgText,files:[],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',model_provider:S.session&&S.session.model_provider||null,profile:S.activeProfile||'default'});
+      queueSessionMessage(activeSid,{text:msgText,files:[],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',model_provider:S.session&&S.session.model_provider||null,profile:currentSessionProfileForTurn()});
       updateQueueBadge(activeSid);
       showToast('Current session is still running. Reconnected and queued your message.',2600);
       try{
@@ -1733,7 +1735,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
           text:continuation_prompt,
           model:S.session&&S.session.model||'',
           model_provider:S.session&&S.session.model_provider||null,
-          profile:S.activeProfile||'default',
+          profile:currentSessionProfileForTurn(),
         };
         const toast=t('goal_continuing_toast');
         const cmsg=_resolveGoalMessage(d);
@@ -1936,7 +1938,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
             text:txt,files:[],
             model:S.session&&S.session.model||'',
             model_provider:S.session&&S.session.model_provider||null,
-            profile:S.activeProfile||'default',
+            profile:currentSessionProfileForTurn(),
           });
           if(typeof updateQueueBadge==='function') updateQueueBadge(sid);
           showToast(t('steer_leftover_queued'),3000);

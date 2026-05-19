@@ -1247,7 +1247,9 @@ def _is_browser_unsafe_request(handler) -> bool:
 
 def _csrf_exempt_path(path: str) -> bool:
     """Paths that cannot or must not carry a session CSRF token."""
-    return path in {"/api/auth/login", "/api/csp-report"}
+    return path in {"/api/auth/login", "/api/csp-report"} or (
+        path.startswith("/api/gather/") and path.rstrip("/").endswith("/events")
+    )
 
 
 def _check_csrf(handler) -> bool:
@@ -2228,7 +2230,7 @@ from api.workspace import (
     _strip_surrounding_quotes,
     _workspace_blocked_roots,
 )
-from api.upload import handle_upload, handle_upload_extract, handle_transcribe
+from api.upload import handle_upload, handle_upload_extract, handle_transcribe, handle_workspace_upload
 from api.streaming import (
     _sse,
     _run_agent_streaming,
@@ -4466,6 +4468,9 @@ def handle_post(handler, parsed) -> bool:
         return handle_upload(handler)
     if parsed.path == "/api/upload/extract":
         return handle_upload_extract(handler)
+    if parsed.path == "/api/file/upload":
+        handle_workspace_upload(handler)
+        return True
 
     if parsed.path == "/api/transcribe":
         return handle_transcribe(handler)
@@ -4478,6 +4483,20 @@ def handle_post(handler, parsed) -> bool:
         if diag:
             diag.finish()
         raise
+
+    try:
+        from api.gather import GatherError, append_gather_event, report_id_from_events_path
+
+        gather_report_id = report_id_from_events_path(parsed.path)
+        if gather_report_id:
+            token = handler.headers.get("X-Hermes-Gather-Token", "")
+            try:
+                j(handler, append_gather_event(gather_report_id, token, body))
+            except GatherError as exc:
+                bad(handler, str(exc), status=exc.status)
+            return True
+    except ImportError:
+        logger.debug("Gather module unavailable for %s", parsed.path, exc_info=True)
 
     if parsed.path == "/api/sessions/activity/groups" or parsed.path.startswith("/api/sessions/activity/"):
         from api.routes_session_activity import handle_post as handle_session_activity_post
@@ -8030,6 +8049,22 @@ def _handle_goal_command(handler, body):
     return j(handler, payload)
 
 
+def _session_profile_retag_locked(s) -> bool:
+    """Return True when an empty session's stamped profile is authoritative.
+
+    Plain New Conversation placeholders may adopt the active profile before the
+    first turn.  Project/Ops/worktree sessions are different: they are created
+    for a profile-owned resource before the first message exists, so accepting a
+    caller-supplied profile would leak the globally selected WebUI profile into
+    project-specific memories and skills.
+    """
+    return bool(
+        getattr(s, "project_id", None)
+        or getattr(s, "source_tag", None)
+        or getattr(s, "worktree_path", None)
+    )
+
+
 def _handle_chat_start(handler, body, diag=None):
     try:
         diag.stage("validate_session_id") if diag else None
@@ -8058,11 +8093,12 @@ def _handle_chat_start(handler, body, diag=None):
                 or getattr(s, "context_messages", None)
                 or getattr(s, "pending_user_message", None)
             )
-            if not has_persisted_turns:
+            if not has_persisted_turns and not _session_profile_retag_locked(s):
                 # Empty sessions are placeholders. If the user switches profiles
                 # before sending the first turn, run the placeholder under the
                 # currently-selected profile instead of the stale one stamped at
-                # creation time.
+                # creation time. Project/Ops/worktree sessions are already
+                # profile-owned before their first message and must not retag.
                 s.profile = requested_profile
         diag.stage("normalize_message") if diag else None
         msg = str(body.get("message", "")).strip()

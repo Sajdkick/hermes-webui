@@ -812,3 +812,151 @@ def test_phase4_legacy_execute_uses_persisted_model_state_when_ops_has_no_dropdo
         text=True,
     )
     assert completed.stdout.strip() == "ok"
+
+
+def test_phase4_mark_needs_more_work_updates_ui_before_persistence_finishes():
+    script = textwrap.dedent(
+        """
+        (async () => {
+        const fs = require('fs');
+        const vm = require('vm');
+
+        const source = fs.readFileSync('static/ops-legacy-task-actions.js', 'utf8');
+        const windowRef = { HermesOpsModules: {} };
+        const context = {
+          console,
+          window: windowRef,
+          document: {},
+          setTimeout,
+          clearTimeout,
+        };
+        vm.createContext(context);
+        vm.runInContext(source, context);
+
+        const project = { id: 'project-1', name: 'Hermes', path: '/tmp/hermes', profile: 'hermes' };
+        const task = {
+          id: 'task-1',
+          text: 'Needs QA feedback',
+          grade: 'green',
+          done: false,
+          qaStatus: 'ready-for-test',
+          moreWork: '',
+          inProgress: false,
+        };
+        let resolveApi;
+        let apiCalled = false;
+        let apiPayload = null;
+        const apiPromise = new Promise((resolve) => { resolveApi = resolve; });
+        let renderCalls = 0;
+        let loadDetailCalls = 0;
+        const toasts = [];
+
+        const dashboard = context.window.HermesOpsModules.taskActions.bindDashboard({
+          OPS: {
+            currentProject: project,
+            sessions: [],
+            taskDataByProject: {},
+            taskAutomationBusyByProject: {},
+            quickTaskImages: [],
+            view: 'project-detail',
+          },
+          AgentBridge: {
+            sessions: {},
+            runs: {},
+          },
+          api: async (path, options) => {
+            apiCalled = true;
+            apiPayload = { path, options };
+            return await apiPromise;
+          },
+          projectUrl: (projectId, suffix='') => '/api/ops/projects/' + projectId + suffix,
+          projectPath: (entry) => entry.path,
+          nameOf: (entry) => entry.name,
+          findProject: () => project,
+          findTask: () => ({ epic: { id: 'epic-1' }, task }),
+          findTaskInData: () => null,
+          allTasks: () => [],
+          findSession: () => null,
+          sessionTaskId: () => '',
+          latestSessionForTask: () => null,
+          sessionRefValue: (value) => typeof value === 'string' ? value : ((value && value.session_id) || ''),
+          normalizeTaskGrade: (value) => value,
+          getTaskQaStatus: (entry) => entry && entry.qaStatus || '',
+          getTaskMoreWork: (entry) => entry && entry.moreWork || '',
+          actionableTaskCount: () => 1,
+          summarizeTaskFilters: () => ({}),
+          renderProjectDetail: () => { renderCalls += 1; },
+          loadProjectDetail: async () => { loadDetailCalls += 1; },
+          refreshOpsSessions: async () => [],
+          reloadProjectTasks: async () => ({}),
+          loadProjects: async () => {},
+          renderProjects: () => {},
+          renderHome: () => {},
+          loadSession: async () => {},
+          renderSessionList: async () => {},
+          closeOpsDashboard: () => {},
+          showToast: (message) => { toasts.push(message); },
+          showPromptDialog: async () => 'Fix the regression',
+          showConfirmDialog: async () => false,
+          setBusy: () => {},
+          domLookup: () => null,
+          documentRef: {},
+          windowRef,
+          FileReaderRef: null,
+          SRef: () => ({ session: null, activeProfile: 'default' }),
+          addFiles: () => {},
+          renderTray: () => {},
+          clearSessionReadableOutput: () => {},
+          clearPersistedSessionId: () => {},
+          sendTurn: async () => {},
+          autoResize: () => {},
+          clearQuickTaskImages: () => {},
+        });
+
+        let markResolved = false;
+        const markPromise = dashboard.markTaskNeedsMoreWork('task-1').then(() => { markResolved = true; });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        if (!markResolved){
+          throw new Error('markTaskNeedsMoreWork waited for the persistence request before resolving.');
+        }
+        if (!apiCalled){
+          throw new Error('Expected the task update API request to be started.');
+        }
+        if (task.qaStatus !== 'needs-more-work' || task.moreWork !== 'Fix the regression' || task.inProgress !== false){
+          throw new Error('Expected task state to update optimistically before persistence resolved.');
+        }
+        if (renderCalls !== 1){
+          throw new Error('Expected one immediate render after the optimistic task update.');
+        }
+        if (loadDetailCalls !== 0){
+          throw new Error('Project detail refreshed before the save completed.');
+        }
+        const body = JSON.parse(apiPayload.options.body);
+        if (apiPayload.path !== '/api/ops/projects/project-1/tasks/task-1' || body.qaStatus !== 'needs-more-work' || body.moreWork !== 'Fix the regression'){
+          throw new Error('Unexpected needs-more-work update payload.');
+        }
+        if (!toasts.includes('Task marked as needing more work')){
+          throw new Error('Expected immediate success feedback.');
+        }
+
+        resolveApi({ task });
+        await markPromise;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (loadDetailCalls !== 1){
+          throw new Error('Expected background refresh after persistence completed.');
+        }
+        console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"

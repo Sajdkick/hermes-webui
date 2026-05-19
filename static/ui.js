@@ -1,7 +1,41 @@
 const S={session:null,messages:[],entries:[],busy:false,pendingFiles:[],toolCalls:[],activeStreamId:null,currentDir:'.',activeProfile:'default',showHiddenWorkspaceFiles:false};
+
+function _trimProfileName(value){
+  const profile=String(value||'').trim();
+  return profile||'';
+}
+
+function sessionHasLockedProfile(session){
+  if(!session)return false;
+  const messageCount=Number(session.message_count||0);
+  const liveMessageCount=(session===S.session&&Array.isArray(S.messages))?S.messages.length:0;
+  return !!(
+    messageCount>0 ||
+    liveMessageCount>0 ||
+    session.project_id ||
+    session.ops_project_id ||
+    session.projectId ||
+    session.source_tag ||
+    session.active_stream_id ||
+    session.pending_user_message ||
+    session.pending_started_at
+  );
+}
+
+function currentSessionProfileForTurn(session){
+  const s=session||S.session;
+  const sessionProfile=_trimProfileName(s&&s.profile);
+  const activeProfile=_trimProfileName(S.activeProfile);
+  if(sessionProfile&&sessionHasLockedProfile(s))return sessionProfile;
+  return activeProfile||sessionProfile||'default';
+}
+
+function displayProfileForCurrentSession(session){
+  return currentSessionProfileForTurn(session);
+}
 const INFLIGHT={};  // keyed by session_id while request in-flight
 const SESSION_QUEUES={};  // keyed by session_id for queued follow-up turns
-const MAX_UPLOAD_BYTES=(window.__HERMES_CONFIG__&&window.__HERMES_CONFIG__.maxUploadBytes)||20*1024*1024;
+const MAX_UPLOAD_BYTES=(window.__HERMES_CONFIG__&&window.__HERMES_CONFIG__.maxUploadBytes)||200*1024*1024;
 const MAX_UPLOAD_MB=Math.round(MAX_UPLOAD_BYTES/1024/1024);
 // Tracks which session's queue to drain in setBusy(false).
 // Set to activeSid just before setBusy(false) in done/error handlers so the
@@ -4598,7 +4632,7 @@ function syncTopbar(){
     if(typeof syncAppTitlebar==='function') syncAppTitlebar();
     // Update profile chip even when no session is active (e.g. right after profile switch)
     const _profileLabel=$('profileChipLabel');
-    if(_profileLabel) _profileLabel.textContent=S.activeProfile||'default';
+    if(_profileLabel) _profileLabel.textContent=displayProfileForCurrentSession();
     return;
   }
   const sessionTitle=S.session.title||t('untitled');
@@ -4697,7 +4731,7 @@ function syncTopbar(){
   // modelSelect already set above
   // Update profile chip label
   const profileLabel=$('profileChipLabel');
-  if(profileLabel) profileLabel.textContent=S.activeProfile||'default';
+  if(profileLabel) profileLabel.textContent=displayProfileForCurrentSession();
 }
 
 function msgContent(m){
@@ -7509,6 +7543,8 @@ function _renderTreeItems(container, entries, depth){
     const el=document.createElement('div');el.className='file-item';
     el.style.paddingLeft=(8+depth*16)+'px';
     el.setAttribute('draggable','true');
+    el.dataset.wsPath=item.path;
+    el.dataset.wsType=item.type;
     el.oncontextmenu=(e)=>{e.preventDefault();e.stopPropagation();_showFileContextMenu(e,item);};
     el.ondragstart=(e)=>{e.dataTransfer.setData('application/ws-path',item.path);e.dataTransfer.setData('application/ws-type',item.type);e.dataTransfer.effectAllowed='copy';};
 
@@ -7652,6 +7688,8 @@ function _renderTreeItems(container, entries, depth){
       }else{
         const empty=document.createElement('div');
         empty.className='file-item file-empty';
+        empty.dataset.wsPath=item.path;
+        empty.dataset.wsType='dir';
         empty.style.paddingLeft=(8+(depth+1)*16)+'px';
         empty.textContent=t('empty_dir');
         container.appendChild(empty);

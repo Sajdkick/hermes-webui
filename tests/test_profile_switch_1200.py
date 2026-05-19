@@ -233,8 +233,8 @@ def test_syncTopbar_early_return_updates_profile_chip():
         "syncTopbar() early-return block (!S.session) must update profileChipLabel. "
         "Without this, switching profiles with no active session leaves the chip stale."
     )
-    assert "S.activeProfile" in early_block, (
-        "profileChipLabel update in early-return block must read S.activeProfile"
+    assert "displayProfileForCurrentSession" in early_block, (
+        "profileChipLabel update in early-return block must use the session-aware profile helper"
     )
 
 
@@ -582,6 +582,69 @@ def test_chat_start_does_not_retag_non_empty_session(monkeypatch, tmp_path):
     )
 
     assert fake.profile == "default"
+    assert fake.saved is True
+
+
+def test_chat_start_does_not_retag_empty_project_owned_session(monkeypatch, tmp_path):
+    """Ops/project sessions are profile-owned before their first message exists."""
+    import api.routes as routes
+
+    class FakeSession:
+        def __init__(self):
+            self.session_id = "sid-ops-task"
+            self.profile = "hermes-webui"
+            self.project_id = "project-1"
+            self.source_tag = "ops_task"
+            self.worktree_path = None
+            self.workspace = str(tmp_path)
+            self.model = "google/gemini-3-flash-preview"
+            self.model_provider = "openrouter"
+            self.messages = []
+            self.context_messages = []
+            self.tool_calls = []
+            self.active_stream_id = None
+            self.pending_user_message = None
+            self.pending_attachments = []
+            self.pending_started_at = None
+            self.saved = False
+
+        def save(self):
+            self.saved = True
+
+    fake = FakeSession()
+    monkeypatch.setattr(routes, "get_session", lambda sid: fake)
+    monkeypatch.setattr(routes, "resolve_trusted_workspace", lambda path: tmp_path)
+    monkeypatch.setattr(
+        routes,
+        "_resolve_compatible_session_model_state",
+        lambda model, provider: (model, provider, False),
+    )
+    monkeypatch.setattr(routes, "set_last_workspace", lambda workspace: None)
+    monkeypatch.setattr(routes, "create_stream_channel", lambda: object())
+
+    class FakeThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(routes.threading, "Thread", FakeThread)
+    monkeypatch.setattr(routes, "j", lambda handler, payload, status=200, **kwargs: payload)
+
+    routes._handle_chat_start(
+        object(),
+        {
+            "session_id": fake.session_id,
+            "message": "hello",
+            "workspace": str(tmp_path),
+            "model": fake.model,
+            "model_provider": fake.model_provider,
+            "profile": "laxlyftet",
+        },
+    )
+
+    assert fake.profile == "hermes-webui"
     assert fake.saved is True
 
 

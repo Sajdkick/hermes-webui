@@ -892,6 +892,152 @@ def test_phase11_quick_task_create_only_does_not_start_execution():
     assert completed.stdout.strip() == "ok"
 
 
+def test_phase11_quick_task_screenshots_persist_and_reach_started_session():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (async () => {
+          const source = fs.readFileSync('static/ops-legacy-task-actions.js', 'utf8');
+          const windowRef = { HermesOpsModules: {}, _opsDashboardOpen: true };
+          class FakeFileReader {
+            readAsDataURL(file){
+              this.result = `data:${file.type || 'image/png'};base64,c2NyZWVuc2hvdA==`;
+              if (this.onload) this.onload();
+            }
+          }
+          const context = { console, window: windowRef, document: {}, FileReader: FakeFileReader };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const project = { id: 'hermes', name: 'Hermes', path: '/tmp/hermes' };
+          const quickEpic = { id: 'quick-epic', title: 'Quick tasks', tasks: [] };
+          const createdTask = { id: 'task-1', text: 'Debug screenshot flow', grade: 'green' };
+          const savedImagePath = '/tmp/hermes-task-images/hermes/task-1/shot.png';
+          const calls = [];
+          const msg = { value: '' };
+          let sentPrompt = '';
+          let addFilesCount = 0;
+          const state = { session: { session_id: 'sess-1', profile: 'default' }, activeProfile: 'default', pendingFiles: [] };
+          const OPS = {
+            currentProject: null,
+            taskData: null,
+            taskDataByProject: { hermes: { epics: [quickEpic], tasksFile: 'project_tasks/master.json', branch: 'master' } },
+            taskAutomationBusyByProject: {},
+            view: 'home',
+            quickTaskImages: [{ id: 'img-1', file: { name: 'shot.png', type: 'image/png' }, previewUrl: 'blob:shot' }],
+            quickTaskText: 'Debug screenshot flow',
+            quickTaskGoalMode: false,
+            quickTaskBusy: false,
+            quickTaskBusyAction: '',
+            quickTaskDictationActive: false,
+            quickTaskDictationBusy: false,
+            quickTaskStatus: '',
+            quickTaskStatusKind: 'info',
+          };
+          const reloadedTask = { ...createdTask, images: savedImagePath };
+          const reloadedData = { epics: [{ ...quickEpic, tasks: [reloadedTask] }] };
+
+          const dashboard = context.window.HermesOpsModules.taskActions.bindDashboard({
+            OPS,
+            AgentBridge: {
+              sessions: {
+                ensureTask: async () => ({ session: { session_id: 'sess-1', profile: 'default' }, task: reloadedTask }),
+              },
+              runs: { create: async (payload) => { calls.push({ kind: 'run', payload }); return { id: 'run-1' }; } },
+            },
+            api: async (url, options) => {
+              calls.push({ kind: 'api', url, method: options && options.method, body: options && options.body });
+              if (url === '/projects/hermes/tasks') return { task: createdTask };
+              if (url === '/projects/hermes/tasks/task-1/images') return { image: { name: 'shot.png', path: savedImagePath, mime: 'image/png', size: 10 }, task: reloadedTask };
+              if (url === '/projects/hermes/ensure-workspace') return {};
+              throw new Error('Unexpected API call: ' + url);
+            },
+            projectUrl: (projectId, suffix) => `/projects/${projectId}${suffix || ''}`,
+            projectPath: () => '/tmp/hermes',
+            nameOf: () => 'Hermes',
+            findProject: (projectId) => projectId === 'hermes' ? project : null,
+            findTask: () => null,
+            findTaskInData: (data, taskId) => {
+              for (const epic of data.epics || []){
+                for (const task of epic.tasks || []){
+                  if (task.id === taskId) return { epic, task };
+                }
+              }
+              return null;
+            },
+            allTasks: () => [],
+            findSession: () => null,
+            sessionTaskId: () => '',
+            latestSessionForTask: () => null,
+            sessionRefValue: (value) => typeof value === 'string' ? value : ((value && value.session_id) || ''),
+            normalizeTaskGrade: (value) => value || 'green',
+            getTaskQaStatus: () => '',
+            getTaskMoreWork: () => '',
+            actionableTaskCount: () => 0,
+            summarizeTaskFilters: () => ({}),
+            renderProjectDetail: () => {},
+            loadProjectDetail: async () => reloadedData,
+            refreshOpsSessions: async () => [],
+            reloadProjectTasks: async () => reloadedData,
+            loadProjects: async () => [],
+            renderProjects: () => {},
+            renderHome: () => {},
+            loadSession: async () => state.session,
+            renderSessionList: () => {},
+            closeOpsDashboard: () => {},
+            showToast: () => {},
+            showPromptDialog: async () => null,
+            showConfirmDialog: async () => false,
+            setBusy: () => {},
+            domLookup: (id) => id === 'msg' ? msg : null,
+            documentRef: context.document,
+            windowRef,
+            FileReaderRef: FakeFileReader,
+            SRef: () => state,
+            addFiles: (files) => { addFilesCount += files.length; },
+            renderTray: () => {},
+            clearSessionReadableOutput: () => {},
+            clearPersistedSessionId: () => {},
+            sendTurn: async () => { sentPrompt = msg.value; },
+            autoResize: () => {},
+            clearQuickTaskImages: () => { OPS.quickTaskImages = []; },
+            enterOpsSessionInspectMode: () => {},
+          });
+
+          await dashboard.createQuickTask('hermes', 'Debug screenshot flow', { run: true });
+
+          const uploadCall = calls.find((call) => call.kind === 'api' && call.url === '/projects/hermes/tasks/task-1/images');
+          if (!uploadCall) throw new Error('Expected quick task screenshot upload call.');
+          const uploadBody = JSON.parse(uploadCall.body);
+          if (uploadBody.filename !== 'shot.png' || !String(uploadBody.content || '').startsWith('data:image/png;base64,')) {
+            throw new Error('Screenshot upload did not include the selected image file.');
+          }
+          if (addFilesCount !== 1) throw new Error('Expected raw screenshot file to remain forwarded to composer upload.');
+          if (!sentPrompt.includes('Attached task screenshots/images:') || !sentPrompt.includes(savedImagePath)) {
+            throw new Error('Started quick task prompt did not include saved task screenshot path: ' + sentPrompt);
+          }
+          if (OPS.quickTaskImages.length !== 0) throw new Error('Quick task screenshot UI state should be cleared after handoff.');
+          if (OPS.quickTaskStatus !== 'Quick task created and execution started.' || OPS.quickTaskStatusKind !== 'success') {
+            throw new Error('Expected successful quick task execution status.');
+          }
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
 def test_phase11_open_session_loads_target_before_closing_dashboard():
     script = textwrap.dedent(
         """

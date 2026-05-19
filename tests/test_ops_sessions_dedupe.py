@@ -172,6 +172,166 @@ def test_find_existing_task_session_allows_archived_tip_for_relaunch(monkeypatch
     assert existing is not None
     assert existing["session"].session_id == "latest_child"
 
+
+def test_launch_task_session_uses_project_profile_over_payload(monkeypatch, tmp_path):
+    """Ops project task launches must not inherit the globally selected UI profile."""
+    project = {
+        "id": "project-1",
+        "name": "Hermes WebUI",
+        "path": str(tmp_path),
+        "resolvedPath": str(tmp_path),
+        "profile": "hermes-webui",
+    }
+    task = {"id": "task-1", "text": "Fix profile routing"}
+    created = {}
+
+    class CreatedSession:
+        session_id = "session-task"
+        messages = []
+        active_stream_id = None
+
+        def __init__(self, *, profile, project_id, workspace, model, model_provider):
+            self.profile = profile
+            self.project_id = project_id
+            self.workspace = workspace
+            self.model = model
+            self.model_provider = model_provider
+            self.title = ""
+            self.source_tag = None
+            self.source_label = None
+
+        def save(self):
+            self.saved = True
+
+        def compact(self):
+            return {
+                "session_id": self.session_id,
+                "profile": self.profile,
+                "project_id": self.project_id,
+                "source_tag": self.source_tag,
+            }
+
+    def fake_new_session(**kwargs):
+        created.update(kwargs)
+        return CreatedSession(**kwargs)
+
+    monkeypatch.setattr(ops_sessions, "_find_existing_task_session", lambda _project_id, _task_id: None)
+    monkeypatch.setattr(
+        ops_sessions.ops_projects,
+        "get_ops_project_task",
+        lambda project_id, task_id: {"project": project, "task": task},
+    )
+    monkeypatch.setattr(ops_sessions, "new_session", fake_new_session)
+    monkeypatch.setattr(
+        ops_sessions,
+        "_profile_config_defaults",
+        lambda profile: ("project-default-model", "project-provider"),
+    )
+    monkeypatch.setattr(
+        ops_sessions.ops_projects,
+        "update_ops_project_task",
+        lambda project_id, task_id, patch: {"task": {**task, **patch}},
+    )
+    monkeypatch.setattr(ops_sessions.ops_projects, "_now_iso", lambda: "2026-05-17T00:00:00Z")
+    monkeypatch.setattr(
+        ops_sessions.session_sidecars,
+        "set_session_linkage",
+        lambda session_id, project_id, task_id, run_id="": {"sessionId": session_id, "runId": run_id},
+    )
+
+    from api import ops_runs
+
+    monkeypatch.setattr(
+        ops_runs,
+        "create_task_run",
+        lambda project_id, task_id, session_id, title="": {"id": "run-1", "sessionId": session_id},
+    )
+    monkeypatch.setattr(ops_runs, "run_url", lambda run_id: f"/ops/runs/{run_id}")
+
+    result = ops_sessions.launch_task_session("project-1", "task-1", {"profile": "laxlyftet"})
+
+    assert created["profile"] == "hermes-webui"
+    assert result["session"]["profile"] == "hermes-webui"
+
+
+def test_launch_task_session_defaults_blank_project_profile_to_default(monkeypatch, tmp_path):
+    """A blank/default project profile means root default, not active UI profile."""
+    project = {
+        "id": "project-1",
+        "name": "Default project",
+        "path": str(tmp_path),
+        "resolvedPath": str(tmp_path),
+        "profile": None,
+    }
+    task = {"id": "task-1", "text": "Use default profile"}
+    created = {}
+    defaults_called = []
+
+    class CreatedSession:
+        session_id = "session-default-task"
+        messages = []
+        active_stream_id = None
+
+        def __init__(self, **kwargs):
+            self.profile = kwargs.get("profile")
+            self.project_id = kwargs.get("project_id")
+            self.workspace = kwargs.get("workspace")
+            self.model = kwargs.get("model")
+            self.model_provider = kwargs.get("model_provider")
+            self.title = ""
+            self.source_tag = None
+            self.source_label = None
+
+        def save(self):
+            self.saved = True
+
+        def compact(self):
+            return {"session_id": self.session_id, "profile": self.profile, "project_id": self.project_id}
+
+    def fake_profile_defaults(profile):
+        defaults_called.append(profile)
+        return "default-profile-model", "default-provider"
+
+    def fake_new_session(**kwargs):
+        created.update(kwargs)
+        return CreatedSession(**kwargs)
+
+    monkeypatch.setattr(ops_sessions, "_find_existing_task_session", lambda _project_id, _task_id: None)
+    monkeypatch.setattr(
+        ops_sessions.ops_projects,
+        "get_ops_project_task",
+        lambda project_id, task_id: {"project": project, "task": task},
+    )
+    monkeypatch.setattr(ops_sessions, "_profile_config_defaults", fake_profile_defaults)
+    monkeypatch.setattr(ops_sessions, "new_session", fake_new_session)
+    monkeypatch.setattr(
+        ops_sessions.ops_projects,
+        "update_ops_project_task",
+        lambda project_id, task_id, patch: {"task": {**task, **patch}},
+    )
+    monkeypatch.setattr(ops_sessions.ops_projects, "_now_iso", lambda: "2026-05-17T00:00:00Z")
+    monkeypatch.setattr(
+        ops_sessions.session_sidecars,
+        "set_session_linkage",
+        lambda session_id, project_id, task_id, run_id="": {"sessionId": session_id, "runId": run_id},
+    )
+
+    from api import ops_runs
+
+    monkeypatch.setattr(
+        ops_runs,
+        "create_task_run",
+        lambda project_id, task_id, session_id, title="": {"id": "run-1", "sessionId": session_id},
+    )
+    monkeypatch.setattr(ops_runs, "run_url", lambda run_id: f"/ops/runs/{run_id}")
+
+    result = ops_sessions.launch_task_session("project-1", "task-1", {"profile": "laxlyftet"})
+
+    assert created["profile"] == "default"
+    assert result["session"]["profile"] == "default"
+    assert defaults_called == ["default"]
+
+
 def test_close_task_session_archives_requested_lineage_tip_when_task_linkage_is_stale(monkeypatch):
     task = {
         "id": "task-1",

@@ -43,7 +43,7 @@ def test_status_command_uses_client_state_not_status_endpoint():
     assert "/api/session/status" not in body
     assert "api(" not in body
     assert "S.session" in body
-    assert "S.activeProfile" in COMMANDS_JS
+    assert "displayProfileForCurrentSession" in COMMANDS_JS
     assert "model_provider" in COMMANDS_JS
     assert "last_usage" in COMMANDS_JS
 

@@ -1,6 +1,7 @@
 """Sprint 5 tests: workspace CRUD, file save, session index, JS serving."""
 import json, pathlib, uuid, urllib.request, urllib.error, urllib.parse
 import os
+import shutil
 
 from tests._pytest_port import BASE
 
@@ -62,6 +63,33 @@ def test_workspace_add_valid(cleanup_test_sessions):
 def test_workspace_add_validates_existence():
     result, status = post("/api/workspaces/add", {"path": "/tmp/does_not_exist_xyz_999"})
     assert status == 400
+
+def test_workspace_add_create_missing_directory(cleanup_test_sessions):
+    _, ws = make_session_tracked(cleanup_test_sessions)
+    parent = ws / f"workspace-auto-create-{uuid.uuid4().hex[:6]}"
+    target = parent / "new-empty-folder"
+    shutil.rmtree(parent, ignore_errors=True)
+    try:
+        result, status = post(
+            "/api/workspaces/add",
+            {"path": str(target), "name": "Auto Created", "create": True},
+        )
+        assert status == 200, result
+        assert target.is_dir()
+        assert any(
+            w["path"] == str(target.resolve()) and w["name"] == "Auto Created"
+            for w in result["workspaces"]
+        )
+    finally:
+        post("/api/workspaces/remove", {"path": str(target.resolve())})
+        shutil.rmtree(parent, ignore_errors=True)
+
+def test_workspace_create_form_requests_missing_folder_creation():
+    raw, _, status = get_raw("/static/panels.js")
+    src = raw.decode("utf-8")
+    assert status == 200
+    assert "create: true" in src
+    assert "payload.name = name" in src
 
 def test_workspace_add_validates_is_dir():
     result, status = post("/api/workspaces/add", {"path": "/etc/hostname"})

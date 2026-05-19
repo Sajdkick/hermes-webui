@@ -1173,6 +1173,22 @@ def _rewrite_html(body: bytes, project_id: str) -> bytes:
     return text.encode("utf-8")
 
 
+def _rewrite_proxy_csp_source_directive(directive: str, required_sources: tuple[str, ...]) -> str:
+    parts = [part for part in str(directive or "").split() if part]
+    if not parts:
+        return directive
+    name = parts[0]
+    sources = parts[1:]
+    if required_sources:
+        sources = [source for source in sources if source.lower() != "'none'"]
+    seen = {source.lower() for source in sources}
+    for required in required_sources:
+        if required.lower() not in seen:
+            sources.append(required)
+            seen.add(required.lower())
+    return " ".join([name, *sources])
+
+
 def _rewrite_proxy_csp(value: str) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -1181,26 +1197,51 @@ def _rewrite_proxy_csp(value: str) -> str:
     rewritten: list[str] = []
     frame_src_seen = False
     child_src_seen = False
+    script_src_seen = False
+    script_src_elem_seen = False
+    style_src_seen = False
+    style_src_elem_seen = False
     for directive in directives:
         if not directive:
             continue
         lower = directive.lower()
         if lower.startswith("frame-src"):
-            rewritten.append("frame-src 'self'")
+            rewritten.append(_rewrite_proxy_csp_source_directive(directive, ("'self'",)))
             frame_src_seen = True
             continue
         if lower.startswith("child-src"):
-            rewritten.append("child-src 'self'")
+            rewritten.append(_rewrite_proxy_csp_source_directive(directive, ("'self'",)))
             child_src_seen = True
+            continue
+        if lower.startswith("script-src-elem"):
+            rewritten.append(_rewrite_proxy_csp_source_directive(directive, ("'self'",)))
+            script_src_elem_seen = True
+            continue
+        if lower.startswith("script-src"):
+            rewritten.append(_rewrite_proxy_csp_source_directive(directive, ("'self'",)))
+            script_src_seen = True
+            continue
+        if lower.startswith("style-src-elem"):
+            rewritten.append(_rewrite_proxy_csp_source_directive(directive, ("'self'", "'unsafe-inline'")))
+            style_src_elem_seen = True
+            continue
+        if lower.startswith("style-src"):
+            rewritten.append(_rewrite_proxy_csp_source_directive(directive, ("'self'", "'unsafe-inline'")))
+            style_src_seen = True
             continue
         rewritten.append(directive)
     if not frame_src_seen:
         rewritten.append("frame-src 'self'")
-    if child_src_seen:
-        rewritten = [
-            "child-src 'self'" if segment.lower().startswith("child-src") else segment
-            for segment in rewritten
-        ]
+    if not child_src_seen:
+        rewritten.append("child-src 'self'")
+    if not script_src_seen:
+        rewritten.append("script-src 'self'")
+    if not script_src_elem_seen:
+        rewritten.append("script-src-elem 'self'")
+    if not style_src_seen:
+        rewritten.append("style-src 'self' 'unsafe-inline'")
+    if not style_src_elem_seen:
+        rewritten.append("style-src-elem 'self' 'unsafe-inline'")
     return "; ".join(segment for segment in rewritten if segment)
 
 

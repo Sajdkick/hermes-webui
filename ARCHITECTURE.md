@@ -143,6 +143,12 @@ Per-request environment variables (set by chat handler, restored after):
                          by this value, enabling per-session approval state.
     HERMES_HOME          Set to the active profile's directory before running agent.
                          Saved and restored around each agent run.
+    HERMES_READABLE_OUTPUT_PATH
+    HERMES_READABLE_OUTPUT_DIR
+    HERMES_READABLE_OUTPUT_ASSET_DIR
+                         Session-scoped Markdown report + asset paths consumed by the
+                         readable-output skill. CLOUD_TERMINAL_READABLE_OUTPUT_* aliases
+                         point to the same paths for compatibility.
 
 WARNING: These env vars are process-global. Two concurrent chat requests will clobber
 each other. This is safe only for single-user, single-concurrent-request use.

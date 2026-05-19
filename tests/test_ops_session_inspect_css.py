@@ -26,6 +26,18 @@ def test_ops_session_inspect_refresh_button_is_wired():
     assert "body.ops-session-inspect .ops-session-inspect-refresh:not([hidden])" in css
     assert "window.forceRefreshOpsSessionInspectMode=forceRefreshOpsSessionInspectMode" in sessions_js
     assert "await loadSession(sid,{force:true})" in sessions_js
+    assert "position:fixed" in css
+    assert "z-index:1200" in css
+    assert "pointer-events:auto" in css
+
+
+def test_ops_session_inspect_refresh_uses_same_session_stale_response_guard():
+    sessions_js = (ROOT / "static" / "sessions.js").read_text(encoding="utf-8")
+
+    assert "let _loadingSessionSeq = 0" in sessions_js
+    assert "const loadToken = _beginSessionLoad(sid)" in sessions_js
+    assert "_isStaleSessionLoad(sid, loadToken)" in sessions_js
+    assert "_clearSessionLoad(sid, loadToken)" in sessions_js
 
 
 def test_forced_same_session_refresh_rebuilds_message_cache():

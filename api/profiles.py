@@ -629,6 +629,79 @@ def _stringify_env_value(value) -> str:
     return str(value)
 
 
+def get_webui_shared_skills_dirs() -> list[Path]:
+    """Return repository-owned skill directories shared by every WebUI profile."""
+    shared = Path(__file__).resolve().parents[1] / '.agents' / 'skills'
+    try:
+        shared = shared.resolve()
+    except Exception:
+        pass
+    return [shared] if shared.is_dir() else []
+
+
+def ensure_webui_shared_skill_dirs(home: Path) -> bool:
+    """Ensure the active profile config points at WebUI's shared skill dir.
+
+    Hermes Agent discovers cross-profile shared skills through
+    ``skills.external_dirs`` in the selected profile's config.yaml.  The WebUI
+    owns a repository-level ``.agents/skills`` source for Cloud Terminal-port
+    skills, so each profile should reference that one shared directory instead
+    of receiving divergent copies.
+    """
+    shared_dirs = get_webui_shared_skills_dirs()
+    if not shared_dirs:
+        return False
+    home = Path(home).expanduser()
+    config_path = home / 'config.yaml'
+    try:
+        import yaml as _yaml
+
+        loaded = _yaml.safe_load(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
+        cfg = loaded if isinstance(loaded, dict) else {}
+        skills_cfg = cfg.get('skills')
+        if not isinstance(skills_cfg, dict):
+            skills_cfg = {}
+            cfg['skills'] = skills_cfg
+        raw_dirs = skills_cfg.get('external_dirs')
+        if isinstance(raw_dirs, str):
+            external_dirs = [raw_dirs]
+        elif isinstance(raw_dirs, list):
+            external_dirs = [str(item) for item in raw_dirs if str(item).strip()]
+        else:
+            external_dirs = []
+
+        resolved_existing: set[Path] = set()
+        for entry in external_dirs:
+            expanded = os.path.expandvars(os.path.expanduser(entry))
+            candidate = Path(expanded)
+            if not candidate.is_absolute():
+                candidate = home / candidate
+            try:
+                resolved_existing.add(candidate.resolve())
+            except Exception:
+                pass
+
+        changed = False
+        for shared in shared_dirs:
+            try:
+                resolved_shared = shared.resolve()
+            except Exception:
+                resolved_shared = shared
+            if resolved_shared not in resolved_existing:
+                external_dirs.append(str(resolved_shared))
+                resolved_existing.add(resolved_shared)
+                changed = True
+        if not changed:
+            return False
+        skills_cfg['external_dirs'] = external_dirs
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(_yaml.safe_dump(cfg, sort_keys=False), encoding='utf-8')
+        return True
+    except Exception:
+        logger.debug("Failed to ensure WebUI shared skill dirs for %s", home, exc_info=True)
+        return False
+
+
 def get_profile_runtime_env(home: Path) -> dict[str, str]:
     """Return env vars needed to run an agent turn for a profile home.
 
@@ -640,6 +713,7 @@ def get_profile_runtime_env(home: Path) -> dict[str, str]:
     of that run.
     """
     home = Path(home).expanduser()
+    ensure_webui_shared_skill_dirs(home)
     env: dict[str, str] = {}
 
     try:

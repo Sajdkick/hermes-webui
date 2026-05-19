@@ -6,10 +6,10 @@ import os
 import re as _re
 import email.parser
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from api.config import MAX_UPLOAD_BYTES, STATE_DIR
-from api.helpers import j, bad
+from api.helpers import j, bad, safe_resolve
 from api.models import get_session
 from api.workspace import safe_resolve_ws
 
@@ -60,6 +60,46 @@ def _sanitize_upload_name(filename: str) -> str:
     if not safe_name or safe_name.strip('.') == '':
         raise ValueError('Invalid filename')
     return safe_name
+
+
+def _normalize_workspace_upload_relpath(rel_path: str, fallback_filename: str = '') -> str:
+    """Return a browser-supplied relative upload path safe for workspace writes.
+
+    Workspace drag/drop uploads need to preserve local folder structure, so this
+    deliberately keeps spaces and unicode in path components instead of applying
+    the attachment-inbox filename sanitizer.  Traversal, absolute paths, drive
+    roots, empty names, and NUL bytes are rejected before the path is passed to
+    the workspace-boundary resolver for the final containment check.
+    """
+    raw = str(rel_path or fallback_filename or '').replace('\\', '/').strip()
+    if not raw:
+        raise ValueError('Invalid upload path')
+    if raw.startswith('/') or _re.match(r'^[A-Za-z]:', raw):
+        raise ValueError('Invalid upload path')
+    parts = []
+    for part in raw.split('/'):
+        part = part.strip()
+        if not part or part == '.':
+            continue
+        if part == '..' or '\x00' in part:
+            raise ValueError('Invalid upload path')
+        parts.append(part)
+    if not parts:
+        raise ValueError('Invalid upload path')
+    return '/'.join(parts)
+
+
+def _normalize_workspace_upload_dir(dir_path: str) -> str:
+    raw = str(dir_path or '.').replace('\\', '/').strip()
+    if raw in ('', '.'):
+        return '.'
+    return _normalize_workspace_upload_relpath(raw)
+
+
+def _workspace_upload_result_path(dir_path: str, rel_path: str) -> str:
+    dir_path = _normalize_workspace_upload_dir(dir_path)
+    rel_path = _normalize_workspace_upload_relpath(rel_path)
+    return rel_path if dir_path == '.' else f'{dir_path.rstrip("/")}/{rel_path}'
 
 
 def _attachment_root() -> Path:
@@ -126,6 +166,69 @@ def handle_upload(handler):
     except Exception:
         print('[webui] upload error: ' + _tb.format_exc(), flush=True)
         return j(handler, {'error': 'Upload failed'}, status=500)
+
+
+def handle_workspace_upload(handler):
+    """Upload one multipart file directly into the active session workspace.
+
+    This is separate from ``/api/upload`` because composer attachments live in a
+    per-session inbox outside the project tree. Workspace-panel drops are an
+    explicit file-system mutation, so the client supplies both the target
+    workspace directory (``dir``) and the browser-relative file path
+    (``rel_path``) used to preserve dropped folder subtrees.
+    """
+    import traceback as _tb
+    try:
+        content_type = handler.headers.get('Content-Type', '')
+        content_length = int(handler.headers.get('Content-Length', 0) or 0)
+        if content_length > MAX_UPLOAD_BYTES:
+            return j(handler, {'error': f'File too large (max {MAX_UPLOAD_BYTES//1024//1024}MB)'}, status=413)
+        fields, files = parse_multipart(handler.rfile, content_type, content_length)
+        session_id = fields.get('session_id', '')
+        if 'file' not in files:
+            return j(handler, {'error': 'No file field in request'}, status=400)
+        filename, file_bytes = files['file']
+        if not filename:
+            return j(handler, {'error': 'No filename in upload'}, status=400)
+        if len(file_bytes) > MAX_UPLOAD_BYTES:
+            return j(handler, {'error': f'File too large (max {MAX_UPLOAD_BYTES//1024//1024}MB)'}, status=413)
+        try:
+            s = get_session(session_id)
+        except KeyError:
+            return j(handler, {'error': 'Session not found'}, status=404)
+
+        target_dir = _normalize_workspace_upload_dir(fields.get('dir', '.'))
+        rel_path = _normalize_workspace_upload_relpath(fields.get('rel_path', ''), filename)
+        workspace = Path(s.workspace)
+        base_dir = safe_resolve(workspace, target_dir)
+        if not base_dir.exists():
+            return j(handler, {'error': 'Target directory not found'}, status=404)
+        if not base_dir.is_dir():
+            return j(handler, {'error': 'Target path is not a directory'}, status=400)
+
+        result_path = _workspace_upload_result_path(target_dir, rel_path)
+        dest = safe_resolve(workspace, result_path)
+        if dest.exists() and dest.is_dir():
+            return j(handler, {'error': 'Upload destination is a directory'}, status=400)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(file_bytes)
+        safe_filename = PurePosixPath(rel_path).name
+        mime = mimetypes.guess_type(safe_filename)[0] or 'application/octet-stream'
+        return j(handler, {
+            'ok': True,
+            'filename': safe_filename,
+            'path': result_path,
+            'size': dest.stat().st_size,
+            'mime': mime,
+            'is_image': mime.startswith('image/'),
+        })
+    except ValueError as e:
+        return j(handler, {'error': str(e)}, status=400)
+    except PermissionError as e:
+        return j(handler, {'error': str(e) or 'Permission denied'}, status=403)
+    except Exception:
+        print('[webui] workspace upload error: ' + _tb.format_exc(), flush=True)
+        return j(handler, {'error': 'Workspace upload failed'}, status=500)
 
 
 def extract_archive(file_bytes: bytes, filename: str, workspace: Path):

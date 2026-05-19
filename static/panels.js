@@ -4302,15 +4302,11 @@ async function saveWorkspaceForm(){
       openWorkspaceDetail(targetPath);
       return;
     }
-    const data = await api('/api/workspaces/add', { method:'POST', body: JSON.stringify({ path }) });
+    const payload = { path, create: true };
+    if (name) payload.name = name;
+    const data = await api('/api/workspaces/add', { method:'POST', body: JSON.stringify(payload) });
     _workspaceList = data.workspaces || [];
     _workspacePreFormDetail = null;
-    // Apply rename if a friendly name was supplied
-    if (name) {
-      try { await api('/api/workspaces/rename', { method:'POST', body: JSON.stringify({ path, name }) }); } catch(_) {}
-      const refreshed = await api('/api/workspaces');
-      _workspaceList = refreshed.workspaces || _workspaceList;
-    }
     renderWorkspacesPanel(_workspaceList);
     showToast(t('workspace_added'));
     const added = _workspaceList.find(w => w.path === path) || _workspaceList[_workspaceList.length - 1];

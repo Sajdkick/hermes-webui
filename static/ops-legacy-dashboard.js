@@ -176,7 +176,7 @@
     loading:false,
     quickTaskProjectId:'',
     quickTaskText:'',
-    quickTaskGoalMode:false,
+    quickTaskGoalMode:true,
     quickTaskBusy:false,
     quickTaskBusyAction:'',
     quickTaskStatus:'',
@@ -690,6 +690,7 @@
   const renderProjectDetail=()=>DASHBOARD_PROJECT_DETAIL.renderProjectDetail();
   const handleTaskFilterField=(event)=>DASHBOARD_PROJECT_DETAIL.handleTaskFilterField(event);
   const handleTaskRowField=(event)=>DASHBOARD_PROJECT_DETAIL.handleTaskRowField(event);
+  const handleTaskFormFocus=(event)=>DASHBOARD_PROJECT_DETAIL.handleTaskFormFocus(event);
   const handleTaskFormField=(event)=>DASHBOARD_PROJECT_DETAIL.handleTaskFormField(event);
   const toggleTaskFormDictation=()=>DASHBOARD_PROJECT_DETAIL.toggleTaskFormDictation();
   const DASHBOARD_TASK_ACTIONS=OPS_MODULES.taskActions&&typeof OPS_MODULES.taskActions.bindDashboard==='function'
@@ -1059,6 +1060,7 @@
   document.addEventListener('keydown',handleHomeKeydownEvent);
   document.addEventListener('click',handleClick);
   document.addEventListener('submit',handleSubmit);
+  document.addEventListener('focusin',handleTaskFormFocus);
   document.addEventListener('input',handleQuickTaskField);
   document.addEventListener('input',handleTaskFilterField);
   document.addEventListener('input',handleTaskFormField);

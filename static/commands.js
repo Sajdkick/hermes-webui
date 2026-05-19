@@ -810,7 +810,7 @@ async function cmdGoal(args){
       workspace:S.session.workspace,
       model:S.session.model||($('modelSelect')&&$('modelSelect').value)||'',
       model_provider:S.session.model_provider||null,
-      profile:S.activeProfile||S.session.profile||'default',
+      profile:currentSessionProfileForTurn(),
     })});
     const msg = (() => {
       const raw = String((r && r.message) || '').trim();
@@ -875,7 +875,7 @@ async function cmdQueue(args){
     return;
   }
   if(!S.session){showToast(t('no_active_session'));return;}
-  queueSessionMessage(S.session.session_id,{text:msg,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',profile:S.activeProfile||'default'});
+  queueSessionMessage(S.session.session_id,{text:msg,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',profile:currentSessionProfileForTurn()});
   updateQueueBadge(S.session.session_id);
   S.pendingFiles=[];renderTray();
   showToast(t('cmd_queue_confirm'),2000);
@@ -897,7 +897,7 @@ async function cmdInterrupt(args){
   }
   if(!S.session){showToast(t('no_active_session'));return;}
   // Queue the message first (before cancel sets busy=false and drains)
-  queueSessionMessage(S.session.session_id,{text:msg,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',profile:S.activeProfile||'default'});
+  queueSessionMessage(S.session.session_id,{text:msg,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',profile:currentSessionProfileForTurn()});
   updateQueueBadge(S.session.session_id);
   S.pendingFiles=[];renderTray();
   // Cancel the active stream; setBusy(false) will drain the queue
@@ -983,7 +983,7 @@ async function _trySteer(msg, explicitSteer){
   }
   // Fall back to interrupt: queue the message + cancel the stream so the
   // drain in setBusy(false) re-sends it as a fresh turn.
-  queueSessionMessage(S.session.session_id,{text:msg,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',profile:S.activeProfile||'default'});
+  queueSessionMessage(S.session.session_id,{text:msg,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',profile:currentSessionProfileForTurn()});
   updateQueueBadge(S.session.session_id);
   S.pendingFiles=[];renderTray();
   if(typeof cancelStream==='function'){await cancelStream();}
@@ -1103,7 +1103,7 @@ function _statusCardFromSession(s){
   const provider=_statusProviderForSession(s);
   const model=s.model||(($('modelSelect')&&$('modelSelect').value)||t('usage_default_model'));
   const running=!!(s.active_stream_id||S.activeStreamId||S.busy);
-  const profile=s.profile||S.activeProfile||'default';
+  const profile=displayProfileForCurrentSession(s);
   const workspace=s.workspace||S.currentDir||t('status_unknown');
   const rows=[
     {label:t('status_session_id'), value:s.session_id||t('status_unknown')},

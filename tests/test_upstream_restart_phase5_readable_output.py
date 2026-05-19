@@ -82,6 +82,21 @@ def test_phase5_session_readable_output_routes_use_workspace_repo_fallback(tmp_p
     assert bytes(asset_handler.body) == b"png"
 
 
+def test_phase5_session_readable_output_env_is_hermes_native_with_legacy_aliases():
+    from api.session_readable_output import build_session_readable_output_env
+
+    env = build_session_readable_output_env("session-env-1")
+
+    assert env["HERMES_READABLE_OUTPUT_PATH"].endswith("/readable-output/session-env-1/message.md")
+    assert env["HERMES_READABLE_OUTPUT_DIR"].endswith("/readable-output/session-env-1")
+    assert env["HERMES_READABLE_OUTPUT_ASSET_DIR"].endswith("/readable-output/session-env-1/assets")
+    assert env["CLOUD_TERMINAL_READABLE_OUTPUT_PATH"] == env["HERMES_READABLE_OUTPUT_PATH"]
+    assert env["CLOUD_TERMINAL_READABLE_OUTPUT_DIR"] == env["HERMES_READABLE_OUTPUT_DIR"]
+    assert env["CLOUD_TERMINAL_READABLE_OUTPUT_ASSET_DIR"] == env["HERMES_READABLE_OUTPUT_ASSET_DIR"]
+    assert env["CLOUD_TERMINAL_SESSION_ID"] == "session-env-1"
+
+
+
 def test_phase5_session_readable_output_routes_do_not_reuse_current_alias_for_unrelated_sessions(tmp_path):
     repo_root = tmp_path / "readable-output-project"
     app_dir = repo_root / "apps" / "demo"
@@ -112,6 +127,20 @@ def test_phase5_session_readable_output_routes_do_not_reuse_current_alias_for_un
     assert artifact["exists"] is False
     assert artifact["path"] == ""
     assert artifact["sessionId"] == session.session_id
+
+
+def test_phase5_readable_output_skill_is_hermes_native_and_actionable():
+    skill_md = Path(".agents/skills/cloud-terminal-readable-output/SKILL.md").read_text(encoding="utf-8")
+    openai_yaml = Path(".agents/skills/cloud-terminal-readable-output/agents/openai.yaml").read_text(encoding="utf-8")
+
+    assert "Hermes Readable Output" in skill_md
+    assert "HERMES_READABLE_OUTPUT_PATH" in skill_md
+    assert "HERMES_READABLE_OUTPUT_ASSET_DIR" in skill_md
+    assert "CLOUD_TERMINAL_READABLE_OUTPUT_PATH" in skill_md
+    assert "Do not silently bury the report in terminal scrollback" in skill_md
+    assert "Use $cloud-terminal-readable-output" in openai_yaml
+    assert "HERMES_READABLE_OUTPUT_PATH" in openai_yaml
+
 
 
 def test_phase5_readable_output_frontend_wiring_and_wrappers_present():
