@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hermes Gather Information"
+  short_description: "Collect user-driven runtime logs into a Hermes WebUI gather report"
+  default_prompt: "Use $hermes-gather-information when you need to add temporary instrumentation, ask the user to reproduce a browser/server flow, and inspect the resulting Hermes gather report directly without copy/paste."

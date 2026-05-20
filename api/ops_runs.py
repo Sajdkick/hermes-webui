@@ -168,6 +168,49 @@ def _session_summary(session_id: str) -> dict | None:
     return session.compact()
 
 
+def _play_handoff_session_id(run: dict) -> str:
+    """Return the session segment the Play overlay should inspect.
+
+    Ops runs are linked to the original/root session id, but stream completion
+    can happen after context compression or continuation has moved the active
+    transcript to a child/tip session.  The Play notification popup should open
+    the session that actually completed and triggered Play, not a stale root.
+    """
+    raw_metadata = run.get("metadata")
+    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+    resolved = _text(metadata.get("resolvedSessionId") or metadata.get("resolved_session_id"), limit=128)
+    if resolved:
+        return resolved
+    stored = _text(run.get("sessionId") or run.get("session_id"), limit=128)
+    if not stored:
+        return ""
+    try:
+        return _text(session_sidecars.resolve_session_id(stored), limit=128) or stored
+    except Exception:
+        return stored
+
+
+def _completion_linkage_context(session_ids: set[str]) -> tuple[set[str], set[str]]:
+    """Return session aliases and run ids linked to completing session ids."""
+    aliases = {value for value in session_ids if value}
+    run_ids: set[str] = set()
+    for session_id in list(aliases):
+        try:
+            linkage = session_sidecars.get_session_linkage(session_id)
+        except Exception:
+            linkage = None
+        if not isinstance(linkage, dict):
+            continue
+        for field in ("sessionId", "linkedSessionId", "lineageRootId", "lineageTipId"):
+            value = _text(linkage.get(field), limit=128)
+            if value:
+                aliases.add(value)
+        run_id = _text(linkage.get("runId") or linkage.get("run_id"), limit=128)
+        if run_id:
+            run_ids.add(run_id)
+    return aliases, run_ids
+
+
 def _project_context(project_id: str) -> dict | None:
     key = _text(project_id, limit=128)
     if not key:
@@ -503,7 +546,7 @@ def _maybe_start_play_pipeline_for_terminal_run(run: dict, *, previous_status: s
             {
                 "runId": _text(run.get("id"), limit=128),
                 "taskId": _text(run.get("taskId"), limit=128),
-                "sessionId": _text(run.get("sessionId"), limit=128),
+                "sessionId": _play_handoff_session_id(run),
             },
         )
         play_metadata = {
@@ -545,7 +588,7 @@ def complete_ops_runs_for_session(session_id: str, *, resolved_session_id: str =
     """Mark active Ops runs for a completed session and trigger server-side Play handoff."""
     session_key = _text(session_id, limit=128)
     resolved_key = _text(resolved_session_id, limit=128)
-    aliases = {value for value in (session_key, resolved_key) if value}
+    aliases, linked_run_ids = _completion_linkage_context({value for value in (session_key, resolved_key) if value})
     terminal_status = _status(status, default="succeeded")
     if not aliases or terminal_status not in RUN_TERMINAL_STATUSES:
         return {"updated": 0, "count": 0, "runs": []}
@@ -554,7 +597,9 @@ def complete_ops_runs_for_session(session_id: str, *, resolved_session_id: str =
         runs = _read_runs()
         changed = False
         for index, run in enumerate(runs):
-            if _text(run.get("sessionId"), limit=128) not in aliases:
+            stored_session_id = _text(run.get("sessionId"), limit=128)
+            run_id = _text(run.get("id"), limit=128)
+            if stored_session_id not in aliases and run_id not in linked_run_ids:
                 continue
             previous_status = _status(run.get("status"), default="running")
             force_play_handoff = terminal_status == "succeeded"
@@ -566,10 +611,11 @@ def complete_ops_runs_for_session(session_id: str, *, resolved_session_id: str =
             next_run["status"] = terminal_status
             next_run["updatedAt"] = now
             next_run["completedAt"] = now
-            if resolved_key and resolved_key != _text(next_run.get("sessionId"), limit=128):
+            completion_session_id = resolved_key or (session_key if session_key != stored_session_id else "")
+            if completion_session_id and completion_session_id != _text(next_run.get("sessionId"), limit=128):
                 raw_metadata = next_run.get("metadata")
                 metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
-                next_run["metadata"] = _json_safe({**metadata, "resolvedSessionId": resolved_key})
+                next_run["metadata"] = _json_safe({**metadata, "resolvedSessionId": completion_session_id})
             runs[index] = _normalize_run(next_run)
             updated_runs.append((runs[index], previous_status, force_play_handoff))
             changed = True

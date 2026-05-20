@@ -2230,7 +2230,13 @@ from api.workspace import (
     _strip_surrounding_quotes,
     _workspace_blocked_roots,
 )
-from api.upload import handle_upload, handle_upload_extract, handle_transcribe, handle_workspace_upload
+from api.upload import (
+    handle_upload,
+    handle_upload_extract,
+    handle_transcribe,
+    handle_workspace_upload,
+    handle_workspace_upload_chunk,
+)
 from api.streaming import (
     _sse,
     _run_agent_streaming,
@@ -3412,6 +3418,7 @@ def handle_get(handler, parsed) -> bool:
                 .replace("__WEBUI_VERSION__", version_token)
                 .replace("__MAX_UPLOAD_BYTES__", str(MAX_UPLOAD_BYTES))
                 .replace("__CSRF_TOKEN_JSON__", json.dumps(csrf_token))
+                .replace("__WORKSPACE_CHUNK_UPLOADS__", "1")
             )
             return t(
                 handler,
@@ -4468,6 +4475,9 @@ def handle_post(handler, parsed) -> bool:
         return handle_upload(handler)
     if parsed.path == "/api/upload/extract":
         return handle_upload_extract(handler)
+    if parsed.path == "/api/file/upload/chunk":
+        handle_workspace_upload_chunk(handler)
+        return True
     if parsed.path == "/api/file/upload":
         handle_workspace_upload(handler)
         return True
@@ -8547,6 +8557,12 @@ def _handle_file_save(handler, body):
         require(body, "session_id", "path")
     except ValueError as e:
         return bad(handler, str(e))
+    if "content" not in body:
+        # A malformed or stale client save request must never silently truncate a
+        # file. Empty string is valid content, but omission is a request bug.
+        return bad(handler, "Missing required field(s): content")
+    if not isinstance(body.get("content"), str):
+        return bad(handler, "content must be a string")
     try:
         s = get_session(body["session_id"])
     except KeyError:

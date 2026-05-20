@@ -10,12 +10,17 @@
 ### Changed
 
 - Ops Quick Task and Epic task executions now start linked task prompts as standing `/goal` turns by default, including execute-ready batch sessions, so long task queues can continue through goal-mode continuation instead of stopping at the first tool-call ceiling.
+- Workspace panel file editing now treats the textarea buffer as the save source of truth, keeps newer in-flight edits visible and dirty after a save snapshot completes, and blocks stale preview/close paths from clearing unsaved edits.
 - Hermes WebUI agent runs now register the repository `.agents/skills` directory through each active profile's `skills.external_dirs`, so shared Cloud Terminal-port skills can be discovered across profiles without per-profile copies.
 - Workspace creation from the Spaces panel now asks the server to create missing folders before saving the new workspace, while preserving the existing rejection for missing paths submitted without the explicit create intent.
 - The bundled readable-output skill is now Hermes-native: it tells agents to prefer `HERMES_READABLE_OUTPUT_*` session env vars, keeps legacy Cloud Terminal aliases for compatibility, and includes a direct shell helper for writing Markdown reports.
 
 ### Fixed
 
+- Quick Task create-and-run now sends the generated first task prompt before opening/navigating to the linked inspect session, preventing standalone Ops launches from creating an empty task session with no initial message.
+- Workspace panel uploads now send files above 512 KiB in proxy-friendly chunks and assemble them server-side, so large files under the configured WebUI upload cap no longer fail as a single nginx/reverse-proxy `413 Request Entity Too Large` request. The shell now advertises chunk-upload capability from the loaded backend so a stale Python process plus newer static JS reports a restart/hard-refresh requirement instead of a raw `not found` upload failure.
+- Ops run completion now matches continued/compressed session tips back to their linked run sidecars, so a just-finished continuation tears down any existing Play pipeline and starts a fresh build instead of leaving an hours-old stale Play notification.
+- Play notification inspection now sends the current resolved/tip Hermes session id into the Play pipeline and injected session overlay, so the popup opens the session that triggered the notification instead of a stale root session.
 - Play notification inspection now reopens the linked Hermes session popup on every Play preview load instead of preserving a stale collapsed desktop state, replaces stale overlay instances when a different run/session opens, and keeps an in-panel full-session fallback if the iframe preview is blocked or slow.
 - Proxied Play HTML now rewrites restrictive app CSP directives enough for Hermes' injected proxy/session overlay scripts, inline overlay styles, and same-origin session iframe to run consistently.
 - Hermes WebUI agent runs now inject session-scoped readable-output paths into both thread-local and process fallback env so the readable-output skill has a reliable target file and asset directory.

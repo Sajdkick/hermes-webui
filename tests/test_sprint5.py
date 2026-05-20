@@ -172,6 +172,25 @@ def test_file_save(cleanup_test_sessions):
     result, status = post("/api/file/save", {"session_id": sid, "path": fname, "content": "updated"})
     assert status == 200 and (ws / fname).read_text() == "updated"
 
+def test_file_save_missing_content_does_not_truncate(cleanup_test_sessions):
+    sid, ws = make_session_tracked(cleanup_test_sessions)
+    fname = f"save_missing_content_{uuid.uuid4().hex[:6]}.txt"
+    target = ws / fname
+    target.write_text("do not erase me")
+    result, status = post("/api/file/save", {"session_id": sid, "path": fname})
+    assert status == 400
+    assert "content" in result.get("error", "")
+    assert target.read_text() == "do not erase me"
+
+def test_file_save_allows_empty_content(cleanup_test_sessions):
+    sid, ws = make_session_tracked(cleanup_test_sessions)
+    fname = f"save_empty_{uuid.uuid4().hex[:6]}.txt"
+    target = ws / fname
+    target.write_text("replace me")
+    result, status = post("/api/file/save", {"session_id": sid, "path": fname, "content": ""})
+    assert status == 200, result
+    assert target.read_text() == ""
+
 def test_file_save_requires_fields(cleanup_test_sessions):
     sid, _ = make_session_tracked(cleanup_test_sessions)
     result, status = post("/api/file/save", {"session_id": sid})

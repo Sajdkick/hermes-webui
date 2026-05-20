@@ -6,6 +6,7 @@ import os
 import re as _re
 import email.parser
 import tempfile
+import shutil
 from pathlib import Path, PurePosixPath
 
 from api.config import MAX_UPLOAD_BYTES, STATE_DIR
@@ -14,6 +15,7 @@ from api.models import get_session
 from api.workspace import safe_resolve_ws
 
 _MAX_EXTRACTED_BYTES = 10 * MAX_UPLOAD_BYTES
+_WORKSPACE_UPLOAD_CHUNK_MAX_BYTES = 512 * 1024
 
 
 def parse_multipart(rfile, content_type, content_length) -> tuple:
@@ -100,6 +102,34 @@ def _workspace_upload_result_path(dir_path: str, rel_path: str) -> str:
     dir_path = _normalize_workspace_upload_dir(dir_path)
     rel_path = _normalize_workspace_upload_relpath(rel_path)
     return rel_path if dir_path == '.' else f'{dir_path.rstrip("/")}/{rel_path}'
+
+
+def _parse_int_field(fields: dict, name: str, *, minimum: int | None = None, maximum: int | None = None) -> int:
+    try:
+        value = int(str(fields.get(name, '')).strip())
+    except (TypeError, ValueError):
+        raise ValueError(f'Invalid {name}')
+    if minimum is not None and value < minimum:
+        raise ValueError(f'Invalid {name}')
+    if maximum is not None and value > maximum:
+        raise ValueError(f'Invalid {name}')
+    return value
+
+
+def _workspace_chunk_upload_id(raw: str) -> str:
+    upload_id = _re.sub(r'[^A-Za-z0-9_.-]', '_', str(raw or '').strip())[:120]
+    if not upload_id or upload_id.strip('._-') == '':
+        raise ValueError('Invalid upload id')
+    return upload_id
+
+
+def _workspace_chunk_temp_path(dest: Path, upload_id: str) -> Path:
+    safe_name = _re.sub(r'[^\w.\-]', '_', dest.name)[:120] or 'upload'
+    dest_parent = dest.parent.resolve()
+    temp = (dest_parent / f'.{safe_name}.{upload_id}.part').resolve()
+    if not temp.is_relative_to(dest_parent):
+        raise ValueError('Invalid upload destination')
+    return temp
 
 
 def _attachment_root() -> Path:
@@ -228,6 +258,127 @@ def handle_workspace_upload(handler):
         return j(handler, {'error': str(e) or 'Permission denied'}, status=403)
     except Exception:
         print('[webui] workspace upload error: ' + _tb.format_exc(), flush=True)
+        return j(handler, {'error': 'Workspace upload failed'}, status=500)
+
+
+def handle_workspace_upload_chunk(handler):
+    """Receive one chunk of a workspace-panel upload and assemble it on disk.
+
+    Large workspace files may cross a reverse proxy that rejects large request
+    bodies before WebUI can enforce ``MAX_UPLOAD_BYTES`` itself.  The browser
+    sends those files as small, sequential chunks to this endpoint; each request
+    stays proxy-friendly while the assembled file remains subject to the normal
+    workspace path and total-size guards.
+    """
+    import traceback as _tb
+    try:
+        content_type = handler.headers.get('Content-Type', '')
+        content_length = int(handler.headers.get('Content-Length', 0) or 0)
+        if content_length > _WORKSPACE_UPLOAD_CHUNK_MAX_BYTES + 128 * 1024:
+            return j(handler, {'error': 'Upload chunk too large'}, status=413)
+        fields, files = parse_multipart(handler.rfile, content_type, content_length)
+        if 'file' not in files:
+            return j(handler, {'error': 'No file field in request'}, status=400)
+
+        filename, file_bytes = files['file']
+        if len(file_bytes) > _WORKSPACE_UPLOAD_CHUNK_MAX_BYTES:
+            return j(handler, {'error': 'Upload chunk too large'}, status=413)
+        if not filename:
+            return j(handler, {'error': 'No filename in upload'}, status=400)
+
+        total_size = _parse_int_field(fields, 'total_size', minimum=0)
+        if total_size > MAX_UPLOAD_BYTES:
+            return j(handler, {'error': f'File too large (max {MAX_UPLOAD_BYTES//1024//1024}MB)'}, status=413)
+        chunk_index = _parse_int_field(fields, 'chunk_index', minimum=0)
+        chunk_count = _parse_int_field(fields, 'chunk_count', minimum=1)
+        chunk_start = _parse_int_field(fields, 'chunk_start', minimum=0, maximum=total_size)
+        if chunk_index >= chunk_count:
+            raise ValueError('Invalid chunk_index')
+        if chunk_start + len(file_bytes) > total_size:
+            raise ValueError('Upload chunk exceeds declared file size')
+        if chunk_index == 0 and chunk_start != 0:
+            raise ValueError('Invalid first chunk offset')
+
+        upload_id = _workspace_chunk_upload_id(fields.get('upload_id', ''))
+        session_id = fields.get('session_id', '')
+        try:
+            s = get_session(session_id)
+        except KeyError:
+            return j(handler, {'error': 'Session not found'}, status=404)
+
+        target_dir = _normalize_workspace_upload_dir(fields.get('dir', '.'))
+        rel_path = _normalize_workspace_upload_relpath(fields.get('rel_path', ''), filename)
+        workspace = Path(s.workspace)
+        base_dir = safe_resolve(workspace, target_dir)
+        if not base_dir.exists():
+            return j(handler, {'error': 'Target directory not found'}, status=404)
+        if not base_dir.is_dir():
+            return j(handler, {'error': 'Target path is not a directory'}, status=400)
+
+        result_path = _workspace_upload_result_path(target_dir, rel_path)
+        dest = safe_resolve(workspace, result_path)
+        if dest.exists() and dest.is_dir():
+            return j(handler, {'error': 'Upload destination is a directory'}, status=400)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        temp = _workspace_chunk_temp_path(dest, upload_id)
+
+        if chunk_index == 0:
+            try:
+                temp.unlink(missing_ok=True)
+            except Exception:
+                pass
+        elif not temp.exists():
+            return j(handler, {'error': 'Upload chunk sequence is incomplete'}, status=409)
+
+        current_size = temp.stat().st_size if temp.exists() else 0
+        if current_size != chunk_start:
+            return j(handler, {'error': 'Upload chunk offset mismatch'}, status=409)
+
+        with temp.open('ab') as fh:
+            fh.write(file_bytes)
+        written = temp.stat().st_size
+        if written > total_size:
+            try:
+                temp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            raise ValueError('Upload exceeded declared file size')
+
+        complete = chunk_index == chunk_count - 1
+        if not complete:
+            return j(handler, {
+                'ok': True,
+                'complete': False,
+                'chunk_index': chunk_index,
+                'received': written,
+                'size': total_size,
+            })
+
+        if written != total_size:
+            return j(handler, {'error': 'Upload ended before declared file size'}, status=400)
+
+        try:
+            temp.replace(dest)
+        except OSError:
+            shutil.move(str(temp), str(dest))
+
+        safe_filename = PurePosixPath(rel_path).name
+        mime = mimetypes.guess_type(safe_filename)[0] or 'application/octet-stream'
+        return j(handler, {
+            'ok': True,
+            'complete': True,
+            'filename': safe_filename,
+            'path': result_path,
+            'size': dest.stat().st_size,
+            'mime': mime,
+            'is_image': mime.startswith('image/'),
+        })
+    except ValueError as e:
+        return j(handler, {'error': str(e)}, status=400)
+    except PermissionError as e:
+        return j(handler, {'error': str(e) or 'Permission denied'}, status=403)
+    except Exception:
+        print('[webui] workspace chunk upload error: ' + _tb.format_exc(), flush=True)
         return j(handler, {'error': 'Workspace upload failed'}, status=500)
 
 

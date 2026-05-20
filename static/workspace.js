@@ -85,7 +85,7 @@ async function loadDir(path){
     }
     if(typeof clearPreview==='function'){
       if(typeof _previewDirty!=='undefined'&&_previewDirty){
-        showConfirmDialog({title:t('unsaved_confirm'),message:'',confirmLabel:'Discard',danger:true,focusCancel:true}).then(ok=>{if(ok)clearPreview({keepPanelOpen:true});});
+        showConfirmDialog({title:t('unsaved_confirm'),message:'',confirmLabel:'Discard',danger:true,focusCancel:true}).then(ok=>{if(ok)clearPreview({keepPanelOpen:true,force:true});});
       }else{
         clearPreview({keepPanelOpen:true});
       }
@@ -144,6 +144,39 @@ function fileExt(p){ const i=p.lastIndexOf('.'); return i>=0?p.slice(i).toLowerC
 let _previewCurrentPath = '';  // relative path of currently previewed file
 let _previewCurrentMode = '';  // 'code' | 'md' | 'image' | 'html' | 'pdf' | 'audio' | 'video'
 let _previewDirty = false;     // true when edits are unsaved
+let _previewSaving = false;    // true while a file-save request is in flight
+let _previewLoadSeq = 0;       // invalidates stale async openFile() completions
+let _previewSaveSeq = 0;       // invalidates stale async save completions
+let _previewRawContent = '';   // raw text for md files (and last saved editor text)
+
+function _previewEditArea(){return $('previewEditArea');}
+
+function _previewIsEditing(){
+  const area=_previewEditArea();
+  return !!(area&&area.style.display!=='none');
+}
+
+function _previewText(key,fallback){
+  const value=typeof t==='function'?t(key):key;
+  return value&&value!==key?value:fallback;
+}
+
+async function _confirmDiscardPreviewEdits(messageKey='unsaved_confirm'){
+  if(!_previewDirty&&!_previewIsEditing())return true;
+  if(typeof showConfirmDialog!=='function')return false;
+  return !!(await showConfirmDialog({
+    title:_previewText('discard_file_edits_title','Discard file edits?'),
+    message:_previewText(messageKey,'You have unsaved changes in the preview. Discard them?'),
+    confirmLabel:_previewText('discard','Discard'),
+    danger:true,
+    focusCancel:true
+  }));
+}
+
+function _setPreviewSaving(saving){
+  _previewSaving=!!saving;
+  updateEditBtn();
+}
 
 function showPreview(mode){
   // mode: 'code' | 'image' | 'md' | 'html' | 'pdf' | 'audio' | 'video'
@@ -170,32 +203,68 @@ function updateEditBtn(){
   if(!btn)return;
   const editable = _previewCurrentMode==='code'||_previewCurrentMode==='md';
   btn.style.display = editable?'':'none';
+  btn.disabled = !!_previewSaving;
   const editing = $('previewEditArea').style.display!=='none';
-  btn.innerHTML = editing ? `&#128190; ${t('save')}` : `&#9998; ${t('edit')}`;
-  btn.title = editing ? t('save_title') : t('edit_title');
+  if(_previewSaving){
+    btn.innerHTML = `&#128190; ${_previewText('saving','Saving…')}`;
+    btn.title = _previewText('saving','Saving…');
+  }else{
+    btn.innerHTML = editing ? `&#128190; ${t('save')}` : `&#9998; ${t('edit')}`;
+    btn.title = editing ? t('save_title') : t('edit_title');
+  }
   btn.style.color = editing ? 'var(--blue)' : '';
-  if(_previewDirty) btn.innerHTML = '&#128190; Save*';
+  if(_previewDirty&&!_previewSaving) btn.innerHTML = `&#128190; ${_previewText('save','Save')}*`;
 }
 
 async function toggleEditMode(){
   const editing = $('previewEditArea').style.display!=='none';
   if(editing){
     // Save
+    if(_previewSaving)return;
     if(!S.session||!_previewCurrentPath)return;
-    const content=$('previewEditArea').value;
+    const area=$('previewEditArea');
+    const path=_previewCurrentPath;
+    const mode=_previewCurrentMode;
+    const content=area.value;
+    const saveSeq=++_previewSaveSeq;
+    _setPreviewSaving(true);
     try{
       await api('/api/file/save',{method:'POST',body:JSON.stringify({
-        session_id:S.session.session_id, path:_previewCurrentPath, content
+        session_id:S.session.session_id, path, content
       })});
-      _previewDirty=false;
-      // Update read-only views
-      if(_previewCurrentMode==='code') $('previewCode').textContent=content;
+      // Ignore completions for a previous file/save if the user has already
+      // navigated elsewhere. This prevents late async responses from replacing
+      // or hiding a newer editor buffer.
+      if(saveSeq!==_previewSaveSeq||_previewCurrentPath!==path||_previewCurrentMode!==mode)return;
+      _previewRawContent=content;
+      // Update read-only views with the snapshot that was actually persisted.
+      if(mode==='code') $('previewCode').textContent=content;
       else { $('previewMd').innerHTML=renderMd(content); requestAnimationFrame(()=>{if(typeof renderKatexBlocks==='function')renderKatexBlocks();}); }
-      $('previewEditArea').style.display='none';
-      if(_previewCurrentMode==='code') $('previewCode').style.display='';
-      else $('previewMd').style.display='';
-      showToast(t('saved'));
-    }catch(e){setStatus(t('save_failed')+e.message);}
+      if(area.value===content){
+        _previewDirty=false;
+        area.style.display='none';
+        area.onkeydown=null;
+        if(mode==='code') $('previewCode').style.display='';
+        else $('previewMd').style.display='';
+        showToast(t('saved'));
+      }else{
+        // The user typed while the save request was in flight. Keep the editor
+        // open and dirty; only the captured snapshot above was written to disk.
+        _previewDirty=true;
+        showToast(_previewText('saved_newer_edits_pending','Saved. You have newer unsaved edits.'),5000,'warning');
+      }
+    }catch(e){
+      if(saveSeq===_previewSaveSeq&&_previewCurrentPath===path&&_previewCurrentMode===mode){
+        _previewDirty=true;
+        area.style.display='';
+        if(mode==='code') $('previewCode').style.display='none';
+        else $('previewMd').style.display='none';
+        setStatus(t('save_failed')+(e&&e.message?e.message:e));
+        if(typeof showToast==='function')showToast(t('save_failed')+(e&&e.message?e.message:e),6000,'error');
+      }
+    }finally{
+      if(saveSeq===_previewSaveSeq)_setPreviewSaving(false);
+    }
   }else{
     // Enter edit mode: populate textarea with current content
     const currentText = _previewCurrentMode==='code'
@@ -213,8 +282,6 @@ async function toggleEditMode(){
   updateEditBtn();
 }
 
-let _previewRawContent = '';  // raw text for md files (to populate editor)
-
 function cancelEditMode(){
   // Discard changes and return to read-only view
   $('previewEditArea').style.display='none';
@@ -227,6 +294,20 @@ function cancelEditMode(){
 
 async function openFile(path){
   if(!S.session)return;
+  if(_previewSaving){showToast(_previewText('save_in_progress','Save in progress…'),4000,'warning');return;}
+  if((_previewDirty||_previewIsEditing())&&path===_previewCurrentPath){
+    if(_previewIsEditing()){
+      const area=_previewEditArea();
+      if(area)area.focus();
+    }
+    return;
+  }
+  if(_previewDirty||_previewIsEditing()){
+    const discard=await _confirmDiscardPreviewEdits('unsaved_confirm');
+    if(!discard)return;
+    if(typeof cancelEditMode==='function')cancelEditMode();
+  }
+  const loadSeq=++_previewLoadSeq;
   const ext=fileExt(path);
 
   // Binary/download-only formats: trigger browser download, don't preview
@@ -272,11 +353,12 @@ async function openFile(path){
     // Markdown: fetch text, render with renderMd, display as formatted HTML
     try{
       const data=await api(`/api/file?session_id=${encodeURIComponent(S.session.session_id)}&path=${encodeURIComponent(path)}`);
+      if(loadSeq!==_previewLoadSeq||_previewCurrentPath!==path)return;
       showPreview('md');
       _previewRawContent = data.content;
       $('previewMd').innerHTML=renderMd(data.content);
       requestAnimationFrame(()=>{if(typeof renderKatexBlocks==='function')renderKatexBlocks();});
-    }catch(e){setStatus(t('file_open_failed'));}
+    }catch(e){if(loadSeq===_previewLoadSeq&&_previewCurrentPath===path)setStatus(t('file_open_failed'));}
   } else if(HTML_EXTS.has(ext)){
     // HTML: render in sandboxed iframe via raw endpoint.
     // SECURITY TRADEOFF: We use sandbox="allow-scripts" which lets inline JS run
@@ -297,16 +379,18 @@ async function openFile(path){
     // Plain code / text -- but fall back to download if server signals binary
     try{
       const data=await api(`/api/file?session_id=${encodeURIComponent(S.session.session_id)}&path=${encodeURIComponent(path)}`);
+      if(loadSeq!==_previewLoadSeq||_previewCurrentPath!==path)return;
       if(data.binary){
         // Server flagged this as binary content
         downloadFile(path);
         return;
       }
       showPreview('code');
+      _previewRawContent = data.content;
       $('previewCode').textContent=data.content;
     }catch(e){
       // If it's a 400/too-large error, offer download instead
-      downloadFile(path);
+      if(loadSeq===_previewLoadSeq&&_previewCurrentPath===path)downloadFile(path);
     }
   }
 }
@@ -499,14 +583,16 @@ async function _workspaceCreateDroppedDir(targetDir,relDir){
   }
 }
 
-async function _workspaceUploadDroppedFile(targetDir,item,onProgress){
-  if(item.file&&item.file.size>MAX_UPLOAD_BYTES)throw new Error(_uploadTooLargeMessage(item.file));
-  const fd=new FormData();
-  fd.append('session_id',S.session.session_id);
-  fd.append('dir',targetDir||'.');
-  fd.append('rel_path',item.relPath);
-  fd.append('file',item.file,item.file.name);
-  const url=new URL('api/file/upload',document.baseURI||location.href).href;
+const WORKSPACE_UPLOAD_CHUNK_BYTES=512*1024;
+const WORKSPACE_UPLOAD_RESTART_MESSAGE='Chunked workspace upload endpoint is not available yet. Restart Hermes WebUI and hard refresh the page, then try again.';
+
+function _workspaceChunkUploadsAvailable(){
+  const cfg=window.__HERMES_CONFIG__||{};
+  return cfg.workspaceChunkUploads===true;
+}
+
+function _workspaceUploadRequest(path,formData,fileSize,onProgress,progressOffset=0){
+  const url=new URL(path,document.baseURI||location.href).href;
   return new Promise((resolve,reject)=>{
     const xhr=new XMLHttpRequest();
     xhr.open('POST',url,true);
@@ -514,7 +600,10 @@ async function _workspaceUploadDroppedFile(targetDir,item,onProgress){
     const csrf=window.__HERMES_CONFIG__&&window.__HERMES_CONFIG__.csrfToken;
     if(csrf)xhr.setRequestHeader('X-Hermes-CSRF-Token',csrf);
     xhr.upload.onprogress=(ev)=>{
-      if(typeof onProgress==='function')onProgress(ev.lengthComputable?ev.loaded:0,ev.lengthComputable?ev.total:((item.file&&item.file.size)||0));
+      if(typeof onProgress==='function'){
+        const loaded=progressOffset+(ev.lengthComputable?ev.loaded:0);
+        onProgress(Math.min(fileSize||0,loaded),fileSize||ev.total||0);
+      }
     };
     xhr.onerror=()=>reject(new Error('Network error while uploading'));
     xhr.ontimeout=()=>reject(new Error('Upload timed out'));
@@ -522,12 +611,57 @@ async function _workspaceUploadDroppedFile(targetDir,item,onProgress){
       const text=xhr.responseText||'';let data=null;
       try{data=text?JSON.parse(text):{};}catch(_e){}
       if(xhr.status===401){window.location.href='login?next='+encodeURIComponent(window.location.pathname+window.location.search);reject(new Error('Authentication required'));return;}
-      if(xhr.status<200||xhr.status>=300){reject(new Error((data&&(data.error||data.message))||text||`HTTP ${xhr.status}`));return;}
+      if(xhr.status<200||xhr.status>=300){
+        let message=(data&&(data.error||data.message))||text||`HTTP ${xhr.status}`;
+        if(xhr.status===404&&/chunk$/.test(new URL(path,document.baseURI||location.href).pathname)&&/not found/i.test(message))message=WORKSPACE_UPLOAD_RESTART_MESSAGE;
+        if(xhr.status===413&&/<html[\s>]/i.test(text))message='HTTP 413 Request Entity Too Large from the reverse proxy';
+        reject(new Error(message));return;
+      }
       if(data&&data.error){reject(new Error(data.error));return;}
       resolve(data||{});
     };
-    xhr.send(fd);
+    xhr.send(formData);
   });
+}
+
+async function _workspaceUploadDroppedFileChunked(targetDir,item,onProgress){
+  const file=item.file;
+  const fileSize=(file&&file.size)||0;
+  const chunkCount=Math.max(1,Math.ceil(fileSize/WORKSPACE_UPLOAD_CHUNK_BYTES));
+  const uploadId=`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${chunkCount}`;
+  let result={};
+  for(let chunkIndex=0;chunkIndex<chunkCount;chunkIndex++){
+    const start=chunkIndex*WORKSPACE_UPLOAD_CHUNK_BYTES;
+    const end=Math.min(fileSize,start+WORKSPACE_UPLOAD_CHUNK_BYTES);
+    const chunk=file.slice(start,end);
+    const fd=new FormData();
+    fd.append('session_id',S.session.session_id);
+    fd.append('dir',targetDir||'.');
+    fd.append('rel_path',item.relPath);
+    fd.append('upload_id',uploadId);
+    fd.append('chunk_index',String(chunkIndex));
+    fd.append('chunk_count',String(chunkCount));
+    fd.append('chunk_start',String(start));
+    fd.append('total_size',String(fileSize));
+    fd.append('file',chunk,file.name);
+    result=await _workspaceUploadRequest('api/file/upload/chunk',fd,fileSize,onProgress,start);
+    if(typeof onProgress==='function')onProgress(end,fileSize);
+  }
+  return result;
+}
+
+async function _workspaceUploadDroppedFile(targetDir,item,onProgress){
+  if(item.file&&item.file.size>MAX_UPLOAD_BYTES)throw new Error(_uploadTooLargeMessage(item.file));
+  if(item.file&&item.file.size>WORKSPACE_UPLOAD_CHUNK_BYTES){
+    if(!_workspaceChunkUploadsAvailable())throw new Error(WORKSPACE_UPLOAD_RESTART_MESSAGE);
+    return _workspaceUploadDroppedFileChunked(targetDir,item,onProgress);
+  }
+  const fd=new FormData();
+  fd.append('session_id',S.session.session_id);
+  fd.append('dir',targetDir||'.');
+  fd.append('rel_path',item.relPath);
+  fd.append('file',item.file,item.file.name);
+  return _workspaceUploadRequest('api/file/upload',fd,(item.file&&item.file.size)||0,onProgress,0);
 }
 
 async function _handleWorkspacePanelFileDrop(e){

@@ -278,6 +278,30 @@ def test_phase6_pending_notifications_skips_linkage_resolution_until_pending(mon
     assert payload == {"notifications": [], "count": 0}
 
 
+def test_phase6_play_fallback_notification_targets_resolved_session_tip(monkeypatch):
+    from api import ops_notifications
+
+    monkeypatch.setattr(ops_notifications, "_recent_notification_time", lambda value: True)
+    notification = ops_notifications._play_handoff_fallback_notification(
+        {"id": "project-1", "name": "Project"},
+        {
+            "id": "run-1",
+            "projectId": "project-1",
+            "taskId": "task-1",
+            "sessionId": "session-root",
+            "metadata": {
+                "resolvedSessionId": "session-tip",
+                "playPipelineTriggeredAt": "2026-05-19T18:34:52.654Z",
+                "playPipelineStatus": "building",
+            },
+        },
+    )
+
+    assert notification is not None
+    assert notification["sessionId"] == "session-tip"
+    assert notification["terminalTarget"]["sessionId"] == "session-tip"
+
+
 def test_phase6_shell_includes_notifications_asset_and_payload():
     from api.routes import handle_get
 

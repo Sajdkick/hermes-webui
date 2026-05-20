@@ -113,6 +113,76 @@ def test_workspace_upload_preserves_subfolder_paths(tmp_path, monkeypatch):
     assert (tmp_path / "target" / "folder" / "nested" / "example.txt").read_bytes() == b"hello workspace"
 
 
+def test_workspace_chunk_upload_assembles_file(tmp_path, monkeypatch):
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    monkeypatch.setattr(upload, "get_session", lambda sid: SimpleNamespace(workspace=str(tmp_path)))
+    file_bytes = b"hello " + b"chunked workspace"
+    chunks = [file_bytes[:6], file_bytes[6:]]
+    upload_id = "upload-1"
+    offset = 0
+    last_payload = None
+
+    for index, chunk in enumerate(chunks):
+        body, content_type = _multipart(
+            {
+                "session_id": "session-1",
+                "dir": "target",
+                "rel_path": "folder/example.txt",
+                "upload_id": upload_id,
+                "chunk_index": str(index),
+                "chunk_count": str(len(chunks)),
+                "chunk_start": str(offset),
+                "total_size": str(len(file_bytes)),
+            },
+            "example.txt",
+            chunk,
+        )
+        handler = FakeUploadHandler(body, content_type)
+
+        upload.handle_workspace_upload_chunk(handler)
+
+        last_payload = _decode(handler)
+        assert handler.status == 200
+        assert last_payload["ok"] is True
+        offset += len(chunk)
+
+    assert last_payload is not None
+    assert last_payload["complete"] is True
+    assert last_payload["path"] == "target/folder/example.txt"
+    assert (tmp_path / "target" / "folder" / "example.txt").read_bytes() == file_bytes
+    assert not list((tmp_path / "target" / "folder").glob("*.part"))
+
+
+def test_workspace_chunk_upload_rejects_declared_total_above_limit(tmp_path, monkeypatch):
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    monkeypatch.setattr(upload, "get_session", lambda sid: SimpleNamespace(workspace=str(tmp_path)))
+    monkeypatch.setattr(upload, "MAX_UPLOAD_BYTES", 10)
+    body, content_type = _multipart(
+        {
+            "session_id": "session-1",
+            "dir": "target",
+            "rel_path": "example.txt",
+            "upload_id": "upload-oversize",
+            "chunk_index": "0",
+            "chunk_count": "1",
+            "chunk_start": "0",
+            "total_size": "11",
+        },
+        "example.txt",
+        b"x",
+    )
+    handler = FakeUploadHandler(body, content_type)
+
+    upload.handle_workspace_upload_chunk(handler)
+
+    payload = _decode(handler)
+    assert handler.status == 413
+    assert "File too large" in payload["error"]
+    assert not (target_dir / "example.txt").exists()
+
+
 @pytest.mark.parametrize(
     "rel_path",
     ["../escape.txt", "/absolute.txt", "C:/Users/me/secret.txt", "folder/../../escape.txt"],
@@ -174,15 +244,52 @@ def test_workspace_upload_route_accepts_browser_multipart(cleanup_test_sessions)
     assert (target_dir / "folder" / "nested" / "example.txt").read_bytes() == b"hello through route"
 
 
+def test_workspace_chunk_upload_route_accepts_browser_multipart(cleanup_test_sessions):
+    session_payload, session_status = _post_json("/api/session/new", {})
+    assert session_status == 200, session_payload
+    sid = session_payload["session"]["session_id"]
+    cleanup_test_sessions.append(sid)
+    workspace = pathlib.Path(session_payload["session"]["workspace"])
+    target_dir = workspace / "target"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    file_bytes = b"hello through chunk route"
+    body, content_type = _multipart(
+        {
+            "session_id": sid,
+            "dir": "target",
+            "rel_path": "folder/nested/example.txt",
+            "upload_id": "route-upload-1",
+            "chunk_index": "0",
+            "chunk_count": "1",
+            "chunk_start": "0",
+            "total_size": str(len(file_bytes)),
+        },
+        "example.txt",
+        file_bytes,
+    )
+
+    payload, status = _post_multipart("/api/file/upload/chunk", body, content_type, origin=BASE)
+
+    assert status == 200, payload
+    assert payload["ok"] is True
+    assert payload["complete"] is True
+    assert payload["path"] == "target/folder/nested/example.txt"
+    assert (target_dir / "folder" / "nested" / "example.txt").read_bytes() == file_bytes
+
+
 def test_workspace_upload_route_is_before_json_body_reader():
     routes = open("api/routes.py", encoding="utf-8").read()
+    chunk_route_idx = routes.index('if parsed.path == "/api/file/upload/chunk"')
     route_idx = routes.index('if parsed.path == "/api/file/upload"')
     read_body_idx = routes.index("body = read_body(handler)")
+    assert chunk_route_idx < read_body_idx
     assert route_idx < read_body_idx
 
 
 def test_workspace_panel_drop_frontend_preserves_folders_and_uses_workspace_endpoint():
     workspace_js = open("static/workspace.js", encoding="utf-8").read()
+    index_html = open("static/index.html", encoding="utf-8").read()
+    routes_py = open("api/routes.py", encoding="utf-8").read()
     ui_js = open("static/ui.js", encoding="utf-8").read()
     style_css = open("static/style.css", encoding="utf-8").read()
     i18n_js = open("static/i18n.js", encoding="utf-8").read()
@@ -191,6 +298,15 @@ def test_workspace_panel_drop_frontend_preserves_folders_and_uses_workspace_endp
     assert "webkitGetAsEntry" in workspace_js
     assert "_collectDroppedWorkspaceEntry" in workspace_js
     assert "api/file/upload" in workspace_js
+    assert "api/file/upload/chunk" in workspace_js
+    assert "WORKSPACE_UPLOAD_CHUNK_BYTES" in workspace_js
+    assert "WORKSPACE_UPLOAD_RESTART_MESSAGE" in workspace_js
+    assert "_workspaceChunkUploadsAvailable" in workspace_js
+    assert "workspaceChunkUploads" in index_html
+    assert "__WORKSPACE_CHUNK_UPLOADS__" in index_html
+    assert '.replace("__WORKSPACE_CHUNK_UPLOADS__", "1")' in routes_py
+    assert "_workspaceUploadDroppedFileChunked" in workspace_js
+    assert "chunk_start" in workspace_js
     assert "_redirectIfUnauth" not in workspace_js
     assert "XMLHttpRequest" in workspace_js
     assert "xhr.status===401" in workspace_js

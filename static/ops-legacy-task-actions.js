@@ -720,7 +720,6 @@
       const pendingQuickTaskFiles=Array.isArray(opts.files)?opts.files.filter(Boolean):[];
       const goalMode=!!opts.goalMode;
       const openInspectAfterStart=opts.openInspectAfterStart===true;
-      let openedInspectBeforeSend=false;
       setBusy(true);
       try{
         const {sessionId,sessionKey,alreadyRunning,epic,task}=await ensureTaskSession(match,project);
@@ -751,14 +750,13 @@
           // Remove this once upstream Hermes WebUI ships native goal-mode support.
           msg.value=goalMode?`/goal ${taskPrompt}`:taskPrompt;
           if(typeof autoResize==='function')autoResize();
-          if(openInspectAfterStart){
-            openLoadedOpsSession(sessionKey||sessionId);
-            openedInspectBeforeSend=true;
-          }
+          // Start the first turn before opening inspect mode. In standalone Ops,
+          // opening the loaded session navigates to /session/<id>; doing that
+          // before sendTurn() can leave a linked task session empty.
           await sendTurn();
           await recordOpsRun(project,epic,task,sessionId,'running',goalMode?'Task goal execution was started from the ops dashboard.':'Task execution was started from the ops dashboard.');
           showToast(goalMode?'Task goal started':'Task execution started',2400);
-          if(openInspectAfterStart&&!openedInspectBeforeSend){
+          if(openInspectAfterStart){
             openLoadedOpsSession(sessionKey||sessionId);
           }
         }else{

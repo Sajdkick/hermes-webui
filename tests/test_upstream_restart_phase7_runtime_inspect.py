@@ -341,6 +341,60 @@ def test_hermes_runtime_json_commands_report_missing_context_as_json():
     assert payload["diagnostics"]["requestInputToken"]["value"] == ""
 
 
+def test_hermes_runtime_cli_routes_runtime_and_play_requests_to_existing_webui_paths():
+    script = r"""
+    (async () => {
+      const runtime = require('./bin/hermes-runtime');
+      const context = runtime.runtimeContextFromDiagnostics(
+        {
+          runtimeApiBaseUrl: {
+            value: 'http://127.0.0.1:4321/api/ops/projects/project-1/runtime'
+          }
+        },
+        { HERMES_WEBUI_REQUEST_INPUT_TOKEN: 'token' }
+      );
+      if (context.apiBaseUrl !== 'http://127.0.0.1:4321/api/ops/projects/project-1/runtime') {
+        throw new Error('unexpected runtime api base: ' + context.apiBaseUrl);
+      }
+      if (context.projectApiBaseUrl !== 'http://127.0.0.1:4321/api/ops/projects/project-1') {
+        throw new Error('unexpected project api base: ' + context.projectApiBaseUrl);
+      }
+      const calls = [];
+      const fetchImpl = async (url, options) => {
+        calls.push({ url, method: options.method, auth: options.headers.Authorization });
+        return { ok: true, status: 200, text: async () => '{}' };
+      };
+      await runtime.apiRequest(context, 'GET', '/summary', null, { fetchImpl });
+      await runtime.apiRequest(context, 'GET', '/play/status', null, { scope: 'project', fetchImpl });
+      await runtime.apiRequest(context, 'POST', '/inspect/screenshot', {}, { fetchImpl });
+      const urls = calls.map((call) => call.url);
+      const expected = [
+        'http://127.0.0.1:4321/api/ops/projects/project-1/runtime/summary',
+        'http://127.0.0.1:4321/api/ops/projects/project-1/play/status',
+        'http://127.0.0.1:4321/api/ops/projects/project-1/runtime/inspect/screenshot',
+      ];
+      if (JSON.stringify(urls) !== JSON.stringify(expected)) {
+        throw new Error('unexpected urls: ' + JSON.stringify(urls));
+      }
+      if (!calls.every((call) => call.auth === 'Bearer token')) {
+        throw new Error('authorization header missing');
+      }
+      console.log('ok');
+    })().catch((error) => {
+      console.error(error && error.stack || error);
+      process.exit(1);
+    });
+    """
+    completed = subprocess.run(
+        ["node", "-e", script],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
 def test_phase7_ops_ui_renders_runtime_inspect_controls():
     script = textwrap.dedent(
         """

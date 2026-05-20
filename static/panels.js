@@ -4439,7 +4439,7 @@ async function switchToWorkspace(path,name){
     });
     if(!discard)return;
     if(typeof cancelEditMode==='function')cancelEditMode();
-    if(typeof clearPreview==='function')clearPreview();
+    if(typeof clearPreview==='function')clearPreview({force:true});
   }
   try{
     closeWsDropdown();

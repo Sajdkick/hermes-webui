@@ -479,8 +479,12 @@ function runtimeContextMissingMessage(diagnostics) {
 }
 
 function runtimeContextFromDiagnostics(diagnostics, env = process.env) {
+  const runtimeApiBaseUrl = normalizeBaseUrl(diagnostics.runtimeApiBaseUrl.value);
+  const projectApiBaseUrl = runtimeApiBaseUrl.replace(/\/runtime$/i, '');
   return {
-    apiBaseUrl: diagnostics.runtimeApiBaseUrl.value,
+    apiBaseUrl: runtimeApiBaseUrl,
+    runtimeApiBaseUrl,
+    projectApiBaseUrl: projectApiBaseUrl || runtimeApiBaseUrl,
     requestToken: firstRuntimeEnvValue(REQUEST_INPUT_TOKEN_ENV_NAMES, env).value,
   };
 }
@@ -712,7 +716,10 @@ async function apiRequest(context, method, route = '', body = null, options = {}
   const headers = {
     Authorization: `Bearer ${context.requestToken}`,
   };
-  const requestUrl = `${context.apiBaseUrl}${route}`;
+  const requestBaseUrl = options.scope === 'project'
+    ? (context.projectApiBaseUrl || context.apiBaseUrl)
+    : (context.runtimeApiBaseUrl || context.apiBaseUrl);
+  const requestUrl = `${requestBaseUrl}${route}`;
   let encodedBody;
   if (body != null) {
     headers['Content-Type'] = 'application/json';
@@ -802,7 +809,7 @@ function printRuntimeStatus(payload) {
 }
 
 async function handleStatus(context, flags) {
-  const payload = await apiRequest(context, 'GET', '/status');
+  const payload = await apiRequest(context, 'GET', '/summary');
   if (flags.json) {
     printJson(payload);
     return;
@@ -811,7 +818,7 @@ async function handleStatus(context, flags) {
 }
 
 async function handlePlayStatus(context, flags) {
-  const payload = await apiRequest(context, 'GET', '/play/status');
+  const payload = await apiRequest(context, 'GET', '/play/status', null, { scope: 'project' });
   if (flags.json) {
     printJson(payload);
     return;
@@ -831,7 +838,7 @@ function buildPlayStartPayload(flags) {
 }
 
 async function handlePlayStart(context, flags) {
-  const payload = await apiRequest(context, 'POST', '/play/start', buildPlayStartPayload(flags));
+  const payload = await apiRequest(context, 'POST', '/play/start', buildPlayStartPayload(flags), { scope: 'project' });
   if (flags.json) {
     printJson(payload);
     return;
@@ -844,7 +851,7 @@ async function handlePlayStart(context, flags) {
 }
 
 async function handlePlayStop(context, flags) {
-  const payload = await apiRequest(context, 'POST', '/play/stop', {});
+  const payload = await apiRequest(context, 'POST', '/play/stop', {}, { scope: 'project' });
   if (flags.json) {
     printJson(payload);
     return;
@@ -856,7 +863,7 @@ async function handlePlayStop(context, flags) {
 async function handlePlayLogs(context, flags) {
   const limit = flags.limit != null ? parseInteger(flags.limit, '--limit') : undefined;
   const query = limit != null ? `?limit=${encodeURIComponent(limit)}` : '';
-  const payload = await apiRequest(context, 'GET', `/play/logs${query}`);
+  const payload = await apiRequest(context, 'GET', `/play/logs${query}`, null, { scope: 'project' });
   if (flags.json) {
     printJson(payload);
     return;
@@ -870,7 +877,7 @@ async function handlePlayLogs(context, flags) {
 }
 
 async function handleInspectUrl(context, flags) {
-  const payload = await apiRequest(context, 'GET', '/status');
+  const payload = await apiRequest(context, 'GET', '/summary');
   const inspectUrl = payload?.inspect?.url || payload?.play?.inspectUrl || '';
   if (!inspectUrl) {
     fail('No inspect URL is available. Run `hermes-runtime play start --wait` first.');

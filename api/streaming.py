@@ -16,10 +16,12 @@ import traceback
 import copy
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
 from api.config import (
+    HOST, PORT, TLS_ENABLED,
     get_config,
     STREAMS, STREAMS_LOCK, CANCEL_FLAGS, AGENT_INSTANCES, STREAM_PARTIAL_TEXT,
     STREAM_REASONING_TEXT, STREAM_LIVE_TOOL_CALLS,
@@ -617,6 +619,98 @@ def _extract_gateway_routing_metadata(agent, result, requested_model=None, reque
     return None
 
 
+def _runtime_bridge_origin() -> str:
+    """Return the local WebUI origin agents should use for runtime API calls."""
+    host = str(os.getenv('HERMES_WEBUI_HOST') or HOST or '127.0.0.1').strip() or '127.0.0.1'
+    if host in {'0.0.0.0', '::', '[::]'}:
+        host = '127.0.0.1'
+    if ':' in host and not (host.startswith('[') and host.endswith(']')):
+        host = f'[{host}]'
+    port = str(os.getenv('HERMES_WEBUI_PORT') or PORT or '').strip()
+    scheme = 'https' if TLS_ENABLED else 'http'
+    return f'{scheme}://{host}:{port}' if port else f'{scheme}://{host}'
+
+
+def _paths_match(left: str | Path, right: str | Path) -> bool:
+    try:
+        return Path(left).expanduser().resolve() == Path(right).expanduser().resolve()
+    except Exception:
+        return str(left) == str(right)
+
+
+def _find_ops_project_for_workspace(workspace: str) -> dict | None:
+    """Find, or lazily register, the Ops project backing a WebUI workspace."""
+    workspace_path = Path(str(workspace or '')).expanduser().resolve()
+    if not workspace_path.exists() or not workspace_path.is_dir():
+        return None
+
+    try:
+        from api import ops_projects
+    except Exception:
+        logger.debug("Failed to import ops_projects for runtime bridge env", exc_info=True)
+        return None
+
+    def _lookup_existing() -> dict | None:
+        try:
+            projects = ops_projects.list_ops_projects().get('projects') or []
+        except Exception:
+            logger.debug("Failed to list Ops projects for runtime bridge env", exc_info=True)
+            return None
+        for project in projects:
+            if not isinstance(project, dict):
+                continue
+            for key in ('resolvedPath', 'path'):
+                raw_path = project.get(key)
+                if raw_path and _paths_match(raw_path, workspace_path):
+                    return project
+        return None
+
+    existing = _lookup_existing()
+    if existing:
+        return existing
+
+    try:
+        return ops_projects.create_ops_project({
+            'name': workspace_path.name or 'Workspace',
+            'path': str(workspace_path),
+        })
+    except Exception as exc:
+        # A concurrent launcher may have created the project between list/create.
+        if getattr(exc, 'status', None) == 409:
+            return _lookup_existing()
+        logger.debug("Failed to create Ops project for runtime bridge env", exc_info=True)
+        return None
+
+
+def _build_runtime_bridge_env(workspace: str, session_id: str, existing_env: dict | None = None) -> dict:
+    """Build Hermes WebUI runtime bridge env for a launched agent session."""
+    existing_env = existing_env or {}
+    env: dict[str, str] = {}
+
+    has_runtime_base = any(
+        str(existing_env.get(key) or '').strip()
+        for key in ('HERMES_WEBUI_RUNTIME_API_BASE_URL', 'HERMES_RUNTIME_API_BASE_URL')
+    )
+    if not has_runtime_base:
+        project = _find_ops_project_for_workspace(workspace)
+        project_id = str((project or {}).get('id') or '').strip()
+        if project_id:
+            encoded_project_id = quote(project_id, safe='')
+            env['HERMES_WEBUI_RUNTIME_API_BASE_URL'] = (
+                f'{_runtime_bridge_origin()}/api/ops/projects/{encoded_project_id}/runtime'
+            )
+            env['HERMES_WEBUI_RUNTIME_PROJECT_ID'] = project_id
+
+    has_request_token = any(
+        str(existing_env.get(key) or '').strip()
+        for key in ('HERMES_WEBUI_REQUEST_INPUT_TOKEN', 'HERMES_REQUEST_INPUT_TOKEN')
+    )
+    if not has_request_token:
+        env['HERMES_WEBUI_REQUEST_INPUT_TOKEN'] = f'webui-session-{session_id}'
+
+    return env
+
+
 def _build_agent_thread_env(profile_runtime_env: dict | None, workspace: str, session_id: str, profile_home: str) -> dict:
     """Build thread-local agent env with per-run values overriding profile defaults.
 
@@ -631,6 +725,7 @@ def _build_agent_thread_env(profile_runtime_env: dict | None, workspace: str, se
         env.update(build_session_readable_output_env(session_id))
     except Exception:
         logger.debug("Failed to build readable-output environment for %s", session_id, exc_info=True)
+    env.update(_build_runtime_bridge_env(workspace, session_id, env))
     env.update({
         'TERMINAL_CWD': str(workspace),
         'HERMES_EXEC_ASK': '1',
@@ -3155,6 +3250,12 @@ def _run_agent_streaming(
             or key.startswith('CLOUD_TERMINAL_READABLE_OUTPUT_')
             or key == 'CLOUD_TERMINAL_SESSION_ID'
         }
+        _runtime_bridge_process_env = {
+            key: value
+            for key, value in _thread_env.items()
+            if key.startswith('HERMES_WEBUI_RUNTIME_')
+            or key.startswith('HERMES_WEBUI_REQUEST_INPUT_')
+        }
         # Prewarm skill-tool imports *before* acquiring the lock so that
         # first-time module initialisation (which can be slow) does not
         # block other concurrent sessions waiting on _ENV_LOCK (#2024).
@@ -3164,7 +3265,7 @@ def _run_agent_streaming(
         # The finally block re-acquires to restore — keeping critical sections short
         # and preventing a deadlock where the restore would re-enter the same lock.
         with _ENV_LOCK:
-            _profile_and_readable_env_keys = set(_profile_runtime_env) | set(_readable_output_process_env)
+            _profile_and_readable_env_keys = set(_profile_runtime_env) | set(_readable_output_process_env) | set(_runtime_bridge_process_env)
             old_profile_env = {key: os.environ.get(key) for key in _profile_and_readable_env_keys}
             old_cwd = os.environ.get('TERMINAL_CWD')
             old_exec_ask = os.environ.get('HERMES_EXEC_ASK')
@@ -3174,6 +3275,7 @@ def _run_agent_streaming(
             old_hermes_home = os.environ.get('HERMES_HOME')
             os.environ.update(_profile_runtime_env)
             os.environ.update(_readable_output_process_env)
+            os.environ.update(_runtime_bridge_process_env)
             os.environ['TERMINAL_CWD'] = str(s.workspace)
             os.environ['HERMES_EXEC_ASK'] = '1'
             os.environ['HERMES_SESSION_KEY'] = session_id

@@ -1,5 +1,7 @@
+import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -118,7 +120,7 @@ def test_streaming_thread_env_allows_profile_terminal_cwd_override():
         re.DOTALL,
     )
     assert match, "_build_agent_thread_env not found in api/streaming.py"
-    ns: dict = {}
+    ns: dict = {"_build_runtime_bridge_env": lambda *_args, **_kwargs: {}}
     exec(compile(match.group(1), "<streaming_extract>", "exec"), ns)
 
     env = ns["_build_agent_thread_env"](
@@ -147,3 +149,62 @@ def test_streaming_thread_env_allows_profile_terminal_cwd_override():
     assert env["HERMES_READABLE_OUTPUT_ASSET_DIR"].endswith("/readable-output/active-session/assets")
     assert env["CLOUD_TERMINAL_READABLE_OUTPUT_PATH"] == env["HERMES_READABLE_OUTPUT_PATH"]
     assert env["CLOUD_TERMINAL_SESSION_ID"] == "active-session"
+
+
+def test_streaming_thread_env_injects_hermes_runtime_bridge(tmp_path, monkeypatch):
+    from api import streaming
+
+    workspace = tmp_path / "runtime-workspace"
+    workspace.mkdir()
+    projects_dir = tmp_path / "ops-projects"
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(projects_dir))
+    monkeypatch.setenv("HERMES_WEBUI_HOST", "0.0.0.0")
+    monkeypatch.setenv("HERMES_WEBUI_PORT", "4321")
+    monkeypatch.setattr(streaming, "TLS_ENABLED", False)
+
+    env = streaming._build_agent_thread_env({}, str(workspace), "active-session", "/active/profile/home")
+
+    runtime_base = env["HERMES_WEBUI_RUNTIME_API_BASE_URL"]
+    assert runtime_base.startswith("http://127.0.0.1:4321/api/ops/projects/")
+    assert runtime_base.endswith("/runtime")
+    assert env["HERMES_WEBUI_RUNTIME_PROJECT_ID"]
+    assert env["HERMES_WEBUI_REQUEST_INPUT_TOKEN"] == "webui-session-active-session"
+
+    completed = subprocess.run(
+        ["node", "bin/hermes-runtime", "doctor", "--json"],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "HERMES_WEBUI_RUNTIME_API_BASE_URL": runtime_base,
+            "HERMES_WEBUI_REQUEST_INPUT_TOKEN": env["HERMES_WEBUI_REQUEST_INPUT_TOKEN"],
+        },
+    )
+    payload = json.loads(completed.stdout)
+    assert payload["ok"] is True
+    assert payload["runtimeApiBaseUrl"]["source"] == "HERMES_WEBUI_RUNTIME_API_BASE_URL"
+    assert payload["requestInputToken"]["value"] == "<set>"
+
+
+def test_streaming_thread_env_preserves_explicit_profile_runtime_bridge(tmp_path, monkeypatch):
+    from api import streaming
+
+    workspace = tmp_path / "runtime-workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "ops-projects"))
+
+    env = streaming._build_agent_thread_env(
+        {
+            "HERMES_WEBUI_RUNTIME_API_BASE_URL": "http://example.test/custom/runtime",
+            "HERMES_WEBUI_REQUEST_INPUT_TOKEN": "profile-token",
+        },
+        str(workspace),
+        "active-session",
+        "/active/profile/home",
+    )
+
+    assert env["HERMES_WEBUI_RUNTIME_API_BASE_URL"] == "http://example.test/custom/runtime"
+    assert env["HERMES_WEBUI_REQUEST_INPUT_TOKEN"] == "profile-token"
+    assert "HERMES_WEBUI_RUNTIME_PROJECT_ID" not in env

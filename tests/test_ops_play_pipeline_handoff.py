@@ -80,6 +80,106 @@ def test_successful_run_triggers_play_after_stream_completion_without_polling(mo
     assert stored["metadata"]["playPipelineStatus"] == "building"
 
 
+def test_stream_completion_play_handoff_uses_resolved_session_tip(monkeypatch, tmp_path):
+    runs_file = _patch_run_context(monkeypatch, tmp_path)
+    runs_file.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "run-1",
+                    "projectId": "project-1",
+                    "taskId": "task-1",
+                    "sessionId": "session-root",
+                    "title": "Run Play",
+                    "summary": "",
+                    "status": "running",
+                    "createdAt": "2026-05-06T00:00:00.000Z",
+                    "updatedAt": "2026-05-06T00:00:00.000Z",
+                    "metadata": {},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    started = []
+    monkeypatch.setattr(play_pipeline, "get_project_play_config_file_info", lambda project_id: {"valid": True})
+    monkeypatch.setattr(
+        play_pipeline,
+        "start_project_play_pipeline",
+        lambda project_id, body: started.append((project_id, body))
+        or {"pipelineId": "pipe-1", "status": "building"},
+    )
+
+    result = ops_runs.complete_ops_runs_for_session("session-root", resolved_session_id="session-tip")
+
+    assert result["updated"] == 1
+    assert started == [("project-1", {"runId": "run-1", "taskId": "task-1", "sessionId": "session-tip"})]
+    stored = json.loads(runs_file.read_text(encoding="utf-8"))[0]
+    assert stored["sessionId"] == "session-root"
+    assert stored["metadata"]["resolvedSessionId"] == "session-tip"
+    assert stored["metadata"]["playPipelineTriggeredAt"]
+    assert stored["metadata"]["playPipelineStatus"] == "building"
+
+
+def test_stream_completion_matches_existing_run_from_continuation_sidecar(monkeypatch, tmp_path):
+    runs_file = _patch_run_context(monkeypatch, tmp_path)
+    runs_file.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "run-1",
+                    "projectId": "project-1",
+                    "taskId": "task-1",
+                    "sessionId": "session_root",
+                    "title": "Run Play",
+                    "summary": "",
+                    "status": "succeeded",
+                    "createdAt": "2026-05-06T00:00:00.000Z",
+                    "updatedAt": "2026-05-06T01:00:00.000Z",
+                    "completedAt": "2026-05-06T01:00:00.000Z",
+                    "metadata": {
+                        "resolvedSessionId": "session_old_tip",
+                        "playPipelineTriggeredAt": "2026-05-06T01:00:00.000Z",
+                        "playPipelineId": "old-pipe",
+                        "playPipelineStatus": "building",
+                    },
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    started = []
+    monkeypatch.setattr(play_pipeline, "get_project_play_config_file_info", lambda project_id: {"valid": True})
+    monkeypatch.setattr(
+        play_pipeline,
+        "start_project_play_pipeline",
+        lambda project_id, body: started.append((project_id, body))
+        or {"pipelineId": "new-pipe", "status": "building"},
+    )
+    monkeypatch.setattr(
+        ops_runs.session_sidecars,
+        "get_session_linkage",
+        lambda session_id: {
+            "sessionId": "session_tip",
+            "linkedSessionId": "session_tip",
+            "lineageTipId": "session_tip",
+            "runId": "run-1",
+        }
+        if session_id == "session_tip"
+        else None,
+    )
+
+    result = ops_runs.complete_ops_runs_for_session("session_tip")
+
+    assert result["updated"] == 1
+    assert started == [("project-1", {"runId": "run-1", "taskId": "task-1", "sessionId": "session_tip"})]
+    stored = json.loads(runs_file.read_text(encoding="utf-8"))[0]
+    assert stored["sessionId"] == "session_root"
+    assert stored["metadata"]["resolvedSessionId"] == "session_tip"
+    assert stored["metadata"]["playPipelineId"] == "new-pipe"
+    assert stored["metadata"]["playPipelineStatus"] == "building"
+
+
 def test_stream_completion_restarts_play_for_reiterated_successful_run(monkeypatch, tmp_path):
     runs_file = _patch_run_context(monkeypatch, tmp_path)
     runs_file.write_text(
@@ -312,6 +412,29 @@ def test_play_status_surfaces_terminal_target(monkeypatch):
         "taskId": "task-1",
         "sessionId": "session-1",
     }
+
+
+def test_play_proxy_overlay_attributes_use_pipeline_session_id(monkeypatch):
+    state = play_pipeline.PlayPipelineState(
+        project_id="project-1",
+        run_id="run-1",
+        task_id="task-1",
+        session_id="session-tip",
+        status="ready",
+        ready=True,
+        inspect_url="/play-project/project-1/",
+        ready_at="2026-05-06T00:00:00.000Z",
+    )
+    with play_pipeline._LOCK:
+        play_pipeline._PIPELINES["project-1"] = state
+    try:
+        attrs = play_pipeline._play_proxy_overlay_attributes("project-1")
+    finally:
+        with play_pipeline._LOCK:
+            play_pipeline._PIPELINES.pop("project-1", None)
+
+    assert 'data-hermes-play-session-id="session-tip"' in attrs
+    assert 'data-hermes-play-session-url="/session/session-tip"' in attrs
 
 
 def test_start_play_pipeline_replaces_existing_ready_pipeline(monkeypatch, tmp_path):

@@ -458,6 +458,7 @@ def _play_handoff_fallback_notification(project: dict, run: dict) -> dict | None
         except Exception:
             pass
     play_pipeline_status = _text(metadata.get("playPipelineStatus"), limit=64) or "unknown"
+    session_id = _text(metadata.get("resolvedSessionId") or metadata.get("resolved_session_id"), limit=256) or session_id
     play_pipeline_error = _text(metadata.get("playPipelineError"), limit=512)
     if play_pipeline_error:
         play_status = "failed"

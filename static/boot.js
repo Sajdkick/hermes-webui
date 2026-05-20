@@ -148,9 +148,15 @@ function ensureWorkspacePreviewVisible(){
   else syncWorkspacePanelUI();
 }
 
-function handleWorkspaceClose(){
+async function handleWorkspaceClose(){
   if(_hasWorkspacePreviewVisible()){
-    clearPreview();
+    if(typeof _previewDirty!=='undefined'&&_previewDirty){
+      const discard=typeof _confirmDiscardPreviewEdits==='function'
+        ? await _confirmDiscardPreviewEdits('unsaved_confirm')
+        : false;
+      if(!discard)return;
+    }
+    clearPreview({force:true});
     return;
   }
   closeWorkspacePanel();
@@ -892,6 +898,18 @@ $('importFileInput').onchange=async(e)=>{
 // btnRefreshFiles is now panel-icon-btn in header (see HTML)
 function clearPreview(opts={}){
   const keepPanelOpen=!!(opts&&opts.keepPanelOpen);
+  const force=!!(opts&&opts.force);
+  if(!force&&typeof _previewDirty!=='undefined'&&_previewDirty){
+    if(typeof showToast==='function')showToast(t('unsaved_confirm'),5000,'warning');
+    return false;
+  }
+  if(!force&&typeof _previewSaving!=='undefined'&&_previewSaving){
+    if(typeof showToast==='function')showToast(typeof _previewText==='function'?_previewText('save_in_progress','Save in progress…'):'Save in progress…',4000,'warning');
+    return false;
+  }
+  if(typeof _previewLoadSeq!=='undefined')_previewLoadSeq++;
+  if(typeof _previewSaveSeq!=='undefined')_previewSaveSeq++;
+  if(typeof _previewSaving!=='undefined')_previewSaving=false;
   // Restore directory breadcrumb after closing file preview
   if(typeof renderBreadcrumb==='function') renderBreadcrumb();
   const closePanelAfter=_workspacePanelMode==='preview'&&!keepPanelOpen;
@@ -901,12 +919,14 @@ function clearPreview(opts={}){
   const html=$('previewHtmlIframe');if(html)html.src='';
   const pm=$('previewMd');if(pm)pm.innerHTML='';
   const pc=$('previewCode');if(pc)pc.textContent='';
+  const pe=$('previewEditArea');if(pe){pe.value='';pe.style.display='none';pe.onkeydown=null;}
   const pp=$('previewPathText');if(pp)pp.textContent='';
   const ft=$('fileTree');if(ft)ft.style.display='';
-  _previewCurrentPath='';_previewCurrentMode='';_previewDirty=false;
+  _previewCurrentPath='';_previewCurrentMode='';_previewDirty=false;if(typeof _previewRawContent!=='undefined')_previewRawContent='';
   if(closePanelAfter)closeWorkspacePanel();
   else if(keepPanelOpen&&_workspacePanelMode==='preview')openWorkspacePanel('browse');
   else syncWorkspacePanelUI();
+  return true;
 }
 $('btnClearPreview').onclick=handleWorkspaceClose;
 // workspacePath click handler removed -- use topbar workspace chip dropdown instead
