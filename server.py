@@ -116,7 +116,7 @@ from api.config import HOST, PORT, STATE_DIR, SESSION_DIR, DEFAULT_WORKSPACE
 from api.helpers import j, get_profile_cookie
 from api.profiles import set_request_profile, clear_request_profile
 from api.routes import handle_delete, handle_get, handle_patch, handle_post
-from api.startup import auto_install_agent_deps, fix_credential_permissions
+from api.startup import auto_install_agent_deps, fix_credential_permissions, run_state_maintenance
 from api.updates import WEBUI_VERSION
 
 
@@ -402,6 +402,7 @@ def main() -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     SESSION_DIR.mkdir(parents=True, exist_ok=True)
     DEFAULT_WORKSPACE.mkdir(parents=True, exist_ok=True)
+    run_state_maintenance()
 
     # Start the gateway session watcher for real-time SSE updates
     try:

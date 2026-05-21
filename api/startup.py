@@ -126,3 +126,45 @@ def auto_install_agent_deps() -> bool:
     except Exception as e:
         print(f'[!!] Auto-install error: {e}', flush=True)
         return False
+
+
+def run_state_maintenance() -> dict:
+    """Best-effort bounded cleanup for generated WebUI state artifacts."""
+    report: dict = {}
+    try:
+        from api.run_journal import prune_run_journals
+
+        run_journal = prune_run_journals()
+        report["run_journal"] = run_journal
+        if run_journal.get("removed"):
+            print(
+                "[maintenance] Pruned "
+                f"{run_journal.get('removed')} run journal file(s) "
+                f"({run_journal.get('removedBytes', 0)} bytes).",
+                flush=True,
+            )
+    except Exception as exc:
+        report["run_journal"] = {"error": str(exc)}
+        print(f"[maintenance] run journal cleanup failed: {exc}", flush=True)
+
+    try:
+        from api.ops_upstream_sync import prune_upstream_sync_artifacts
+
+        upstream_sync = prune_upstream_sync_artifacts()
+        report["upstream_sync"] = upstream_sync
+        removed_total = (
+            int(upstream_sync.get("recordsRemoved") or 0)
+            + int(upstream_sync.get("worktreesRemoved") or 0)
+            + int(upstream_sync.get("orphansRemoved") or 0)
+        )
+        if removed_total:
+            print(
+                "[maintenance] Pruned upstream-sync artifacts: "
+                f"{upstream_sync}.",
+                flush=True,
+            )
+    except Exception as exc:
+        report["upstream_sync"] = {"error": str(exc)}
+        print(f"[maintenance] upstream-sync cleanup failed: {exc}", flush=True)
+
+    return report

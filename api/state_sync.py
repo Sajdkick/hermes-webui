@@ -17,6 +17,8 @@ import logging
 import os
 from pathlib import Path
 
+from api.state_db_health import state_db_has_sqlite_header, warn_state_db_exception
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,11 +42,13 @@ def _get_state_db():
     db_path = hermes_home / 'state.db'
     if not db_path.exists():
         return None
+    if not state_db_has_sqlite_header(db_path, log=logger, purpose="state.db sync"):
+        return None
 
     try:
         return SessionDB(db_path)
-    except Exception:
-        logger.debug("Failed to open state.db")
+    except Exception as exc:
+        warn_state_db_exception(db_path, exc, log=logger, purpose="state.db sync")
         return None
 
 

@@ -89,10 +89,14 @@ class TestSessionOwnedRuntimeInvariants:
 
     def test_approval_and_clarify_pollers_are_stopped_by_owner_session(self):
         messages = read("static/messages.js")
+        ui = read("static/ui.js")
         assert "let _approvalPollingSessionId = null" in messages
         assert "let _clarifyPollingSessionId = null" in messages
         assert "function stopApprovalPollingForSession" in messages
         assert "function stopClarifyPollingForSession" in messages
+        assert "function stopPromptSideChannels" in messages
+        assert "pagehide" in messages and "beforeunload" in messages
+        assert "stopPromptSideChannels" in ui
 
         approval_stop = _function_body(messages, "stopApprovalPollingForSession")
         clarify_stop = _function_body(messages, "stopClarifyPollingForSession")
@@ -115,6 +119,12 @@ class TestSessionOwnedRuntimeInvariants:
         assert "stopApprovalPolling();\n      stopClarifyPolling();" not in done, (
             "The done handler must not blindly stop whatever approval/clarify poller "
             "the active pane currently owns."
+        )
+
+        clarify_start = _function_body(messages, "startClarifyPolling")
+        assert "!S.busy" in clarify_start, (
+            "The clarify SSE health path must close once the active session is no longer busy; "
+            "otherwise it can reconnect stale side-channel streams after normal completion."
         )
 
     def test_live_stream_transport_and_inflight_state_remain_session_keyed(self):

@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -188,6 +189,55 @@ def test_phase10_start_upstream_sync_session_records_prompt_and_session(monkeypa
     assert "If upstream already fixed it, remove our local patch" in record["prompt"]
     assert "docs/local-upstream-patches.md" in record["prompt"]
     assert str(worktree) in record["prompt"]
+
+
+def test_prune_upstream_sync_artifacts_removes_old_applied_records_and_orphans(monkeypatch, tmp_path):
+    record_root = tmp_path / "ops" / "upstream-sync"
+    monkeypatch.setattr(ops_upstream_sync, "OPS_UPSTREAM_SYNC_ROOT", record_root)
+    monkeypatch.setattr(ops_upstream_sync, "OPS_UPSTREAM_SYNC_RECORDS_DIR", record_root / "records")
+    monkeypatch.setattr(ops_upstream_sync, "OPS_UPSTREAM_SYNC_WORKTREES_DIR", record_root / "worktrees")
+
+    old_worktree = record_root / "worktrees" / "sync-old"
+    old_worktree.mkdir(parents=True)
+    (old_worktree / "artifact.log").write_text("large log\n", encoding="utf-8")
+    keep_worktree = record_root / "worktrees" / "sync-current"
+    keep_worktree.mkdir(parents=True)
+    orphan_worktree = record_root / "worktrees" / "sync-orphan"
+    orphan_worktree.mkdir(parents=True)
+
+    write_json(
+        record_root / "records" / "sync-old.json",
+        {
+            "id": "sync-old",
+            "projectId": "project-1",
+            "worktreePath": str(old_worktree),
+            "createdAt": "2026-04-01T00:00:00.000Z",
+            "appliedAt": "2026-04-02T00:00:00.000Z",
+        },
+    )
+    write_json(
+        record_root / "records" / "sync-current.json",
+        {
+            "id": "sync-current",
+            "projectId": "project-1",
+            "worktreePath": str(keep_worktree),
+            "createdAt": "2026-04-20T00:00:00.000Z",
+            "appliedAt": None,
+        },
+    )
+    old_mtime = 1_775_000_000
+    os.utime(orphan_worktree, (old_mtime, old_mtime))
+
+    result = ops_upstream_sync.prune_upstream_sync_artifacts(now_ms=1_777_000_000_000)
+
+    assert result["recordsRemoved"] == 1
+    assert result["worktreesRemoved"] == 1
+    assert result["orphansRemoved"] == 1
+    assert not (record_root / "records" / "sync-old.json").exists()
+    assert not old_worktree.exists()
+    assert not orphan_worktree.exists()
+    assert (record_root / "records" / "sync-current.json").exists()
+    assert keep_worktree.exists()
 
 
 def test_phase10_upstream_sync_prefers_active_profile_defaults_when_present(monkeypatch):

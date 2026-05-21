@@ -1,10 +1,12 @@
 import json
+import os
 
 from api.run_journal import (
     RunJournalWriter,
     append_run_event,
     find_run_summary,
     latest_run_summary,
+    prune_run_journals,
     read_run_events,
     stale_interrupted_event,
 )
@@ -126,3 +128,43 @@ def test_stale_interrupted_event_skips_terminal_journal(tmp_path, monkeypatch):
     monkeypatch.setattr("api.run_journal._default_session_dir", lambda: tmp_path)
 
     assert stale_interrupted_event("session_1", "run_1") is None
+
+
+def test_prune_run_journals_removes_old_terminal_runs_but_keeps_active(tmp_path):
+    now = 1_800_000_000.0
+    append_run_event("session_1", "old_done", "done", {"session": {}}, session_dir=tmp_path, created_at=now - 20 * 86400)
+    append_run_event("session_1", "active_done", "done", {"session": {}}, session_dir=tmp_path, created_at=now - 20 * 86400)
+    old_path = tmp_path / "_run_journal" / "session_1" / "old_done.jsonl"
+    active_path = tmp_path / "_run_journal" / "session_1" / "active_done.jsonl"
+    old_mtime = now - 20 * 86400
+    os.utime(old_path, (old_mtime, old_mtime))
+    os.utime(active_path, (old_mtime, old_mtime))
+
+    result = prune_run_journals(
+        session_dir=tmp_path,
+        terminal_retention_days=14,
+        active_run_ids={"active_done"},
+        now=now,
+    )
+
+    assert result["removed"] == 1
+    assert not old_path.exists()
+    assert active_path.exists()
+
+
+def test_prune_run_journals_keeps_recent_non_terminal_runs(tmp_path):
+    now = 1_800_000_000.0
+    append_run_event("session_1", "recent_running", "token", {"text": "partial"}, session_dir=tmp_path, created_at=now - 20 * 86400)
+    path = tmp_path / "_run_journal" / "session_1" / "recent_running.jsonl"
+    mtime = now - 20 * 86400
+    os.utime(path, (mtime, mtime))
+
+    result = prune_run_journals(
+        session_dir=tmp_path,
+        terminal_retention_days=14,
+        stale_retention_days=30,
+        now=now,
+    )
+
+    assert result["removed"] == 0
+    assert path.exists()

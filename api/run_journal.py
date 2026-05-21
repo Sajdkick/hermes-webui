@@ -21,6 +21,8 @@ _TERMINAL_SSE_EVENTS = {"done", "cancel", "apperror", "error", "stream_end"}
 _FSYNC_MODE_ENV = "HERMES_WEBUI_RUN_JOURNAL_FSYNC"
 _FSYNC_MODE_EAGER = "eager"
 _FSYNC_MODE_TERMINAL_ONLY = "terminal-only"
+_RETENTION_DAYS_ENV = "HERMES_WEBUI_RUN_JOURNAL_RETENTION_DAYS"
+_STALE_RETENTION_DAYS_ENV = "HERMES_WEBUI_RUN_JOURNAL_STALE_RETENTION_DAYS"
 
 
 def _default_session_dir() -> Path:
@@ -282,3 +284,111 @@ def stale_interrupted_event(session_id: str, run_id: str, *, after_seq: int | No
         "payload": payload,
         "synthetic": True,
     }
+
+
+def _env_days(name: str, default: int) -> float:
+    raw = os.environ.get(name, "")
+    if raw == "":
+        return float(default)
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _active_run_ids_from_sessions(session_dir: Path) -> set[str]:
+    active: set[str] = set()
+    for path in session_dir.glob("*.json"):
+        try:
+            parsed = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        stream_id = str(parsed.get("active_stream_id") or "").strip()
+        if stream_id:
+            active.add(stream_id)
+        active_run_ids = parsed.get("active_run_ids")
+        if isinstance(active_run_ids, list):
+            for run_id in active_run_ids:
+                run_id = str(run_id or "").strip()
+                if run_id:
+                    active.add(run_id)
+    return active
+
+
+def prune_run_journals(
+    *,
+    session_dir: Path | None = None,
+    terminal_retention_days: float | None = None,
+    stale_retention_days: float | None = None,
+    active_run_ids: set[str] | None = None,
+    now: float | None = None,
+) -> dict:
+    """Remove old run journals after their replay/recovery window has passed.
+
+    Terminal journals are safe to drop after the shorter retention period because
+    the completed transcript has already been persisted. Non-terminal journals
+    are kept longer so restart recovery can still synthesize an interrupted
+    event for recent crashes.
+    """
+    root_session_dir = Path(session_dir) if session_dir is not None else _default_session_dir()
+    journal_root = root_session_dir / RUN_JOURNAL_DIR_NAME
+    result = {
+        "scanned": 0,
+        "removed": 0,
+        "removedBytes": 0,
+        "keptActive": 0,
+        "removedEmptySessionDirs": 0,
+    }
+    if not journal_root.exists():
+        return result
+
+    now_ts = float(now if now is not None else time.time())
+    terminal_days = _env_days(_RETENTION_DAYS_ENV, 14) if terminal_retention_days is None else max(0.0, float(terminal_retention_days))
+    stale_days = _env_days(_STALE_RETENTION_DAYS_ENV, 30) if stale_retention_days is None else max(0.0, float(stale_retention_days))
+    terminal_cutoff = now_ts - terminal_days * 86400.0 if terminal_days > 0 else None
+    stale_cutoff = now_ts - stale_days * 86400.0 if stale_days > 0 else None
+    active_ids = set(active_run_ids or set()) | _active_run_ids_from_sessions(root_session_dir)
+
+    for path in journal_root.glob("*/*.jsonl"):
+        result["scanned"] += 1
+        run_id = path.stem
+        if run_id in active_ids:
+            result["keptActive"] += 1
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        mtime = float(stat.st_mtime)
+        if terminal_cutoff is not None and mtime > terminal_cutoff:
+            continue
+        events, _malformed = _read_jsonl(path)
+        summary = _summary_from_events(path.parent.name, run_id, events)
+        terminal = bool(summary.get("terminal"))
+        stale = not terminal and stale_cutoff is not None and mtime <= stale_cutoff
+        if not terminal and not stale:
+            continue
+        try:
+            removed_bytes = path.stat().st_size
+            path.unlink()
+        except OSError:
+            continue
+        result["removed"] += 1
+        result["removedBytes"] += removed_bytes
+
+    for session_path in journal_root.iterdir():
+        if not session_path.is_dir():
+            continue
+        try:
+            next(session_path.iterdir())
+        except StopIteration:
+            try:
+                session_path.rmdir()
+                result["removedEmptySessionDirs"] += 1
+            except OSError:
+                pass
+        except OSError:
+            pass
+    return result

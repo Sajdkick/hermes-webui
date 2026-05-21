@@ -166,6 +166,17 @@ def test_read_importable_agent_session_rows_closes_connection(tmp_path, tracking
     assert len(tracking_sqlite.instances) == 5
 
 
+def test_read_importable_agent_session_rows_skips_corrupt_state_db_header(tmp_path, tracking_sqlite):
+    """A corrupt global state.db should not be opened on every sidebar poll."""
+    db = tmp_path / "state.db"
+    db.write_bytes(b"SQLit\x17\x03\x03not-a-sqlite-header")
+
+    from api.agent_sessions import read_importable_agent_session_rows
+
+    assert read_importable_agent_session_rows(db) == []
+    assert tracking_sqlite.instances == []
+
+
 def test_read_session_lineage_metadata_closes_connection(tmp_path, tracking_sqlite):
     """`read_session_lineage_metadata` must close every sqlite connection."""
     db = tmp_path / "state.db"
@@ -178,6 +189,16 @@ def test_read_session_lineage_metadata_closes_connection(tmp_path, tracking_sqli
 
     _assert_all_closed(tracking_sqlite, "read_session_lineage_metadata")
     assert len(tracking_sqlite.instances) == 5
+
+
+def test_read_session_lineage_metadata_skips_corrupt_state_db_header(tmp_path, tracking_sqlite):
+    db = tmp_path / "state.db"
+    db.write_bytes(b"SQLit\x17\x03\x03not-a-sqlite-header")
+
+    from api.agent_sessions import read_session_lineage_metadata
+
+    assert read_session_lineage_metadata(db, ["s1"]) == {}
+    assert tracking_sqlite.instances == []
 
 
 def test_get_cli_session_messages_closes_connection(tmp_path, tracking_sqlite, monkeypatch):

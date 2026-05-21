@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import queue
+import os
+import shutil
 import subprocess
 import threading
 import time
@@ -25,6 +27,9 @@ OPS_MAINTENANCE_SOURCE_LABEL = "Ops maintenance"
 OPS_UPSTREAM_SYNC_ROOT = STATE_DIR / "ops" / "upstream-sync"
 OPS_UPSTREAM_SYNC_RECORDS_DIR = OPS_UPSTREAM_SYNC_ROOT / "records"
 OPS_UPSTREAM_SYNC_WORKTREES_DIR = OPS_UPSTREAM_SYNC_ROOT / "worktrees"
+OPS_UPSTREAM_SYNC_APPLIED_RETENTION_DAYS_ENV = "HERMES_WEBUI_UPSTREAM_SYNC_APPLIED_RETENTION_DAYS"
+OPS_UPSTREAM_SYNC_STALE_RETENTION_DAYS_ENV = "HERMES_WEBUI_UPSTREAM_SYNC_STALE_RETENTION_DAYS"
+OPS_UPSTREAM_SYNC_ORPHAN_RETENTION_DAYS_ENV = "HERMES_WEBUI_UPSTREAM_SYNC_ORPHAN_RETENTION_DAYS"
 _LOCK = threading.RLock()
 
 
@@ -303,6 +308,140 @@ def _load_records() -> list[dict]:
             records.append(parsed)
     records.sort(key=lambda item: str(item.get("createdAt") or ""), reverse=True)
     return records
+
+
+def _record_file_for_loaded_record(record: dict) -> Path | None:
+    try:
+        return _record_path(str(record.get("id") or ""))
+    except Exception:
+        return None
+
+
+def _parse_iso_ms(value: Any) -> float:
+    text = _text(value, limit=80)
+    if not text:
+        return 0.0
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp() * 1000.0
+    except ValueError:
+        return 0.0
+
+
+def _env_retention_days(name: str, default: int) -> float:
+    raw = os.environ.get(name, "")
+    if raw == "":
+        return float(default)
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _is_generated_worktree_path(worktree_path: Path) -> bool:
+    try:
+        worktree_path.resolve().relative_to(OPS_UPSTREAM_SYNC_WORKTREES_DIR.resolve())
+        return True
+    except Exception:
+        return False
+
+
+def _remove_worktree_for_record(record: dict) -> bool:
+    raw_worktree = _text(record.get("worktreePath"), limit=1200)
+    if not raw_worktree:
+        return False
+    worktree_path = Path(raw_worktree).expanduser().resolve()
+    if not _is_generated_worktree_path(worktree_path):
+        return False
+    existed = worktree_path.exists()
+    repo_raw = _text(record.get("repoPath"), limit=1200)
+    if repo_raw:
+        repo_path = Path(repo_raw).expanduser().resolve()
+        if repo_path.exists():
+            _run_git(repo_path, ["worktree", "remove", "--force", str(worktree_path)], timeout=45.0, check=False)
+            _run_git(repo_path, ["worktree", "prune"], timeout=20.0, check=False)
+    if worktree_path.exists():
+        shutil.rmtree(worktree_path)
+        existed = True
+    return existed
+
+
+def prune_upstream_sync_artifacts(*, now_ms: float | None = None) -> dict:
+    """Remove old generated upstream-sync records and worktrees.
+
+    Keep the newest unapplied record per project so an in-review sync is not
+    discarded. Applied records and orphan worktrees are generated maintenance
+    artifacts, so they can be removed after a shorter retention window.
+    """
+    now = float(now_ms if now_ms is not None else time.time() * 1000.0)
+    applied_cutoff = now - _env_retention_days(OPS_UPSTREAM_SYNC_APPLIED_RETENTION_DAYS_ENV, 7) * 86400000.0
+    stale_cutoff = now - _env_retention_days(OPS_UPSTREAM_SYNC_STALE_RETENTION_DAYS_ENV, 30) * 86400000.0
+    orphan_cutoff = now - _env_retention_days(OPS_UPSTREAM_SYNC_ORPHAN_RETENTION_DAYS_ENV, 14) * 86400000.0
+    result = {
+        "recordsScanned": 0,
+        "recordsRemoved": 0,
+        "worktreesRemoved": 0,
+        "orphansRemoved": 0,
+        "errors": 0,
+    }
+    with _LOCK:
+        records = _load_records()
+        result["recordsScanned"] = len(records)
+        newest_unapplied_by_project: set[str] = set()
+        keep_record_ids: set[str] = set()
+        for record in records:
+            project_id = _text(record.get("projectId"), limit=128)
+            if not project_id or _text(record.get("appliedAt"), limit=64):
+                continue
+            if project_id not in newest_unapplied_by_project:
+                newest_unapplied_by_project.add(project_id)
+                record_id = _text(record.get("id"), limit=256)
+                if record_id:
+                    keep_record_ids.add(record_id)
+
+        referenced_worktrees = set()
+        for record in records:
+            record_id = _text(record.get("id"), limit=256)
+            raw_worktree = _text(record.get("worktreePath"), limit=1200)
+            if raw_worktree:
+                referenced_worktrees.add(str(Path(raw_worktree).expanduser().resolve()))
+            if record_id in keep_record_ids:
+                continue
+            created_ms = _parse_iso_ms(record.get("createdAt"))
+            applied_ms = _parse_iso_ms(record.get("appliedAt"))
+            record_file = _record_file_for_loaded_record(record)
+            if created_ms <= 0 and record_file and record_file.exists():
+                try:
+                    created_ms = record_file.stat().st_mtime * 1000.0
+                except OSError:
+                    created_ms = 0.0
+            should_remove = bool(applied_ms and applied_ms <= applied_cutoff)
+            should_remove = should_remove or bool(not applied_ms and created_ms and created_ms <= stale_cutoff)
+            if not should_remove:
+                continue
+            try:
+                if _remove_worktree_for_record(record):
+                    result["worktreesRemoved"] += 1
+                if record_file and record_file.exists():
+                    record_file.unlink()
+                    result["recordsRemoved"] += 1
+            except Exception:
+                result["errors"] += 1
+
+        if OPS_UPSTREAM_SYNC_WORKTREES_DIR.exists():
+            for entry in OPS_UPSTREAM_SYNC_WORKTREES_DIR.iterdir():
+                if not entry.is_dir():
+                    continue
+                resolved = str(entry.resolve())
+                if resolved in referenced_worktrees:
+                    continue
+                try:
+                    if entry.stat().st_mtime * 1000.0 > orphan_cutoff:
+                        continue
+                    shutil.rmtree(entry)
+                    result["orphansRemoved"] += 1
+                except Exception:
+                    result["errors"] += 1
+    return result
 
 
 def _project_records(project_id: str) -> list[dict]:

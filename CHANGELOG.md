@@ -10,6 +10,7 @@
 ### Changed
 
 - Ops Quick Task and Epic task executions now start linked task prompts as standing `/goal` turns by default, including execute-ready batch sessions, so long task queues can continue through goal-mode continuation instead of stopping at the first tool-call ceiling.
+- Startup maintenance now prunes old generated run journals and upstream-sync maintenance worktrees after their recovery/review retention windows, reducing WebUI state growth without deleting active run journals.
 - Workspace panel file editing now treats the textarea buffer as the save source of truth, keeps newer in-flight edits visible and dirty after a save snapshot completes, and blocks stale preview/close paths from clearing unsaved edits.
 - Hermes WebUI agent runs now register the repository `.agents/skills` directory through each active profile's `skills.external_dirs`, so shared Cloud Terminal-port skills can be discovered across profiles without per-profile copies.
 - Workspace creation from the Spaces panel now asks the server to create missing folders before saving the new workspace, while preserving the existing rejection for missing paths submitted without the explicit create intent.
@@ -17,6 +18,8 @@
 
 ### Fixed
 
+- Approval/clarify side-channel streams now close on page unload, idle transitions, and stale clarify health checks so completed sessions do not keep reconnecting dormant SSE connections through the Cloud Terminal proxy.
+- Optional Hermes Agent `state.db` reads now detect invalid SQLite headers before opening the DB and throttle warnings, so a corrupt global DB no longer causes repeated sidebar/gateway polling failures.
 - Quick Task create-and-run now sends the generated first task prompt before opening/navigating to the linked inspect session, preventing standalone Ops launches from creating an empty task session with no initial message.
 - Workspace panel uploads now send files above 512 KiB in proxy-friendly chunks and assemble them server-side, so large files under the configured WebUI upload cap no longer fail as a single nginx/reverse-proxy `413 Request Entity Too Large` request. The shell now advertises chunk-upload capability from the loaded backend so a stale Python process plus newer static JS reports a restart/hard-refresh requirement instead of a raw `not found` upload failure.
 - Ops run completion now matches continued/compressed session tips back to their linked run sidecars, so a just-finished continuation tears down any existing Play pipeline and starts a fresh build instead of leaving an hours-old stale Play notification.

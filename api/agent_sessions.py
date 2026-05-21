@@ -4,6 +4,8 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+from api.state_db_health import state_db_has_sqlite_header, warn_state_db_exception
+
 logger = logging.getLogger(__name__)
 
 
@@ -361,87 +363,93 @@ def read_importable_agent_session_rows(
     db_path = Path(db_path)
     if not db_path.exists():
         return []
+    if not state_db_has_sqlite_header(db_path, log=log or logger, purpose="agent session listing"):
+        return []
 
     log = log or logger
-    with closing(sqlite3.connect(str(db_path))) as conn:
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
+    try:
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
 
-        # Older Hermes Agent versions may not have source tracking. Without a
-        # source column we cannot safely distinguish WebUI rows from agent rows.
-        cur.execute("PRAGMA table_info(sessions)")
-        session_cols = {row[1] for row in cur.fetchall()}
-        cur.execute("PRAGMA table_info(messages)")
-        message_cols = {row[1] for row in cur.fetchall()}
-        if 'source' not in session_cols:
-            log.warning(
-                "agent session listing skipped: state.db at %s has no 'source' column "
-                "(older hermes-agent?). Agent sessions unavailable. "
-                "Upgrade hermes-agent to fix this.",
-                db_path,
+            # Older Hermes Agent versions may not have source tracking. Without a
+            # source column we cannot safely distinguish WebUI rows from agent rows.
+            cur.execute("PRAGMA table_info(sessions)")
+            session_cols = {row[1] for row in cur.fetchall()}
+            cur.execute("PRAGMA table_info(messages)")
+            message_cols = {row[1] for row in cur.fetchall()}
+            if 'source' not in session_cols:
+                log.warning(
+                    "agent session listing skipped: state.db at %s has no 'source' column "
+                    "(older hermes-agent?). Agent sessions unavailable. "
+                    "Upgrade hermes-agent to fix this.",
+                    db_path,
+                )
+                return []
+
+            parent_expr = _optional_col('parent_session_id', session_cols)
+            session_source_expr = _optional_col('session_source', session_cols)
+            ended_expr = _optional_col('ended_at', session_cols)
+            end_reason_expr = _optional_col('end_reason', session_cols)
+            user_id_expr = _optional_col('user_id', session_cols)
+            chat_id_expr = _optional_col('chat_id', session_cols)
+            chat_type_expr = _optional_col('chat_type', session_cols)
+            thread_id_expr = _optional_col('thread_id', session_cols)
+            session_key_expr = _optional_col('session_key', session_cols)
+            origin_chat_id_expr = _optional_col('origin_chat_id', session_cols)
+            origin_user_id_expr = _optional_col('origin_user_id', session_cols)
+            platform_expr = _optional_col('platform', session_cols)
+            user_message_count_expr = (
+                "COUNT(CASE WHEN LOWER(m.role) = 'user' THEN 1 END)"
+                if 'role' in message_cols
+                else "COUNT(m.id)"
             )
-            return []
 
-        parent_expr = _optional_col('parent_session_id', session_cols)
-        session_source_expr = _optional_col('session_source', session_cols)
-        ended_expr = _optional_col('ended_at', session_cols)
-        end_reason_expr = _optional_col('end_reason', session_cols)
-        user_id_expr = _optional_col('user_id', session_cols)
-        chat_id_expr = _optional_col('chat_id', session_cols)
-        chat_type_expr = _optional_col('chat_type', session_cols)
-        thread_id_expr = _optional_col('thread_id', session_cols)
-        session_key_expr = _optional_col('session_key', session_cols)
-        origin_chat_id_expr = _optional_col('origin_chat_id', session_cols)
-        origin_user_id_expr = _optional_col('origin_user_id', session_cols)
-        platform_expr = _optional_col('platform', session_cols)
-        user_message_count_expr = (
-            "COUNT(CASE WHEN LOWER(m.role) = 'user' THEN 1 END)"
-            if 'role' in message_cols
-            else "COUNT(m.id)"
-        )
+            where_clauses = ["s.source IS NOT NULL"]
+            params: list[str] = []
+            if exclude_sources:
+                excluded = tuple(str(source) for source in exclude_sources if source)
+                if excluded:
+                    placeholders = ", ".join("?" for _ in excluded)
+                    where_clauses.append(f"s.source NOT IN ({placeholders})")
+                    params.extend(excluded)
 
-        where_clauses = ["s.source IS NOT NULL"]
-        params: list[str] = []
-        if exclude_sources:
-            excluded = tuple(str(source) for source in exclude_sources if source)
-            if excluded:
-                placeholders = ", ".join("?" for _ in excluded)
-                where_clauses.append(f"s.source NOT IN ({placeholders})")
-                params.extend(excluded)
-
-        cur.execute(
-            f"""
-            SELECT s.id, s.title, s.model, s.message_count,
-                   s.started_at, s.source,
-                   {session_source_expr},
-                   {user_id_expr},
-                   {chat_id_expr},
-                   {chat_type_expr},
-                   {thread_id_expr},
-                   {session_key_expr},
-                   {origin_chat_id_expr},
-                   {origin_user_id_expr},
-                   {platform_expr},
-                   {parent_expr},
-                   {ended_expr},
-                   {end_reason_expr},
-                   COUNT(m.id) AS actual_message_count,
-                   {user_message_count_expr} AS actual_user_message_count,
-                   MAX(m.timestamp) AS last_activity
-            FROM sessions s
-            LEFT JOIN messages m ON m.session_id = s.id
-            WHERE {' AND '.join(where_clauses)}
-            GROUP BY s.id
-            ORDER BY COALESCE(MAX(m.timestamp), s.started_at) DESC
-            """,
-            params,
-        )
-        projected = _project_agent_session_rows([dict(row) for row in cur.fetchall()])
-        projected = [_with_normalized_source(row) for row in projected]
-        projected = [row for row in projected if is_cli_session_row_visible(row)]
-        if limit is None:
-            return projected
-        return projected[:max(0, int(limit))]
+            cur.execute(
+                f"""
+                SELECT s.id, s.title, s.model, s.message_count,
+                       s.started_at, s.source,
+                       {session_source_expr},
+                       {user_id_expr},
+                       {chat_id_expr},
+                       {chat_type_expr},
+                       {thread_id_expr},
+                       {session_key_expr},
+                       {origin_chat_id_expr},
+                       {origin_user_id_expr},
+                       {platform_expr},
+                       {parent_expr},
+                       {ended_expr},
+                       {end_reason_expr},
+                       COUNT(m.id) AS actual_message_count,
+                       {user_message_count_expr} AS actual_user_message_count,
+                       MAX(m.timestamp) AS last_activity
+                FROM sessions s
+                LEFT JOIN messages m ON m.session_id = s.id
+                WHERE {' AND '.join(where_clauses)}
+                GROUP BY s.id
+                ORDER BY COALESCE(MAX(m.timestamp), s.started_at) DESC
+                """,
+                params,
+            )
+            projected = _project_agent_session_rows([dict(row) for row in cur.fetchall()])
+            projected = [_with_normalized_source(row) for row in projected]
+            projected = [row for row in projected if is_cli_session_row_visible(row)]
+            if limit is None:
+                return projected
+            return projected[:max(0, int(limit))]
+    except sqlite3.DatabaseError as exc:
+        warn_state_db_exception(db_path, exc, log=log, purpose="agent session listing")
+        return []
 
 
 
@@ -489,6 +497,8 @@ def read_session_lineage_report(db_path: Path, session_id: str | None, max_hops:
         return _empty_lineage_report('')
     db_path = Path(db_path)
     if not db_path.exists():
+        return _empty_lineage_report(sid)
+    if not state_db_has_sqlite_header(db_path, log=logger, purpose="session lineage report"):
         return _empty_lineage_report(sid)
 
     try:
@@ -583,6 +593,9 @@ def read_session_lineage_report(db_path: Path, session_id: str | None, max_hops:
                         manual_review = True
                         continue
                     child_rows.append(child)
+    except sqlite3.DatabaseError as exc:
+        warn_state_db_exception(db_path, exc, log=logger, purpose="session lineage report")
+        return _empty_lineage_report(sid)
     except Exception:
         return _empty_lineage_report(sid)
 
@@ -619,6 +632,8 @@ def read_session_lineage_metadata(db_path: Path, session_ids: list[str] | set[st
     wanted = {str(sid) for sid in (session_ids or []) if sid}
     db_path = Path(db_path)
     if not wanted or not db_path.exists():
+        return {}
+    if not state_db_has_sqlite_header(db_path, log=logger, purpose="session lineage metadata"):
         return {}
 
     try:
@@ -676,6 +691,9 @@ def read_session_lineage_metadata(db_path: Path, session_ids: list[str] | set[st
                     parent_id = rows.get(sid, {}).get('parent_session_id')
                     if parent_id and parent_id not in rows and parent_id not in to_fetch:
                         to_fetch.add(parent_id)
+    except sqlite3.DatabaseError as exc:
+        warn_state_db_exception(db_path, exc, log=logger, purpose="session lineage metadata")
+        return {}
     except Exception:
         return {}
 

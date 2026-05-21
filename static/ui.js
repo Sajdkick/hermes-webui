@@ -3186,6 +3186,11 @@ function setBusy(v){
   S.busy=v;
   updateSendBtn();
   if(!v){
+    if(typeof stopPromptSideChannels==='function') stopPromptSideChannels();
+    else {
+      if(typeof stopApprovalPolling==='function') stopApprovalPolling();
+      if(typeof stopClarifyPolling==='function') stopClarifyPolling();
+    }
     if(typeof _clearActivityElapsedTimer==='function') _clearActivityElapsedTimer();
     setStatus('');
     setComposerStatus('');

@@ -2478,6 +2478,7 @@ async function respondApproval(choice) {
 
 function startApprovalPolling(sid) {
   stopApprovalPolling();
+  if (!sid) return;
   _approvalPollingSessionId = sid || null;
   // ── SSE (preferred): long-lived connection, server pushes instantly ──
   try {
@@ -2891,6 +2892,7 @@ let _clarifyPollingSessionId = null;
 
 function startClarifyPolling(sid) {
   stopClarifyPolling();
+  if (!sid) return;
   _clarifyPollingSessionId = sid || null;
   _clarifyMissingEndpointWarned = false;
 
@@ -2919,6 +2921,10 @@ function startClarifyPolling(sid) {
   });
 
   _clarifyEventSource.onerror = function() {
+    if (!S.busy || !S.session || S.session.session_id !== sid || _clarifyPollingSessionId !== sid) {
+      stopClarifyPolling();
+      return;
+    }
     stopClarifyPolling();
     _startClarifyFallbackPoll(sid);
   };
@@ -2938,6 +2944,9 @@ function startClarifyPolling(sid) {
   _clarifyEventSource.addEventListener('initial', _markClarifyEvent);
   _clarifyEventSource.addEventListener('clarify', _markClarifyEvent);
   _clarifyHealthTimer = setInterval(function() {
+    if (!S.busy || !S.session || S.session.session_id !== sid || _clarifyPollingSessionId !== sid) {
+      stopClarifyPolling(); _hideClarifyCardIfOwner(sid, true, 'session'); return;
+    }
     if (Date.now() - _lastClarifyEventAt < 60000) return;
     if (_clarifyEventSource) {
       try { _clarifyEventSource.close(); } catch(_){}
@@ -2950,7 +2959,7 @@ function startClarifyPolling(sid) {
 
 function _startClarifyFallbackPoll(sid) {
   _clarifyFallbackTimer = setInterval(async () => {
-    if (!S.session || S.session.session_id !== sid) {
+    if (!S.busy || !S.session || S.session.session_id !== sid) {
       stopClarifyPolling(); _hideClarifyCardIfOwner(sid, true, 'session'); return;
     }
     try {
@@ -2981,6 +2990,17 @@ function stopClarifyPolling() {
   if (_clarifyFallbackTimer) { clearInterval(_clarifyFallbackTimer); _clarifyFallbackTimer = null; }
   if (_clarifyHealthTimer) { clearInterval(_clarifyHealthTimer); _clarifyHealthTimer = null; }
   _clarifyPollingSessionId = null;
+}
+
+function stopPromptSideChannels() {
+  stopApprovalPolling();
+  stopClarifyPolling();
+}
+
+if (typeof window !== 'undefined' && !window.__hermesPromptSideChannelCleanupBound) {
+  window.__hermesPromptSideChannelCleanupBound = true;
+  window.addEventListener('pagehide', stopPromptSideChannels);
+  window.addEventListener('beforeunload', stopPromptSideChannels);
 }
 
 // ── Notifications and Sound ──────────────────────────────────────────────────
