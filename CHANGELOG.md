@@ -3,14 +3,16 @@
 
 ## [Unreleased]
 
+## [v0.51.133] — 2026-05-25 — Release DE (stage-batch15 — 6-PR contributor batch — aux-task validation + workspace artifact gating + update apply guard + Joplin auth header + prefill cache guard + notes drawer i18n)
+
 ### Fixed
 
-- Auxiliary model settings now reject unknown task slots instead of allowing arbitrary keys under `config.yaml`'s `auxiliary` block. Valid slots and the `__reset__` sentinel continue to work.
-- Workspace Artifacts now keeps read-only tool paths out of the "files changed" list by gating structured path extraction to known file-mutation tools.
-- Update Now no longer reports success or enters the restart wait flow when no WebUI or Agent update target is selected.
-- Cached WebUI agents no longer overwrite `prefill_messages` with an empty list when a later request does not include explicit prefill context.
-- Joplin notes drawer API calls now send the Web Clipper token in an `Authorization` header instead of placing it in the request URL query string.
-- Third-party notes drawer copy now uses localized strings in the supported non-English locale bundles instead of reusing the English defaults.
+- **PR #2891** by @franksong2702 — Auxiliary model settings now reject unknown task slots instead of allowing arbitrary keys under `config.yaml`'s `auxiliary` block. Valid slots and the `__reset__` sentinel continue to work.
+- **PR #2892** by @franksong2702 — Workspace Artifacts now keeps read-only tool paths out of the "files changed" list by gating structured path extraction to known file-mutation tools.
+- **PR #2893** by @franksong2702 — Update Now no longer reports success or enters the restart wait flow when no WebUI or Agent update target is selected.
+- **PR #2895** by @franksong2702 — Cached WebUI agents no longer overwrite `prefill_messages` with an empty list when a later request does not include explicit prefill context.
+- **PR #2894** by @franksong2702 — Joplin notes drawer API calls now send the Web Clipper token in an `Authorization` header instead of placing it in the request URL query string.
+- **PR #2896** by @franksong2702 — Third-party notes drawer copy now uses localized strings in the supported non-English locale bundles (it, ja, ru, es, de, zh, zh-Hant, pt, ko, fr, tr) instead of reusing the English defaults.
 
 ## [v0.51.132] — 2026-05-24 — Release DD (stage-batch14 — 4-PR replayed-context + interrupted-response + shutdown affordance + passkey opt-in)
 
