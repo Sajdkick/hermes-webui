@@ -787,6 +787,168 @@ def test_phase11_home_menu_routes_back_into_main_hermes_app():
     assert completed.stdout.strip() == "ok"
 
 
+def test_phase11_home_menu_routes_back_into_main_hermes_app_from_trailing_ops_route():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        async function runCase(baseHref){
+          const source = fs.readFileSync('static/ops-legacy-home.js', 'utf8');
+          const rootEl = {
+            innerHTML: '',
+            contains: () => true,
+            querySelectorAll: () => [],
+            querySelector: () => null,
+          };
+          const assigned = [];
+          const windowRef = {
+            HermesOpsModules: {},
+            setInterval: () => 1,
+            _opsDashboardOpen: true,
+            location: {
+              href: baseHref,
+              assign: (value) => assigned.push(value),
+            },
+          };
+          const context = {
+            console,
+            window: windowRef,
+            document: {
+              activeElement: null,
+              baseURI: baseHref,
+            },
+            navigator: {},
+            URL,
+            setTimeout,
+            clearTimeout,
+            requestAnimationFrame: (cb) => cb(),
+          };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const dashboard = context.window.HermesOpsModules.home.bindDashboard({
+            OPS: {
+              loading: false,
+              view: 'home',
+              projects: [{ id: 'hermes', name: 'Hermes', coreBranch: 'master' }],
+              sessions: [],
+              notifications: [],
+              notificationBusy: false,
+              notificationAutoApprovalPolicy: { enabled: true, rules: [] },
+              sessionActivity: [],
+              sessionActivityGroups: [],
+              sessionActivityCollapsed: {},
+              sessionActivityInitialized: {},
+              sessionActivityExpanded: true,
+              sessionActivityLastRefreshedAt: 0,
+              sessionActivityError: '',
+              sessionActivityBusy: false,
+              sessionActivityFocusGroupId: '',
+              quickTaskImages: [],
+              quickTaskProjectId: 'hermes',
+              quickTaskText: '',
+              quickTaskBusy: false,
+              quickTaskDictationActive: false,
+              quickTaskDictationBusy: false,
+              quickTaskStatus: '',
+              quickTaskStatusKind: 'info',
+            },
+            AgentBridge: { sessions: {} },
+            renderCurrentOpsView: () => {},
+            root: () => rootEl,
+            esc: (value) => String(value ?? ''),
+            svg: { folder: '', close: '', chat: '', play: '', refresh: '', check: '', arrow: '' },
+            showError: () => {},
+            setBusy: () => {},
+            setDashboardTopbar: () => {},
+            renderNotifications: () => '<div class="ops-notification-empty">No notifications.</div>',
+            normalizedAutoApprovalPolicy: () => ({ enabled: true }),
+            loadProjects: async () => [],
+            createQuickTask: async () => null,
+            executeReadyTasksWithAi: async () => null,
+            loadNotifications: async () => [],
+            loadOpsRuns: async () => [],
+            loadNotificationDiagnostics: async () => null,
+            findProject: (projectId) => projectId === 'hermes' ? { id: 'hermes', name: 'Hermes', coreBranch: 'master' } : null,
+            projectUsesBranchTitle: () => false,
+            projectBranchLabel: () => '',
+            projectCardTitle: () => '',
+            projectRepositoryLabel: () => '',
+            normalizeRunStatus: () => 'running',
+            runStatusLabel: () => 'Running',
+            runStatusKind: () => 'running',
+            formatOpsDateTime: () => 'now',
+            renderProjectGitQuickAction: () => '',
+            renderProjectPlayQuickAction: () => '',
+            renderProjectActivityQuickAction: () => '',
+            sessionAccentStyle: () => '',
+            sessionGroupAccentStyle: () => '',
+            sessionRefValue: (session) => session.session_id || session.id,
+            canonicalTaskSessions: (sessions) => sessions,
+            projectSessionsFor: () => [],
+            isSessionForProject: () => false,
+            taskImageLabel: () => '',
+            writeStoredJson: () => {},
+            sessionActivityStorageKey: 'activity-collapse',
+            navigatorRef: {},
+            windowRef,
+            documentRef: context.document,
+            URLRef: URL,
+            MediaRecorderRef: function(){},
+            FileRef: function(){},
+            showPromptDialog: async () => null,
+            showConfirmDialog: async () => false,
+            requestAnimationFrameRef: (cb) => cb(),
+            taskDictationPrompt: '',
+            taskDictationAudioBitsPerSecond: 0,
+            runActiveStatusValues: ['running'],
+            playStatusFor: () => null,
+          });
+
+          await dashboard.handleHomeAction('view-settings');
+          await dashboard.handleHomeAction('view-todos');
+          await dashboard.handleHomeAction('back-to-terminal');
+          await dashboard.handleHomeAction('go-recovery');
+          await dashboard.handleHomeAction('back-to-hermes');
+          return assigned;
+        }
+
+        (async () => {
+          const cases = [
+            'http://example.com/hermes/ops/',
+            'http://example.com/hermes/ops-phase/',
+            'http://example.com/hermes/session/abc123/ops/',
+          ];
+          const expected = [
+            'http://example.com/hermes/index.html?panel=settings',
+            'http://example.com/hermes/index.html?panel=todos',
+            'http://example.com/hermes/index.html',
+            'http://example.com/hermes/recovery',
+            'http://example.com/hermes/index.html',
+          ];
+          for (const baseHref of cases){
+            const assigned = await runCase(baseHref);
+            if (JSON.stringify(assigned) !== JSON.stringify(expected)) {
+              throw new Error('Unexpected Hermes navigation targets for ' + baseHref + ': ' + JSON.stringify(assigned));
+            }
+          }
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
 def test_phase11_quick_task_create_only_does_not_start_execution():
     script = textwrap.dedent(
         """

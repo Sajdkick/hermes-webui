@@ -11,7 +11,15 @@ TASK_ACTIONS_JS = (ROOT / "static" / "ops-legacy-task-actions.js").read_text(enc
 
 def test_quick_task_create_and_run_requests_inspect_mode_after_stream_start():
     assert "openInspectAfterStart=opts.openInspectAfterStart===true" in TASK_ACTIONS_JS
-    assert "executeTaskMatch(project,match,{files:pendingQuickTaskFiles,goalMode,openInspectAfterStart:true})" in TASK_ACTIONS_JS
+    assert "executeTaskMatch(project,match,{files:pendingQuickTaskFiles,goalMode,openInspectAfterStart:true,forceNewSession:true})" in TASK_ACTIONS_JS
+
+
+def test_quick_task_create_and_run_uses_lean_task_start_path():
+    assert "return ensureProjectEpic(projectId,'Quick tasks',{lean:true});" in TASK_ACTIONS_JS
+    assert "projectUrl(projectKey,'/epics/ensure')" in TASK_ACTIONS_JS
+    assert "payload.skipExistingLookup=true" in TASK_ACTIONS_JS
+    assert "const data=await reloadProjectTasks(project.id);" not in TASK_ACTIONS_JS
+    assert "findTaskInData(data,created.task&&created.task.id)" not in TASK_ACTIONS_JS
 
 
 def test_execute_task_match_sends_task_prompt_before_opening_inspect_mode():

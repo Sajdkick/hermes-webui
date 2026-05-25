@@ -1,5 +1,6 @@
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import textwrap
@@ -136,6 +137,34 @@ def test_start_writes_pid_under_hermes_home_runs_foreground_no_browser_and_logs(
         assert stop.returncode == 0, stop.stderr + stop.stdout
         assert_process_exits(pid)
         assert not pid_file.exists()
+
+
+def test_start_process_survives_sighup_after_launcher_exits(tmp_path):
+    fake_python = tmp_path / "fake-python"
+    fake_log = tmp_path / "fake-python.log"
+    write_fake_python(fake_python)
+
+    result = run_ctl(
+        tmp_path,
+        "start",
+        env={
+            "HERMES_WEBUI_PYTHON": str(fake_python),
+            "FAKE_PYTHON_LOG": str(fake_log),
+        },
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    pid = wait_for_pid_file(tmp_path / ".hermes" / "webui.pid")
+    try:
+        os.kill(pid, signal.SIGHUP)
+        time.sleep(0.2)
+        os.kill(pid, 0)
+        fake_output = wait_for_file_text(fake_log)
+        assert "fake-python args:" in fake_output
+    finally:
+        stop = run_ctl(tmp_path, "stop")
+        assert stop.returncode == 0, stop.stderr + stop.stdout
+        assert_process_exits(pid)
 
 
 def test_start_loads_dotenv_but_inline_overrides_win(tmp_path):

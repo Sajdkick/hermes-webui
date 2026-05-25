@@ -61,7 +61,26 @@ def _session_aliases(session: dict | None) -> set[str]:
         value = str(session.get(field) or "").strip()
         if value:
             aliases.add(value)
+    member_ids = session.get("_lineage_member_ids")
+    if isinstance(member_ids, (list, tuple, set)):
+        aliases.update(str(value).strip() for value in member_ids if str(value or "").strip())
     return aliases
+
+
+def _all_sessions_with_parent_lineage_metadata() -> list[dict]:
+    """Return WebUI session summaries with parent-chain lineage aliases.
+
+    ``all_sessions()`` normally includes ``_lineage_root_id``/``_lineage_tip_id``
+    from Hermes state.db.  When that metadata is unavailable, Ops still needs to
+    collapse task sidecars and open actions to the current continuation.  Reuse
+    the sidecar resolver's parent-chain fallback so project/activity lists and
+    click targets agree.
+    """
+    sessions = [session for session in all_sessions() if isinstance(session, dict)]
+    try:
+        return session_sidecars._with_parent_lineage_metadata(sessions)
+    except Exception:
+        return sessions
 
 
 def _linkage_aliases(linkage: dict | None) -> set[str]:
@@ -414,14 +433,15 @@ def list_ops_sessions(project_id: str | None = None, activity_only: bool = False
     }
 
     logical_sessions: dict[str, dict] = {}
-    for session in all_sessions():
+    session_summaries = _all_sessions_with_parent_lineage_metadata()
+    for session in session_summaries:
         if not isinstance(session, dict) or session.get("archived"):
             continue
         lineage_root = str(session.get("_lineage_root_id") or session.get("session_id") or "").strip()
         if not lineage_root:
             continue
         current = logical_sessions.get(lineage_root)
-        if not current or _session_sort_key(session) >= _session_sort_key(current):
+        if not current or _ops_task_session_rank(session) >= _ops_task_session_rank(current):
             logical_sessions[lineage_root] = dict(session)
 
     activity_candidate_aliases: set[str] | None = None
@@ -550,11 +570,22 @@ def list_ops_sessions(project_id: str | None = None, activity_only: bool = False
     return {"sessions": sessions, "groups": groups, "ungrouped": ungrouped}
 
 
+def _payload_force_new_session(body: dict | None) -> bool:
+    payload = body if isinstance(body, dict) else {}
+    return bool(
+        payload.get("forceNew")
+        or payload.get("forceNewSession")
+        or payload.get("skipExistingLookup")
+        or payload.get("skipReuseSession")
+    )
+
+
 def launch_task_session(project_id: str, task_id: str, body: dict | None = None) -> dict:
     resolved = ops_projects.get_ops_project_task(project_id, task_id)
     project = resolved["project"]
     task = resolved["task"]
-    existing = _find_existing_task_session(project["id"], task["id"])
+    force_new_session = _payload_force_new_session(body)
+    existing = None if force_new_session else _find_existing_task_session(project["id"], task["id"])
     if existing:
         session = existing["session"]
         if getattr(session, "archived", False):
@@ -654,7 +685,7 @@ def _requested_close_aliases(session_id: str) -> set[str]:
     except Exception:
         pass
     try:
-        for session in all_sessions():
+        for session in _all_sessions_with_parent_lineage_metadata():
             if not isinstance(session, dict):
                 continue
             if str(session.get("session_id") or "").strip() != session_id:
@@ -694,7 +725,7 @@ def _task_close_target_session_ids(project_id: str, requested_session_id: str, s
 
     if target_aliases:
         try:
-            for session in all_sessions():
+            for session in _all_sessions_with_parent_lineage_metadata():
                 if not isinstance(session, dict) or session.get("archived"):
                     continue
                 sid = str(session.get("session_id") or "").strip()

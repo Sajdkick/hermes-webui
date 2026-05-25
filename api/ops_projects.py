@@ -658,6 +658,21 @@ def read_ops_project_tasks(project_id: str) -> dict:
     }
 
 
+def ensure_ops_project_epic(project_id: str, title: str) -> dict:
+    project = get_ops_project(project_id)
+    trimmed = str(title or "").strip()
+    if not trimmed:
+        raise OpsProjectError("Epic title is required.")
+    data, _, _ = _read_tasks_data(project)
+    normalized_title = trimmed.lower()
+    for epic in data.get("epics") or []:
+        if str(epic.get("title") or "").strip().lower() == normalized_title:
+            return {"epic": epic, "created": False}
+    epic = {"id": str(uuid.uuid4()), "title": trimmed, "tasks": []}
+    _write_tasks_data(project, {**data, "epics": [*(data.get("epics") or []), epic]})
+    return {"epic": epic, "created": True}
+
+
 def add_ops_project_epic(project_id: str, title: str) -> dict:
     project = get_ops_project(project_id)
     trimmed = str(title or "").strip()

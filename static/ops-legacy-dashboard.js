@@ -22,6 +22,7 @@
     {accent:'#22d3ee',soft:'rgba(34,211,238,.12)',border:'rgba(34,211,238,.35)'},
   ];
   const OPS_MODULES=window.HermesOpsModules||{};
+  const VOICE_INPUT=typeof window!=='undefined'&&window.HermesVoiceInput?window.HermesVoiceInput:null;
   const OPS_SESSION_GROUP_COLLAPSE_STORAGE_KEY='hermes-webui-ops-session-group-collapse';
   const OPS_SESSION_ACTIVITY_COLLAPSE_STORAGE_KEY='hermes-webui-ops-session-activity-collapse';
   const OPS_EPIC_COLLAPSE_STORAGE_KEY='hermes-webui-ops-epic-collapse';
@@ -163,7 +164,7 @@
       taskFormFocusedField:'',
       taskFormSelectionStart:null,
       taskFormSelectionEnd:null,
-      taskFormDictationSupported:!!(window.navigator&&window.navigator.mediaDevices&&window.navigator.mediaDevices.getUserMedia&&typeof window.MediaRecorder!=='undefined'),
+      taskFormDictationSupported:!!(VOICE_INPUT&&typeof VOICE_INPUT.isSupported==='function'&&VOICE_INPUT.isSupported()),
       taskFormDictationActive:false,
       taskFormDictationBusy:false,
       taskFormDictationStatus:'',
@@ -182,7 +183,7 @@
     quickTaskStatus:'',
     quickTaskStatusKind:'info',
     quickTaskImages:[],
-    quickTaskDictationSupported:!!(window.navigator&&window.navigator.mediaDevices&&window.navigator.mediaDevices.getUserMedia&&typeof window.MediaRecorder!=='undefined'),
+    quickTaskDictationSupported:!!(VOICE_INPUT&&typeof VOICE_INPUT.isSupported==='function'&&VOICE_INPUT.isSupported()),
     quickTaskDictationActive:false,
     quickTaskDictationBusy:false,
     quickTaskDictationStatus:'',
@@ -451,6 +452,7 @@
       sessionActivityStorageKey:OPS_SESSION_ACTIVITY_COLLAPSE_STORAGE_KEY,
       navigatorRef:typeof navigator!=='undefined'?navigator:null,
       windowRef:typeof window!=='undefined'?window:null,
+      voiceInput:VOICE_INPUT,
       documentRef:typeof document!=='undefined'?document:null,
       URLRef:typeof URL!=='undefined'?URL:null,
       MediaRecorderRef:typeof MediaRecorder!=='undefined'?MediaRecorder:null,
@@ -637,6 +639,7 @@
       showError:typeof showError==='function'?showError:()=>{},
       documentRef:typeof document!=='undefined'?document:null,
       windowRef:typeof window!=='undefined'?window:null,
+      voiceInput:VOICE_INPUT,
       URLRef:typeof URL!=='undefined'?URL:null,
       AgentBridge:typeof AgentBridge!=='undefined'?AgentBridge:null,
       navigatorRef:typeof navigator!=='undefined'?navigator:null,

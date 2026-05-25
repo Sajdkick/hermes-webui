@@ -27,10 +27,22 @@
       return OPS.gitStatusByProject[projectId]||null;
     }
 
+    function gitBusyMode(projectId){
+      const value=OPS.gitBusyByProject[projectId];
+      if(value===true)return 'operation';
+      return String(value||'').trim();
+    }
+
+    function gitOperationBusyMode(projectId){
+      const mode=gitBusyMode(projectId);
+      if(!mode||mode==='status'||mode==='refresh')return '';
+      return mode;
+    }
+
     async function refreshProjectGitStatus(projectId,options){
       const id=String(projectId||'').trim();
       if(!id)return null;
-      OPS.gitBusyByProject[id]=true;
+      OPS.gitBusyByProject[id]='status';
       try{
         const data=await api(projectUrl(id,'/git/status'));
         const status=data.git||data;
@@ -50,7 +62,7 @@
       const op=String(operation||'').trim().toLowerCase();
       if(!id||!['push','sync'].includes(op))return null;
       const label=op==='push'?'Push':'Sync';
-      OPS.gitBusyByProject[id]=true;
+      OPS.gitBusyByProject[id]=op;
       renderCurrentOpsView();
       try{
         delete OPS.gitPlansByProject[id];
@@ -206,7 +218,7 @@
       const status=gitStatusFor(project.id);
       const primary=gitPrimaryActionState(project,status);
       const badge=gitQuickBadgeState(project,status);
-      const busy=String(OPS.gitBusyByProject[project.id]||'').trim();
+      const busy=gitOperationBusyMode(project.id);
       const label=busy==='push'
         ? 'Pushing...'
         : busy==='sync'
@@ -238,7 +250,20 @@
       const primary=gitPrimaryActionState(project,status);
       const operation=OPS.gitOperationsByProject[project.id]||null;
       const kind=gitStatusKind(status,project);
-      const busy=!!OPS.gitBusyByProject[project.id];
+      const busyMode=gitBusyMode(project.id);
+      const operationBusy=gitOperationBusyMode(project.id);
+      const primaryLabel=operationBusy==='push'
+        ? 'Pushing...'
+        : operationBusy==='sync'
+          ? 'Syncing...'
+          : primary.label;
+      const primaryTitle=operationBusy==='push'
+        ? 'Pushing the current project changes and waiting for Git to finish.'
+        : operationBusy==='sync'
+          ? 'Syncing the project with the remote branch.'
+          : primary.title;
+      const primaryDisabled=!!operationBusy||primary.disabled;
+      const refreshLabel=operationBusy?'Busy...':busyMode?'Refreshing...':'Refresh';
       const summary=gitStatusSummary(status);
       const remote=status&&status.remoteUrl?String(status.remoteUrl):'';
       const last=status&&status.lastCommit&&status.lastCommit.subject?String(status.lastCommit.subject):'';
@@ -260,8 +285,8 @@
             `:''}
           </div>
           <div class="ops-git-actions">
-            <button class="ops-btn" type="button" data-ops-action="refresh-git-status" data-project-id="${esc(project.id)}" ${busy?'disabled':''}>${svg.refresh}<span>${busy?'Refreshing...':'Refresh'}</span></button>
-            <button class="ops-btn ${!primary.disabled?'primary':''}" type="button" data-ops-action="${esc(primary.action||'git-noop')}" data-project-id="${esc(project.id)}" ${busy||primary.disabled?'disabled':''} title="${esc(primary.title)}">${primary.icon}<span>${esc(primary.label)}</span></button>
+            <button class="ops-btn" type="button" data-ops-action="refresh-git-status" data-project-id="${esc(project.id)}" ${busyMode?'disabled':''}>${svg.refresh}<span>${refreshLabel}</span></button>
+            <button class="ops-btn ${!primaryDisabled?'primary':''}" type="button" data-ops-action="${esc(primary.action||'git-noop')}" data-project-id="${esc(project.id)}" ${primaryDisabled?'disabled':''} title="${esc(primaryTitle)}">${primary.icon}<span>${esc(primaryLabel)}</span></button>
           </div>
         </div>
       `;

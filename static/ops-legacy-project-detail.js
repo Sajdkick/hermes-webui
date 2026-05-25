@@ -11,6 +11,7 @@
     const documentRef=(ctx&&ctx.documentRef)||(typeof document!=='undefined'?document:null);
     const windowRef=(ctx&&ctx.windowRef)||(typeof window!=='undefined'?window:null);
     const URLRef=(ctx&&ctx.URLRef)||(typeof URL!=='undefined'?URL:null);
+    const VoiceInputRef=ctx&&ctx.voiceInput;
     const AgentBridgeRef=ctx&&ctx.AgentBridge;
     const navigatorRef=ctx&&ctx.navigatorRef;
     const MediaRecorderRef=ctx&&ctx.MediaRecorderRef;
@@ -120,67 +121,20 @@
       ));
     }
 
-    function appendTranscriptText(current,next){
-      const trimmed=String(next||'').trim();
-      if(!trimmed)return String(current||'').trim();
-      const existing=String(current||'').trim();
-      return existing?`${existing} ${trimmed}`:trimmed;
+    let taskFormDictationController=null;
+
+    function taskFormVoiceSupported(){
+      return !!(VoiceInputRef&&typeof VoiceInputRef.isSupported==='function'&&VoiceInputRef.isSupported({
+        windowRef,
+        navigatorRef,
+        MediaRecorderRef,
+      }));
     }
 
-    function normalizeDictationLanguage(tag){
-      if(typeof tag!=='string')return '';
-      const trimmed=tag.trim();
-      if(!trimmed)return '';
-      const primary=trimmed.toLowerCase().split(/[-_]/)[0];
-      return primary.length>=2&&primary.length<=3?primary:'';
-    }
-
-    function getTaskFormDictationLanguage(){
-      const language=Array.isArray(navigatorRef&&navigatorRef.languages)&&navigatorRef.languages.length
-        ? navigatorRef.languages[0]
-        : navigatorRef&&navigatorRef.language;
-      return normalizeDictationLanguage(language);
-    }
-
-    function getTaskFormDictationPrompt(language){
-      if(language&&language!=='en')return '';
-      return taskDictationPrompt||'';
-    }
-
-    function getPreferredAudioMimeType(){
-      if(!MediaRecorderRef)return '';
-      const candidates=['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/ogg'];
-      return candidates.find(type=>MediaRecorderRef.isTypeSupported&&MediaRecorderRef.isTypeSupported(type))||'';
-    }
-
-    function getTaskFormDictationAudioConstraints(){
-      const supported=navigatorRef&&navigatorRef.mediaDevices&&typeof navigatorRef.mediaDevices.getSupportedConstraints==='function'
-        ? navigatorRef.mediaDevices.getSupportedConstraints()
-        : {};
-      const audio={};
-      if(supported.echoCancellation)audio.echoCancellation=true;
-      if(supported.noiseSuppression)audio.noiseSuppression=true;
-      if(supported.autoGainControl)audio.autoGainControl=true;
-      if(supported.channelCount)audio.channelCount={ideal:1};
-      if(supported.sampleRate)audio.sampleRate={ideal:48000};
-      if(supported.sampleSize)audio.sampleSize={ideal:16};
-      return Object.keys(audio).length?audio:true;
-    }
-
-    function createTaskFormDictationRecorder(stream,mimeType){
-      const options={};
-      if(mimeType)options.mimeType=mimeType;
-      if(Number.isFinite(taskDictationAudioBitsPerSecond))options.audioBitsPerSecond=taskDictationAudioBitsPerSecond;
-      try{
-        return new MediaRecorderRef(stream,Object.keys(options).length?options:undefined);
-      }catch(error){
-        if('audioBitsPerSecond' in options){
-          const fallback={...options};
-          delete fallback.audioBitsPerSecond;
-          return new MediaRecorderRef(stream,Object.keys(fallback).length?fallback:undefined);
-        }
-        throw error;
-      }
+    function refreshTaskFormDictationSupport(){
+      const supported=taskFormVoiceSupported();
+      OPS.taskFormDictationSupported=supported;
+      return supported;
     }
 
     function setTaskFormMicStatus(message,type){
@@ -188,30 +142,12 @@
       OPS.taskFormDictationStatusKind=type==='error'||type==='success'?type:'info';
     }
 
-    function cleanupTaskFormDictationStream(){
-      const stream=OPS.taskFormDictationStream;
-      if(!stream||typeof stream.getTracks!=='function')return;
-      stream.getTracks().forEach(track=>{
-        try{track.stop();}catch(_){}
-      });
-      OPS.taskFormDictationStream=null;
-    }
-
     function taskFormCanDictate(){
-      return !!(
-        OPS.taskFormDictationSupported
-        && AgentBridgeRef
-        && AgentBridgeRef.sessions
-        && typeof AgentBridgeRef.sessions.transcribeAudio==='function'
-        && navigatorRef
-        && navigatorRef.mediaDevices
-        && typeof navigatorRef.mediaDevices.getUserMedia==='function'
-        && MediaRecorderRef
-        && BlobRef
-      );
+      return !!refreshTaskFormDictationSupport();
     }
 
     function taskFormMicButtonState(){
+      refreshTaskFormDictationSupport();
       let label='Record';
       let title='Record task text by voice';
       if(OPS.taskFormDictationBusy){
@@ -244,142 +180,99 @@
       };
     }
 
+    function syncTaskFormDictationText(value){
+      ensureTaskFormDraftText(value);
+      const field=root()&&root().querySelector('form[data-ops-submit="save-task"] input[name="text"]');
+      if(field&&field.value!==OPS.taskFormDraft.text)field.value=OPS.taskFormDraft.text;
+    }
+
+    function renderTaskFormDictationState(){
+      if(OPS.view==='project'){
+        renderProjectDetail();
+        restoreTaskFormFocus();
+      }
+    }
+
+    function ensureTaskFormDictationController(){
+      if(taskFormDictationController)return taskFormDictationController;
+      if(!VoiceInputRef||typeof VoiceInputRef.createController!=='function')return null;
+      taskFormDictationController=VoiceInputRef.createController({
+        windowRef,
+        navigatorRef,
+        MediaRecorderRef,
+        getText:()=>OPS.taskFormDraft&&typeof OPS.taskFormDraft==='object'?OPS.taskFormDraft.text:'',
+        setText:value=>syncTaskFormDictationText(value),
+        canStart:()=>taskFormCanDictate(),
+        onActiveChange:on=>{
+          OPS.taskFormDictationActive=!!on;
+          renderTaskFormDictationState();
+        },
+        onBusyChange:on=>{
+          OPS.taskFormDictationBusy=!!on;
+          renderTaskFormDictationState();
+        },
+        onStatus:(message,type)=>{
+          setTaskFormMicStatus(message,type);
+          renderTaskFormDictationState();
+        },
+        onCommit:(transcript)=>{
+          if(String(transcript||'').trim())setTaskFormMicStatus('Transcription added.','success');
+          renderTaskFormDictationState();
+        },
+        onNoSpeech:()=>{
+          setTaskFormMicStatus('No speech detected.','error');
+          renderTaskFormDictationState();
+        },
+        messages:{
+          requesting:'Requesting microphone access...',
+          listening:'Listening...',
+          transcribing:'Transcribing...',
+          micDenied:'Microphone access was denied.',
+          micNetwork:'Unable to access microphone.',
+          noSpeech:'No speech detected.',
+          noAudio:'No audio captured.',
+          unsupported:'Voice dictation is not supported in this browser.',
+          transcriptionFailed:'Unable to transcribe audio.',
+        },
+      });
+      return taskFormDictationController;
+    }
+
     function stopTaskFormDictation(options){
       const settings=options||{};
-      if(settings.discard)OPS.taskFormDictationDiscard=true;
-      OPS.taskFormDictationActive=false;
-      const recorder=OPS.taskFormDictationRecorder;
-      if(recorder&&recorder.state!=='inactive'){
-        try{
-          recorder.stop();
-          return;
-        }catch(_){}
+      const controller=ensureTaskFormDictationController();
+      if(controller){
+        controller.stop(settings);
+        if(settings.discard&&settings.updateStatus!==false){
+          setTaskFormMicStatus('Dictation canceled.','info');
+          renderTaskFormDictationState();
+        }
+        return;
       }
-      OPS.taskFormDictationRecorder=null;
-      OPS.taskFormDictationChunks=[];
-      OPS.taskFormDictationDiscard=false;
-      cleanupTaskFormDictationStream();
+      OPS.taskFormDictationActive=false;
+      OPS.taskFormDictationBusy=false;
       if(settings.updateStatus!==false){
         setTaskFormMicStatus(settings.discard?'Dictation canceled.':'Recording stopped.',settings.discard?'info':'success');
       }
-      renderProjectDetail();
-    }
-
-    async function transcribeTaskFormAudio(blob){
-      if(!blob||!blob.size)return;
-      OPS.taskFormDictationBusy=true;
-      setTaskFormMicStatus('Transcribing with OpenAI...','info');
-      renderProjectDetail();
-      try{
-        const mimeType=String(blob.type||'audio/webm').trim()||'audio/webm';
-        const extension=mimeType.includes('ogg')?'ogg':'webm';
-        const file=FileRef
-          ? new FileRef([blob],`task-form-dictation.${extension}`,{type:mimeType})
-          : blob;
-        const language=getTaskFormDictationLanguage();
-        const options={filename:file&&file.name?file.name:`task-form-dictation.${extension}`};
-        const prompt=getTaskFormDictationPrompt(language);
-        if(prompt)options.prompt=prompt;
-        if(language)options.language=language;
-        const data=await AgentBridgeRef.sessions.transcribeAudio(file,options);
-        const transcript=String(data.transcript||data.text||'').trim();
-        if(!transcript){
-          setTaskFormMicStatus('No speech detected.','error');
-          return;
-        }
-        const current=OPS.taskFormDraft&&typeof OPS.taskFormDraft==='object'?OPS.taskFormDraft.text:'';
-        ensureTaskFormDraftText(appendTranscriptText(current,transcript));
-        setTaskFormMicStatus('Transcription added.','success');
-        renderProjectDetail();
-        restoreTaskFormFocus();
-      }catch(error){
-        setTaskFormMicStatus(error&&error.message?error.message:'Unable to transcribe audio.','error');
-      }finally{
-        OPS.taskFormDictationBusy=false;
-        renderProjectDetail();
-      }
-    }
-
-    function handleTaskFormDictationStop(recorder){
-      const chunks=Array.isArray(OPS.taskFormDictationChunks)?OPS.taskFormDictationChunks.slice():[];
-      const mimeType=String(recorder&&recorder.mimeType||'audio/webm').trim()||'audio/webm';
-      OPS.taskFormDictationRecorder=null;
-      OPS.taskFormDictationChunks=[];
-      OPS.taskFormDictationActive=false;
-      cleanupTaskFormDictationStream();
-      if(OPS.taskFormDictationDiscard){
-        OPS.taskFormDictationDiscard=false;
-        setTaskFormMicStatus('','info');
-        renderProjectDetail();
-        return;
-      }
-      if(!chunks.length){
-        setTaskFormMicStatus('No audio captured.','error');
-        renderProjectDetail();
-        return;
-      }
-      renderProjectDetail();
-      void transcribeTaskFormAudio(new BlobRef(chunks,{type:mimeType}));
+      renderTaskFormDictationState();
     }
 
     async function startTaskFormDictation(){
       if(OPS.taskFormDictationActive||OPS.taskFormDictationBusy)return;
       if(!taskFormCanDictate()){
         setTaskFormMicStatus('Voice dictation is not supported in this browser.','error');
-        renderProjectDetail();
+        renderTaskFormDictationState();
         return;
       }
       OPS.taskFormDictationDiscard=false;
-      OPS.taskFormDictationChunks=[];
-      setTaskFormMicStatus('Requesting microphone access...','info');
-      renderProjectDetail();
-      let stream=null;
-      try{
-        stream=await navigatorRef.mediaDevices.getUserMedia({audio:getTaskFormDictationAudioConstraints()});
-      }catch(error){
-        const errorName=String(error&&error.name||'').trim();
-        const message=errorName==='NotAllowedError'
-          ? 'Microphone access was denied.'
-          : errorName==='NotFoundError'
-            ? 'No microphone found.'
-            : 'Unable to access microphone.';
-        setTaskFormMicStatus(message,'error');
-        renderProjectDetail();
+      setTaskFormMicStatus('','info');
+      const controller=ensureTaskFormDictationController();
+      if(!controller){
+        setTaskFormMicStatus('Voice dictation is not supported in this browser.','error');
+        renderTaskFormDictationState();
         return;
       }
-      OPS.taskFormDictationStream=stream;
-      let recorder=null;
-      try{
-        recorder=createTaskFormDictationRecorder(stream,getPreferredAudioMimeType());
-      }catch(error){
-        OPS.taskFormDictationSupported=false;
-        cleanupTaskFormDictationStream();
-        setTaskFormMicStatus('Recording is not supported in this browser.','error');
-        renderProjectDetail();
-        return;
-      }
-      OPS.taskFormDictationRecorder=recorder;
-      recorder.ondataavailable=event=>{
-        if(event.data&&event.data.size>0)OPS.taskFormDictationChunks.push(event.data);
-      };
-      recorder.onstart=()=>{
-        OPS.taskFormDictationActive=true;
-        setTaskFormMicStatus('Recording... Speak clearly and keep close to the mic.','info');
-        renderProjectDetail();
-      };
-      recorder.onstop=()=>handleTaskFormDictationStop(recorder);
-      recorder.onerror=()=>{
-        setTaskFormMicStatus('Recording error. Try again.','error');
-        stopTaskFormDictation({updateStatus:false,discard:true});
-      };
-      try{
-        recorder.start();
-      }catch(error){
-        OPS.taskFormDictationRecorder=null;
-        cleanupTaskFormDictationStream();
-        setTaskFormMicStatus('Unable to start recording.','error');
-        renderProjectDetail();
-      }
+      await controller.start();
     }
 
     async function toggleTaskFormDictation(){

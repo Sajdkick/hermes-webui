@@ -1,23 +1,24 @@
 from api import session_activity
 
 
-def test_session_activity_hides_stale_pending_untitled_sidecars(monkeypatch):
+def _patch_activity_source(monkeypatch, sessions):
     monkeypatch.setattr(session_activity, "_read_state", lambda: {"groups": [], "assignments": []})
-    monkeypatch.setattr(
-        session_activity.ops_sessions,
-        "list_ops_sessions",
-        lambda: {
-            "sessions": [
-                {
-                    "session_id": "stale_first_turn",
-                    "title": "Untitled",
-                    "active_stream_id": "stream-replayable",
-                    "pending_user_message": "resume",
-                    "is_streaming": False,
-                    "updated_at": 100,
-                }
-            ]
-        },
+    monkeypatch.setattr(session_activity, "_list_ops_activity_source", lambda: {"sessions": sessions})
+
+
+def test_session_activity_hides_stale_pending_untitled_sidecars(monkeypatch):
+    _patch_activity_source(
+        monkeypatch,
+        [
+            {
+                "session_id": "stale_first_turn",
+                "title": "Untitled",
+                "active_stream_id": "stream-replayable",
+                "pending_user_message": "resume",
+                "is_streaming": False,
+                "updated_at": 100,
+            }
+        ],
     )
 
     payload = session_activity.list_session_activity()
@@ -27,24 +28,20 @@ def test_session_activity_hides_stale_pending_untitled_sidecars(monkeypatch):
 
 
 def test_session_activity_keeps_durable_running_ops_task_without_live_stream(monkeypatch):
-    monkeypatch.setattr(session_activity, "_read_state", lambda: {"groups": [], "assignments": []})
-    monkeypatch.setattr(
-        session_activity.ops_sessions,
-        "list_ops_sessions",
-        lambda: {
-            "sessions": [
-                {
-                    "session_id": "ops_task_session",
-                    "title": "Project: Fix the dashboard",
-                    "is_streaming": False,
-                    "updated_at": 200,
-                    "ops_project_id": "project-1",
-                    "repositoryLabel": "Repo",
-                    "ops_task": {"id": "task-1", "text": "Fix the dashboard"},
-                    "ops_run": {"id": "run-1", "status": "running"},
-                }
-            ]
-        },
+    _patch_activity_source(
+        monkeypatch,
+        [
+            {
+                "session_id": "ops_task_session",
+                "title": "Project: Fix the dashboard",
+                "is_streaming": False,
+                "updated_at": 200,
+                "ops_project_id": "project-1",
+                "repositoryLabel": "Repo",
+                "ops_task": {"id": "task-1", "text": "Fix the dashboard"},
+                "ops_run": {"id": "run-1", "status": "running"},
+            }
+        ],
     )
 
     payload = session_activity.list_session_activity()
@@ -58,22 +55,18 @@ def test_session_activity_keeps_durable_running_ops_task_without_live_stream(mon
 
 
 def test_session_activity_keeps_live_non_ops_stream(monkeypatch):
-    monkeypatch.setattr(session_activity, "_read_state", lambda: {"groups": [], "assignments": []})
-    monkeypatch.setattr(
-        session_activity.ops_sessions,
-        "list_ops_sessions",
-        lambda: {
-            "sessions": [
-                {
-                    "session_id": "live_general_session",
-                    "title": "Untitled",
-                    "active_stream_id": "live-stream",
-                    "pending_user_message": "hello",
-                    "is_streaming": True,
-                    "updated_at": 300,
-                }
-            ]
-        },
+    _patch_activity_source(
+        monkeypatch,
+        [
+            {
+                "session_id": "live_general_session",
+                "title": "Untitled",
+                "active_stream_id": "live-stream",
+                "pending_user_message": "hello",
+                "is_streaming": True,
+                "updated_at": 300,
+            }
+        ],
     )
 
     payload = session_activity.list_session_activity()
@@ -85,20 +78,104 @@ def test_session_activity_keeps_live_non_ops_stream(monkeypatch):
     assert item["activityStatus"]["labelText"] == "Codex is working"
 
 
-def test_session_activity_requests_activity_only_ops_source(monkeypatch):
+def test_session_activity_uses_lean_source_not_rich_ops_sessions(monkeypatch):
     calls = []
     monkeypatch.setattr(session_activity, "_read_state", lambda: {"groups": [], "assignments": []})
 
-    def list_ops_sessions(*, activity_only=False):
-        calls.append(activity_only)
+    def lean_source():
+        calls.append("lean")
         return {"sessions": []}
 
-    monkeypatch.setattr(session_activity.ops_sessions, "list_ops_sessions", list_ops_sessions)
+    def rich_source(*args, **kwargs):
+        raise AssertionError("activity endpoint must not call rich ops session enrichment")
+
+    monkeypatch.setattr(session_activity, "_lean_activity_source", lean_source)
+    monkeypatch.setattr(session_activity.ops_sessions, "list_ops_sessions", rich_source)
 
     payload = session_activity.list_session_activity()
 
     assert payload["sessionCount"] == 0
-    assert calls == [True]
+    assert calls == ["lean"]
+
+
+def test_lean_activity_source_uses_raw_indexes_without_rich_ops_calls(monkeypatch, tmp_path):
+    from api import ops_projects, ops_sessions
+
+    workspace = tmp_path / "hermes"
+    workspace.mkdir()
+    project = {
+        "id": "project-1",
+        "name": "Hermes",
+        "fullName": "Hermes WebUI",
+        "path": str(workspace),
+        "coreBranch": "master",
+    }
+    monkeypatch.setattr(
+        session_activity,
+        "all_sessions",
+        lambda: [
+            {
+                "session_id": "active_1",
+                "_lineage_root_id": "active_1",
+                "title": "Hermes: Speed up active sessions",
+                "workspace": str(workspace),
+                "source_tag": ops_sessions.OPS_TASK_SOURCE_TAG,
+                "is_streaming": False,
+                "message_count": 2,
+                "created_at": 100,
+                "updated_at": 200,
+                "last_message_at": 200,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        session_activity.ops_sessions.session_sidecars,
+        "_with_parent_lineage_metadata",
+        lambda rows: rows,
+    )
+    monkeypatch.setattr(ops_projects, "_read_projects", lambda: [project])
+    monkeypatch.setattr(
+        session_activity,
+        "_read_raw_ops_runs",
+        lambda: [
+            {
+                "id": "run-1",
+                "sessionId": "active_1",
+                "projectId": "project-1",
+                "taskId": "task-1",
+                "status": "running",
+                "updatedAt": "2026-05-12T12:01:00Z",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        session_activity,
+        "_load_project_tasks_by_id",
+        lambda _project: {"task-1": {"id": "task-1", "text": "Speed up active sessions", "done": False}},
+    )
+    monkeypatch.setattr(
+        ops_sessions,
+        "list_ops_sessions",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("rich session source called")),
+    )
+    monkeypatch.setattr(
+        ops_projects,
+        "list_ops_projects",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("rich project source called")),
+    )
+    monkeypatch.setattr(
+        ops_projects,
+        "read_ops_project_tasks",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("sidecar task source called")),
+    )
+
+    payload = session_activity._lean_activity_source()
+
+    [item] = payload["sessions"]
+    assert item["session_id"] == "active_1"
+    assert item["ops_project_id"] == "project-1"
+    assert item["ops_run"]["id"] == "run-1"
+    assert item["ops_task"]["text"] == "Speed up active sessions"
 
 
 def test_activity_only_ops_sessions_skips_unrelated_project_run_loads(monkeypatch):
@@ -114,8 +191,8 @@ def test_activity_only_ops_sessions_skips_unrelated_project_run_loads(monkeypatc
         "all_sessions",
         lambda: [
             {
-                "session_id": "active-1",
-                "_lineage_root_id": "active-1",
+                "session_id": "active_1",
+                "_lineage_root_id": "active_1",
                 "source_tag": ops_sessions.OPS_TASK_SOURCE_TAG,
                 "is_streaming": False,
                 "updated_at": "2026-05-12T12:00:00Z",
@@ -132,7 +209,7 @@ def test_activity_only_ops_sessions_skips_unrelated_project_run_loads(monkeypatc
                     "done": False,
                     "linkedSessions": [
                         {
-                            "sessionId": "active-1",
+                            "sessionId": "active_1",
                             "runId": "run-1",
                             "updatedAt": "2026-05-12T12:01:00Z",
                         }
@@ -146,7 +223,7 @@ def test_activity_only_ops_sessions_skips_unrelated_project_run_loads(monkeypatc
                 "done": False,
                 "linkedSessions": [
                     {
-                        "sessionId": "old-session",
+                        "sessionId": "old_session",
                         "runId": "run-2",
                         "updatedAt": "2026-05-01T12:01:00Z",
                     }

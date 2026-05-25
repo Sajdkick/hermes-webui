@@ -17,6 +17,7 @@ _PROJECT_DELETE_RE = re.compile(r"^/api/ops/projects/([^/]+)/delete/?$")
 _PROJECT_ENSURE_WORKSPACE_RE = re.compile(r"^/api/ops/projects/([^/]+)/ensure-workspace/?$")
 _PROJECT_TASKS_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/?$")
 _PROJECT_EPICS_RE = re.compile(r"^/api/ops/projects/([^/]+)/epics/?$")
+_PROJECT_EPIC_ENSURE_RE = re.compile(r"^/api/ops/projects/([^/]+)/epics/ensure/?$")
 _PROJECT_EPIC_DELETE_RE = re.compile(r"^/api/ops/projects/([^/]+)/epics/([^/]+)/delete/?$")
 _PROJECT_TASK_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/([^/]+)/?$")
 _PROJECT_TASK_UPDATE_RE = re.compile(r"^/api/ops/projects/([^/]+)/tasks/([^/]+)/update/?$")
@@ -80,6 +81,12 @@ def handle_post(handler, parsed, body: dict) -> bool:
         match = _PROJECT_ENSURE_WORKSPACE_RE.match(parsed.path)
         if match:
             j(handler, ops_projects.ensure_ops_project_workspace(match.group(1)))
+            return True
+
+        match = _PROJECT_EPIC_ENSURE_RE.match(parsed.path)
+        if match:
+            result = ops_projects.ensure_ops_project_epic(match.group(1), str(body.get("title") or ""))
+            j(handler, result, status=201 if result.get("created") else 200)
             return True
 
         match = _PROJECT_EPICS_RE.match(parsed.path)

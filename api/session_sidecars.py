@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -77,7 +78,24 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
-def _canonical_session_rank(summary: dict[str, Any] | None) -> tuple[int, int, float, float, str]:
+def _iso_epoch(value: Any) -> float:
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        pass
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _canonical_session_rank(summary: dict[str, Any] | None) -> tuple[int, int, float, float, float, str]:
     """Rank lineage candidates by transcript currency, not sidebar visibility.
 
     Ops task links are durable references to a conversation lineage. A completed
@@ -87,7 +105,7 @@ def _canonical_session_rank(summary: dict[str, Any] | None) -> tuple[int, int, f
     older root/sibling and make the conversation look like it lost messages.
     """
     if not isinstance(summary, dict):
-        return (0, 0, 0.0, 0.0, "")
+        return (0, 0, 0.0, 0.0, 0.0, "")
     session_id = str(summary.get("session_id") or "").strip()
     lineage_tip_id = str(summary.get("_lineage_tip_id") or "").strip()
     continuation_tip = bool(
@@ -97,6 +115,7 @@ def _canonical_session_rank(summary: dict[str, Any] | None) -> tuple[int, int, f
     return (
         1 if continuation_tip else 0,
         _safe_int(summary.get("message_count")),
+        float(summary.get("_sidecar_updated_at_epoch") or 0.0),
         _session_sort_key(summary),
         float(summary.get("updated_at") or 0.0),
         session_id,
@@ -111,7 +130,125 @@ def _session_aliases(summary: dict[str, Any] | None) -> set[str]:
         value = str(summary.get(field) or "").strip()
         if value:
             aliases.add(value)
+    member_ids = summary.get("_lineage_member_ids")
+    if isinstance(member_ids, (list, tuple, set)):
+        aliases.update(str(value).strip() for value in member_ids if str(value or "").strip())
     return aliases
+
+
+def _with_parent_lineage_metadata(summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Backfill root/tip aliases from ``parent_session_id`` chains.
+
+    The sidebar normally gets lineage metadata from the Hermes ``state.db``
+    compression tables. Ops task sidecars must still resolve correctly when
+    that database is unavailable, corrupt, or was not written for older rows.
+    In that degraded mode the WebUI session JSON still carries the direct
+    ``parent_session_id`` links, so derive a transitive lineage group from those
+    links and expose the same aliases the state.db path would have supplied.
+    """
+    copies = [dict(summary) for summary in summaries if isinstance(summary, dict)]
+    by_id = {
+        str(summary.get("session_id") or "").strip(): summary
+        for summary in copies
+        if str(summary.get("session_id") or "").strip()
+    }
+    if not by_id:
+        return copies
+
+    root_cache: dict[str, str] = {}
+
+    def root_for(session_id: str) -> str:
+        key = str(session_id or "").strip()
+        if not key:
+            return ""
+        if key in root_cache:
+            return root_cache[key]
+        seen: set[str] = set()
+        current = key
+        root = key
+        while current and current not in seen:
+            seen.add(current)
+            summary = by_id.get(current)
+            if not summary:
+                break
+            root = current
+            parent = str(summary.get("parent_session_id") or "").strip()
+            if not parent or parent not in by_id:
+                break
+            current = parent
+        for member in seen:
+            root_cache[member] = root
+        return root
+
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for summary in copies:
+        session_id = str(summary.get("session_id") or "").strip()
+        if not session_id:
+            continue
+        parent_root = root_for(session_id)
+        existing_root = str(summary.get("_lineage_root_id") or "").strip()
+        root = parent_root if parent_root and (parent_root != session_id or not existing_root) else existing_root or parent_root
+        if root:
+            groups.setdefault(root, []).append(summary)
+
+    for root, members in groups.items():
+        if not members:
+            continue
+        tip = max(members, key=_canonical_session_rank)
+        tip_id = str(tip.get("_lineage_tip_id") or tip.get("session_id") or "").strip()
+        member_ids = sorted(
+            str(member.get("session_id") or "").strip()
+            for member in members
+            if str(member.get("session_id") or "").strip()
+        )
+        for member in members:
+            member.setdefault("_lineage_root_id", root)
+            if tip_id:
+                member.setdefault("_lineage_tip_id", tip_id)
+            existing_member_ids = member.get("_lineage_member_ids")
+            if not isinstance(existing_member_ids, list):
+                member["_lineage_member_ids"] = member_ids
+    return copies
+
+
+def _sidecar_group_session_summaries(session_id: str) -> list[dict[str, Any]]:
+    """Load candidate summaries linked to the same Ops task/run sidecar group."""
+    key = _validate_session_id(session_id)
+    payload = _read_json(_sidecar_path(key)) or {}
+    if not isinstance(payload, dict):
+        return []
+    project_key = str(payload.get("projectId") or "").strip()
+    task_key = str(payload.get("taskId") or "").strip()
+    run_key = str(payload.get("runId") or "").strip()
+    if not project_key or not task_key:
+        return []
+
+    try:
+        records = list_project_linkage_records(project_key)
+    except Exception:
+        return []
+
+    summaries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("taskId") or "").strip() != task_key:
+            continue
+        record_run = str(record.get("runId") or "").strip()
+        if run_key and record_run and record_run != run_key:
+            continue
+        candidate_id = str(record.get("sessionId") or "").strip()
+        if not candidate_id or candidate_id in seen:
+            continue
+        seen.add(candidate_id)
+        summary = _session_summary(candidate_id)
+        if summary:
+            linked_epoch = _iso_epoch(record.get("updatedAt") or record.get("linkedAt"))
+            if linked_epoch:
+                summary["_sidecar_updated_at_epoch"] = linked_epoch
+            summaries.append(summary)
+    return _with_parent_lineage_metadata(summaries)
 
 
 def resolve_session_summary(session_id: str) -> dict[str, Any] | None:
@@ -123,11 +260,22 @@ def resolve_session_summary(session_id: str) -> dict[str, Any] | None:
         candidates[str(direct.get("session_id") or key)] = direct
 
     try:
-        for session in all_sessions():
+        session_summaries = _with_parent_lineage_metadata(
+            [session for session in all_sessions() if isinstance(session, dict)]
+        )
+        for session in session_summaries:
             if not isinstance(session, dict):
                 continue
             if key not in _session_aliases(session):
                 continue
+            session_key = str(session.get("session_id") or "").strip()
+            if session_key:
+                candidates[session_key] = dict(session)
+    except Exception:
+        pass
+
+    try:
+        for session in _sidecar_group_session_summaries(key):
             session_key = str(session.get("session_id") or "").strip()
             if session_key:
                 candidates[session_key] = dict(session)

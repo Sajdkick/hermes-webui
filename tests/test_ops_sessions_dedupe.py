@@ -135,6 +135,118 @@ def test_sidecar_resolution_prefers_archived_latest_tip_over_visible_old_sibling
     assert summary["session_id"] == "latest_child"
 
 
+def test_sidecar_resolution_derives_lineage_from_parent_chain_without_state_db_metadata(monkeypatch):
+    root = {
+        "session_id": "root",
+        "archived": False,
+        "updated_at": 300,
+        "last_message_at": 30,
+        "message_count": 10,
+    }
+    old_sibling = {
+        "session_id": "old_child",
+        "parent_session_id": "root",
+        "archived": False,
+        "updated_at": 400,
+        "last_message_at": 100,
+        "message_count": 20,
+    }
+    middle = {
+        "session_id": "middle",
+        "parent_session_id": "root",
+        "archived": True,
+        "updated_at": 150,
+        "last_message_at": 150,
+        "message_count": 30,
+    }
+    latest_tip = {
+        "session_id": "latest_child",
+        "parent_session_id": "middle",
+        "archived": True,
+        "updated_at": 200,
+        "last_message_at": 200,
+        "message_count": 40,
+    }
+
+    monkeypatch.setattr(session_sidecars, "_session_summary", lambda sid: root if sid == "root" else None)
+    monkeypatch.setattr(session_sidecars, "all_sessions", lambda: [root, old_sibling, middle, latest_tip])
+
+    root_summary = session_sidecars.resolve_session_summary("root")
+    old_child_summary = session_sidecars.resolve_session_summary("old_child")
+    middle_summary = session_sidecars.resolve_session_summary("middle")
+
+    assert root_summary is not None
+    assert old_child_summary is not None
+    assert middle_summary is not None
+    assert root_summary["session_id"] == "latest_child"
+    assert old_child_summary["session_id"] == "latest_child"
+    assert middle_summary["session_id"] == "latest_child"
+
+
+def test_sidecar_resolution_uses_task_sidecar_group_when_index_lacks_parent_chain(monkeypatch):
+    root = {
+        "session_id": "root",
+        "archived": False,
+        "updated_at": 300,
+        "last_message_at": 30,
+        "message_count": 10,
+    }
+    older_touched_segment = {
+        "session_id": "older_segment",
+        "parent_session_id": "root",
+        "archived": False,
+        "updated_at": 300,
+        "last_message_at": 300,
+        "message_count": 40,
+    }
+    latest_tip = {
+        "session_id": "latest_child",
+        "parent_session_id": "missing_middle",
+        "archived": False,
+        "updated_at": 200,
+        "last_message_at": 200,
+        "message_count": 40,
+    }
+    summaries = {"root": root, "older_segment": older_touched_segment, "latest_child": latest_tip}
+    records = [
+        {
+            "sessionId": "root",
+            "projectId": "project-1",
+            "taskId": "task-1",
+            "runId": "run-1",
+            "updatedAt": "2026-05-21T10:00:00Z",
+        },
+        {
+            "sessionId": "older_segment",
+            "projectId": "project-1",
+            "taskId": "task-1",
+            "runId": "run-1",
+            "updatedAt": "2026-05-21T11:00:00Z",
+        },
+        {
+            "sessionId": "latest_child",
+            "projectId": "project-1",
+            "taskId": "task-1",
+            "runId": "run-1",
+            "updatedAt": "2026-05-21T12:00:00Z",
+        },
+    ]
+
+    monkeypatch.setattr(session_sidecars, "_session_summary", lambda sid: summaries.get(sid))
+    monkeypatch.setattr(session_sidecars, "all_sessions", lambda: [root])
+    monkeypatch.setattr(
+        session_sidecars,
+        "_read_json",
+        lambda _path: {"sessionId": "root", "projectId": "project-1", "taskId": "task-1", "runId": "run-1"},
+    )
+    monkeypatch.setattr(session_sidecars, "list_project_linkage_records", lambda _project_id: records)
+
+    summary = session_sidecars.resolve_session_summary("root")
+
+    assert summary is not None
+    assert summary["session_id"] == "latest_child"
+
+
 def test_find_existing_task_session_allows_archived_tip_for_relaunch(monkeypatch):
     archived_tip = FakeSession(
         session_id="latest_child",
@@ -171,6 +283,96 @@ def test_find_existing_task_session_allows_archived_tip_for_relaunch(monkeypatch
 
     assert existing is not None
     assert existing["session"].session_id == "latest_child"
+
+
+def test_launch_task_session_force_new_skips_existing_task_lookup(monkeypatch, tmp_path):
+    """Fresh Quick Tasks should not scan project-wide linked-session sidecars."""
+    project = {
+        "id": "project-1",
+        "name": "Hermes WebUI",
+        "path": str(tmp_path),
+        "resolvedPath": str(tmp_path),
+        "profile": "hermes-webui",
+    }
+    task = {"id": "task-1", "text": "Run a fresh quick task"}
+    created = {}
+
+    class CreatedSession:
+        session_id = "session-force-new"
+        messages = []
+        active_stream_id = None
+
+        def __init__(self, **kwargs):
+            self.profile = kwargs.get("profile")
+            self.project_id = kwargs.get("project_id")
+            self.workspace = kwargs.get("workspace")
+            self.model = kwargs.get("model")
+            self.model_provider = kwargs.get("model_provider")
+            self.title = ""
+            self.source_tag = None
+            self.source_label = None
+
+        def save(self):
+            self.saved = True
+
+        def compact(self):
+            return {
+                "session_id": self.session_id,
+                "profile": self.profile,
+                "project_id": self.project_id,
+                "source_tag": self.source_tag,
+            }
+
+    def fail_existing_lookup(_project_id, _task_id):
+        raise AssertionError("forceNew task launch should not look up existing linked sessions")
+
+    def fake_new_session(**kwargs):
+        created.update(kwargs)
+        return CreatedSession(**kwargs)
+
+    monkeypatch.setattr(ops_sessions, "_find_existing_task_session", fail_existing_lookup)
+    monkeypatch.setattr(
+        ops_sessions.session_sidecars,
+        "task_linkage_map",
+        lambda _project_id: (_ for _ in ()).throw(AssertionError("task_linkage_map should not be called")),
+    )
+    monkeypatch.setattr(
+        ops_sessions.ops_projects,
+        "get_ops_project_task",
+        lambda project_id, task_id: {"project": project, "task": task},
+    )
+    monkeypatch.setattr(ops_sessions, "new_session", fake_new_session)
+    monkeypatch.setattr(
+        ops_sessions,
+        "_profile_config_defaults",
+        lambda profile: ("project-default-model", "project-provider"),
+    )
+    monkeypatch.setattr(
+        ops_sessions.ops_projects,
+        "update_ops_project_task",
+        lambda project_id, task_id, patch: {"task": {**task, **patch}},
+    )
+    monkeypatch.setattr(ops_sessions.ops_projects, "_now_iso", lambda: "2026-05-17T00:00:00Z")
+    monkeypatch.setattr(
+        ops_sessions.session_sidecars,
+        "set_session_linkage",
+        lambda session_id, project_id, task_id, run_id="": {"sessionId": session_id, "runId": run_id},
+    )
+
+    from api import ops_runs
+
+    monkeypatch.setattr(
+        ops_runs,
+        "create_task_run",
+        lambda project_id, task_id, session_id, title="": {"id": "run-1", "sessionId": session_id},
+    )
+    monkeypatch.setattr(ops_runs, "run_url", lambda run_id: f"/ops/runs/{run_id}")
+
+    result = ops_sessions.launch_task_session("project-1", "task-1", {"forceNew": True})
+
+    assert created["profile"] == "hermes-webui"
+    assert result["session"]["session_id"] == "session-force-new"
+    assert result.get("reused") is not True
 
 
 def test_launch_task_session_uses_project_profile_over_payload(monkeypatch, tmp_path):

@@ -18,6 +18,9 @@
 
 ### Fixed
 
+- Switching back into the main Hermes app from legacy `/ops` shell routes now resolves against the actual app root even when the shell URL ends with `/ops/`, `/ops-phase/`, or session-prefixed trailing-slash variants, so “switch to Hermes” and related home-menu links no longer navigate to invalid nested `index.html` or `recovery` paths.
+- `ctl.sh start`/`restart` now launch the foreground bootstrap under `nohup` with detached stdin, so WebUI daemon restarts survive the launching shell exiting instead of dropping immediately after a successful-looking start.
+- Ops Quick Task and project-detail task dictation now use the same shared Web Speech API-first voice pipeline as the Chat composer, falling back to `/api/transcribe` only through that shared controller instead of maintaining a separate recorder-only Ops path.
 - Approval/clarify side-channel streams now close on page unload, idle transitions, and stale clarify health checks so completed sessions do not keep reconnecting dormant SSE connections through the Cloud Terminal proxy.
 - Optional Hermes Agent `state.db` reads now detect invalid SQLite headers before opening the DB and throttle warnings, so a corrupt global DB no longer causes repeated sidebar/gateway polling failures.
 - Quick Task create-and-run now sends the generated first task prompt before opening/navigating to the linked inspect session, preventing standalone Ops launches from creating an empty task session with no initial message.

@@ -47,6 +47,7 @@
     const windowRef=ctx&&ctx.windowRef;
     const documentRef=ctx&&ctx.documentRef;
     const URLRef=ctx&&ctx.URLRef;
+    const VoiceInputRef=ctx&&ctx.voiceInput;
     const MediaRecorderRef=ctx&&ctx.MediaRecorderRef;
     const FileRef=ctx&&ctx.FileRef;
     const showPromptDialog=ctx&&ctx.showPromptDialog;
@@ -112,69 +113,6 @@
       return name;
     }
 
-    function appendTranscriptText(current,next){
-      const trimmed=String(next||'').trim();
-      if(!trimmed)return String(current||'').trim();
-      const existing=String(current||'').trim();
-      return existing?`${existing} ${trimmed}`:trimmed;
-    }
-
-    function normalizeDictationLanguage(tag){
-      if(typeof tag!=='string')return '';
-      const trimmed=tag.trim();
-      if(!trimmed)return '';
-      const primary=trimmed.toLowerCase().split(/[-_]/)[0];
-      return primary.length>=2&&primary.length<=3?primary:'';
-    }
-
-    function getPreferredAudioMimeType(){
-      if(typeof MediaRecorderRef==='undefined')return '';
-      const candidates=['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/ogg'];
-      return candidates.find(type=>MediaRecorderRef.isTypeSupported&&MediaRecorderRef.isTypeSupported(type))||'';
-    }
-
-    function getDictationLanguage(){
-      const language=Array.isArray(navigatorRef&&navigatorRef.languages)&&navigatorRef.languages.length
-        ? navigatorRef.languages[0]
-        : navigatorRef&&navigatorRef.language;
-      return normalizeDictationLanguage(language);
-    }
-
-    function getDictationPrompt(language){
-      if(language&&language!=='en')return '';
-      return taskDictationPrompt;
-    }
-
-    function getDictationAudioConstraints(){
-      const supported=navigatorRef&&navigatorRef.mediaDevices&&typeof navigatorRef.mediaDevices.getSupportedConstraints==='function'
-        ? navigatorRef.mediaDevices.getSupportedConstraints()
-        : {};
-      const audio={};
-      if(supported.echoCancellation)audio.echoCancellation=true;
-      if(supported.noiseSuppression)audio.noiseSuppression=true;
-      if(supported.autoGainControl)audio.autoGainControl=true;
-      if(supported.channelCount)audio.channelCount={ideal:1};
-      if(supported.sampleRate)audio.sampleRate={ideal:48000};
-      if(supported.sampleSize)audio.sampleSize={ideal:16};
-      return Object.keys(audio).length?audio:true;
-    }
-
-    function createDictationRecorder(stream,mimeType){
-      const options={};
-      if(mimeType)options.mimeType=mimeType;
-      if(Number.isFinite(taskDictationAudioBitsPerSecond))options.audioBitsPerSecond=taskDictationAudioBitsPerSecond;
-      try{
-        return new MediaRecorderRef(stream,Object.keys(options).length?options:undefined);
-      }catch(error){
-        if('audioBitsPerSecond' in options){
-          const fallback={...options};
-          delete fallback.audioBitsPerSecond;
-          return new MediaRecorderRef(stream,Object.keys(fallback).length?fallback:undefined);
-        }
-        throw error;
-      }
-    }
-
     function quickTaskImageId(){
       return `quick-task-image-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
     }
@@ -226,6 +164,22 @@
       OPS.quickTaskImages=next;
     }
 
+    let quickTaskDictationController=null;
+
+    function quickTaskVoiceSupported(){
+      return !!(VoiceInputRef&&typeof VoiceInputRef.isSupported==='function'&&VoiceInputRef.isSupported({
+        windowRef,
+        navigatorRef,
+        MediaRecorderRef,
+      }));
+    }
+
+    function refreshQuickTaskDictationSupport(){
+      const supported=quickTaskVoiceSupported();
+      OPS.quickTaskDictationSupported=supported;
+      return supported;
+    }
+
     function setQuickTaskMicStatus(message,type){
       OPS.quickTaskDictationStatus=String(message||'').trim();
       OPS.quickTaskDictationStatusKind=type==='error'||type==='success'?type:'info';
@@ -244,13 +198,14 @@
 
     function quickTaskCanDictate(){
       return !!(
-        OPS.quickTaskDictationSupported
+        refreshQuickTaskDictationSupport()
         && normalizeQuickTaskProjectSelection()
         && !OPS.quickTaskBusy
       );
     }
 
     function quickTaskMicButtonState(){
+      refreshQuickTaskDictationSupport();
       let label='Record';
       let title='Start recording';
       if(OPS.quickTaskDictationBusy){
@@ -272,151 +227,100 @@
       };
     }
 
-    function cleanupQuickTaskDictationStream(){
-      const stream=OPS.quickTaskDictationStream;
-      if(!stream||typeof stream.getTracks!=='function')return;
-      stream.getTracks().forEach(track=>{
-        try{track.stop();}catch(_){}
+    function syncQuickTaskDictationText(value){
+      OPS.quickTaskText=String(value||'');
+      const field=root()&&root().querySelector('[data-ops-quick-field="text"]');
+      if(field&&field.value!==OPS.quickTaskText)field.value=OPS.quickTaskText;
+    }
+
+    function renderQuickTaskDictationState(){
+      if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home'){
+        renderCurrentOpsView();
+        restoreQuickTaskFocus();
+      }
+    }
+
+    function ensureQuickTaskDictationController(){
+      if(quickTaskDictationController)return quickTaskDictationController;
+      if(!VoiceInputRef||typeof VoiceInputRef.createController!=='function')return null;
+      quickTaskDictationController=VoiceInputRef.createController({
+        windowRef,
+        navigatorRef,
+        MediaRecorderRef,
+        getText:()=>OPS.quickTaskText,
+        setText:value=>syncQuickTaskDictationText(value),
+        canStart:()=>quickTaskCanDictate(),
+        canStartMessage:'Select a project before using quick task dictation.',
+        onActiveChange:on=>{
+          OPS.quickTaskDictationActive=!!on;
+          renderQuickTaskDictationState();
+        },
+        onBusyChange:on=>{
+          OPS.quickTaskDictationBusy=!!on;
+          renderQuickTaskDictationState();
+        },
+        onStatus:(message,type)=>{
+          setQuickTaskMicStatus(message,type);
+          renderQuickTaskDictationState();
+        },
+        onCommit:(transcript)=>{
+          if(String(transcript||'').trim())setQuickTaskMicStatus('Transcription added.','success');
+          renderQuickTaskDictationState();
+        },
+        onNoSpeech:()=>{
+          setQuickTaskMicStatus('No speech detected.','error');
+          renderQuickTaskDictationState();
+        },
+        messages:{
+          requesting:'Requesting microphone access...',
+          listening:'Listening...',
+          transcribing:'Transcribing...',
+          micDenied:'Microphone access was denied.',
+          micNetwork:'Unable to access microphone.',
+          noSpeech:'No speech detected.',
+          noAudio:'No audio captured.',
+          unsupported:'Voice dictation is not supported in this browser.',
+          transcriptionFailed:'Unable to transcribe audio.',
+        },
       });
-      OPS.quickTaskDictationStream=null;
+      return quickTaskDictationController;
     }
 
     function stopQuickTaskDictation(options){
       const settings=options||{};
-      if(settings.discard)OPS.quickTaskDictationDiscard=true;
-      OPS.quickTaskDictationActive=false;
-      const recorder=OPS.quickTaskDictationRecorder;
-      if(recorder&&recorder.state!=='inactive'){
-        try{
-          recorder.stop();
-          return;
-        }catch(_){}
+      const controller=ensureQuickTaskDictationController();
+      if(controller){
+        controller.stop(settings);
+        if(settings.discard&&settings.updateStatus!==false){
+          setQuickTaskMicStatus('Dictation canceled.','info');
+          renderQuickTaskDictationState();
+        }
+        return;
       }
-      OPS.quickTaskDictationRecorder=null;
-      OPS.quickTaskDictationChunks=[];
-      OPS.quickTaskDictationDiscard=false;
-      cleanupQuickTaskDictationStream();
+      OPS.quickTaskDictationActive=false;
+      OPS.quickTaskDictationBusy=false;
       if(settings.updateStatus!==false){
         setQuickTaskMicStatus(settings.discard?'Dictation canceled.':'Recording stopped.',settings.discard?'info':'success');
       }
-      renderCurrentOpsView();
-    }
-
-    async function transcribeQuickTaskAudio(blob){
-      if(!blob||!blob.size)return;
-      OPS.quickTaskDictationBusy=true;
-      setQuickTaskMicStatus('Transcribing with OpenAI...','info');
-      renderCurrentOpsView();
-      try{
-        const mimeType=String(blob.type||'audio/webm').trim()||'audio/webm';
-        const extension=mimeType.includes('ogg')?'ogg':'webm';
-        const file=FileRef
-          ? new FileRef([blob],`quick-task-dictation.${extension}`,{type:mimeType})
-          : blob;
-        const data=await AgentBridgeRef.sessions.transcribeAudio(file,{filename:file&&file.name?file.name:`quick-task-dictation.${extension}`});
-        const transcript=String(data.transcript||data.text||'').trim();
-        if(!transcript){
-          setQuickTaskMicStatus('No speech detected.','error');
-          return;
-        }
-        OPS.quickTaskText=appendTranscriptText(OPS.quickTaskText,transcript);
-        setQuickTaskMicStatus('Transcription added.','success');
-        renderCurrentOpsView();
-        restoreQuickTaskFocus();
-      }catch(error){
-        setQuickTaskMicStatus(error&&error.message?error.message:'Unable to transcribe audio.','error');
-      }finally{
-        OPS.quickTaskDictationBusy=false;
-        renderCurrentOpsView();
-      }
-    }
-
-    function handleQuickTaskDictationStop(recorder){
-      const chunks=Array.isArray(OPS.quickTaskDictationChunks)?OPS.quickTaskDictationChunks.slice():[];
-      const mimeType=String(recorder&&recorder.mimeType||'audio/webm').trim()||'audio/webm';
-      OPS.quickTaskDictationRecorder=null;
-      OPS.quickTaskDictationChunks=[];
-      OPS.quickTaskDictationActive=false;
-      cleanupQuickTaskDictationStream();
-      if(OPS.quickTaskDictationDiscard){
-        OPS.quickTaskDictationDiscard=false;
-        setQuickTaskMicStatus('','info');
-        renderCurrentOpsView();
-        return;
-      }
-      if(!chunks.length){
-        setQuickTaskMicStatus('No audio captured.','error');
-        renderCurrentOpsView();
-        return;
-      }
-      renderCurrentOpsView();
-      void transcribeQuickTaskAudio(new Blob(chunks,{type:mimeType}));
+      renderQuickTaskDictationState();
     }
 
     async function startQuickTaskDictation(){
       if(OPS.quickTaskDictationActive||OPS.quickTaskDictationBusy)return;
-      if(!OPS.quickTaskDictationSupported){
-        setQuickTaskMicStatus('Voice dictation is not supported in this browser.','error');
-        renderCurrentOpsView();
-        return;
-      }
       if(!quickTaskCanDictate()){
-        setQuickTaskMicStatus('Select a project before using quick task dictation.','error');
-        renderCurrentOpsView();
+        setQuickTaskMicStatus(refreshQuickTaskDictationSupport()?'Select a project before using quick task dictation.':'Voice dictation is not supported in this browser.','error');
+        renderQuickTaskDictationState();
         return;
       }
       OPS.quickTaskDictationDiscard=false;
-      OPS.quickTaskDictationBaseText=String(OPS.quickTaskText||'').trim();
-      OPS.quickTaskDictationChunks=[];
-      setQuickTaskMicStatus('Requesting microphone access...','info');
-      renderCurrentOpsView();
-      let stream=null;
-      try{
-        stream=await navigatorRef.mediaDevices.getUserMedia({audio:getDictationAudioConstraints()});
-      }catch(error){
-        const errorName=String(error&&error.name||'').trim();
-        const message=errorName==='NotAllowedError'
-          ? 'Microphone access was denied.'
-          : errorName==='NotFoundError'
-            ? 'No microphone found.'
-            : 'Unable to access microphone.';
-        setQuickTaskMicStatus(message,'error');
-        renderCurrentOpsView();
+      setQuickTaskMicStatus('','info');
+      const controller=ensureQuickTaskDictationController();
+      if(!controller){
+        setQuickTaskMicStatus('Voice dictation is not supported in this browser.','error');
+        renderQuickTaskDictationState();
         return;
       }
-      OPS.quickTaskDictationStream=stream;
-      let recorder=null;
-      try{
-        recorder=createDictationRecorder(stream,getPreferredAudioMimeType());
-      }catch(error){
-        OPS.quickTaskDictationSupported=false;
-        cleanupQuickTaskDictationStream();
-        setQuickTaskMicStatus('Recording is not supported in this browser.','error');
-        renderCurrentOpsView();
-        return;
-      }
-      OPS.quickTaskDictationRecorder=recorder;
-      recorder.ondataavailable=event=>{
-        if(event.data&&event.data.size>0)OPS.quickTaskDictationChunks.push(event.data);
-      };
-      recorder.onstart=()=>{
-        OPS.quickTaskDictationActive=true;
-        setQuickTaskMicStatus('Recording... Speak clearly and keep close to the mic.','info');
-        renderCurrentOpsView();
-      };
-      recorder.onstop=()=>handleQuickTaskDictationStop(recorder);
-      recorder.onerror=()=>{
-        setQuickTaskMicStatus('Recording error. Try again.','error');
-        stopQuickTaskDictation({updateStatus:false,discard:true});
-      };
-      try{
-        recorder.start();
-      }catch(error){
-        OPS.quickTaskDictationRecorder=null;
-        cleanupQuickTaskDictationStream();
-        setQuickTaskMicStatus('Unable to start recording.','error');
-        renderCurrentOpsView();
-      }
+      await controller.start();
     }
 
     function sessionActivityEntries(){
@@ -797,9 +701,31 @@
       return entries[0]||null;
     }
 
+    function shellRouteRoot(){
+      const base=(windowRef&&windowRef.location&&windowRef.location.href)
+        || (documentRef&&documentRef.baseURI)
+        || (typeof location!=='undefined' && location.href)
+        || '';
+      if(!base)return '';
+      try{
+        const resolved=new URL(base);
+        let pathname=String(resolved.pathname||'/');
+        pathname=pathname.replace(/\/session\/[^/]+\/(?:ops|ops-phase)\/?$/,'/');
+        pathname=pathname.replace(/\/(?:ops|ops-phase)\/?$/,'/');
+        if(!pathname.endsWith('/'))pathname+='/';
+        resolved.pathname=pathname;
+        resolved.search='';
+        resolved.hash='';
+        return resolved.href;
+      }catch(_error){
+        return base;
+      }
+    }
+
     function shellUrl(path){
       const rel=String(path||'').trim();
-      const base=(documentRef&&documentRef.baseURI)
+      const base=shellRouteRoot()
+        || (documentRef&&documentRef.baseURI)
         || (windowRef&&windowRef.location&&windowRef.location.href)
         || (typeof location!=='undefined' && location.href)
         || '';

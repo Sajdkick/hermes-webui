@@ -71,6 +71,19 @@ _find_python() {
   fi
 }
 
+_find_launcher_python() {
+  if command -v python3 >/dev/null 2>&1; then
+    command -v python3
+  elif command -v python >/dev/null 2>&1; then
+    command -v python
+  elif [[ -n "${HERMES_WEBUI_PYTHON:-}" ]]; then
+    printf '%s\n' "${HERMES_WEBUI_PYTHON}"
+  else
+    echo "[ctl] Python 3 is required to launch the Hermes WebUI daemon" >&2
+    return 1
+  fi
+}
+
 _parse_launch_binding() {
   CTL_HOST="${HERMES_WEBUI_HOST:-127.0.0.1}"
   CTL_PORT="${HERMES_WEBUI_PORT:-8787}"
@@ -214,14 +227,56 @@ start_cmd() {
   fi
   _clear_stale_pid >/dev/null 2>&1 || true
 
-  local python_exe pid
+  local python_exe launcher_python pid
   python_exe="$(_find_python)"
+  launcher_python="$(_find_launcher_python)"
   : >> "${LOG_FILE}"
-  (
-    cd "${REPO_ROOT}"
-    exec "${python_exe}" "${REPO_ROOT}/bootstrap.py" --no-browser --foreground --host "${CTL_HOST}" "${CTL_PORT}" ${CTL_BOOTSTRAP_ARGS[@]+"${CTL_BOOTSTRAP_ARGS[@]}"}
-  ) >> "${LOG_FILE}" 2>&1 &
-  pid=$!
+  pid="$(
+    cd "${REPO_ROOT}" &&
+    "${launcher_python}" - "${python_exe}" "${REPO_ROOT}" "${LOG_FILE}" "${CTL_HOST}" "${CTL_PORT}" ${CTL_BOOTSTRAP_ARGS[@]+"${CTL_BOOTSTRAP_ARGS[@]}"} <<'PY'
+import os
+import shutil
+import signal
+import subprocess
+import sys
+
+python_exe = sys.argv[1]
+repo_root = sys.argv[2]
+log_file = sys.argv[3]
+host = sys.argv[4]
+port = sys.argv[5]
+extra_args = sys.argv[6:]
+
+cmd = [
+    python_exe,
+    os.path.join(repo_root, "bootstrap.py"),
+    "--no-browser",
+    "--foreground",
+    "--host",
+    host,
+    port,
+    *extra_args,
+]
+nohup_exe = shutil.which("nohup")
+spawn_cmd = [nohup_exe, *cmd] if nohup_exe else cmd
+with open(log_file, "ab", buffering=0) as log_handle:
+    proc = subprocess.Popen(
+        spawn_cmd,
+        cwd=repo_root,
+        stdin=subprocess.DEVNULL,
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+        preexec_fn=(lambda: signal.signal(signal.SIGHUP, signal.SIG_IGN)),
+    )
+print(proc.pid)
+PY
+  )"
+  [[ "${pid}" =~ ^[0-9]+$ ]] || {
+    echo "[ctl] Failed to launch Hermes WebUI daemon" >&2
+    return 1
+  }
 
   printf '%s\n' "${pid}" > "${PID_FILE}"
   _write_state "${pid}" "${CTL_HOST}" "${CTL_PORT}" "${python_exe}"

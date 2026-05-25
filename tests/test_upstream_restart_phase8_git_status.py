@@ -295,6 +295,133 @@ def test_phase8_ops_ui_renders_git_status_panel():
     assert completed.stdout.strip() == "ok"
 
 
+def test_phase8_git_status_refresh_does_not_disable_cached_push_action():
+    script = textwrap.dedent(
+        """
+        (() => {
+        const fs = require('fs');
+        const vm = require('vm');
+        const source = fs.readFileSync('static/ops-legacy-git.js', 'utf8');
+        const context = {
+          console,
+          window: { HermesOpsModules: {} },
+          setTimeout,
+          clearTimeout,
+        };
+        vm.createContext(context);
+        vm.runInContext(source, context);
+
+        const OPS = {
+          gitBusyByProject: { 'project-1': 'status' },
+          gitPlansByProject: {},
+          gitOperationsByProject: {},
+          gitStatusByProject: {
+            'project-1': {
+              projectId: 'project-1',
+              coreBranch: 'Summons',
+              branch: 'Summons',
+              upstream: 'origin/Summons',
+              ahead: 0,
+              behind: 0,
+              dirty: true,
+              conflicts: 0,
+              counts: { files: 16, untracked: 7, conflicts: 0 },
+            },
+          },
+        };
+
+        const git = context.window.HermesOpsModules.git.bindDashboard({
+          OPS,
+          api: async () => ({}),
+          projectUrl: (projectId, suffix) => `/api/ops/projects/${projectId}${suffix}`,
+          renderCurrentOpsView: () => {},
+          showToast: () => {},
+          esc: (value) => String(value == null ? '' : value),
+          svg: { refresh: '', git: '', check: '' },
+        });
+
+        const html = git.renderProjectGitQuickAction({ id: 'project-1', coreBranch: 'Summons' });
+        const button = html.match(/<button[^>]*data-ops-action="git-push-execute"[^>]*>/);
+        if (!button) throw new Error('Push action button did not render.');
+        if (button[0].includes('disabled')) throw new Error('Background status refresh disabled the push action.');
+        if (!button[0].includes('ops-btn primary')) throw new Error('Push action was not rendered as primary/enabled.');
+        if (!html.includes('Needs push') || !html.includes('origin/Summons')) throw new Error('Needs-push badge did not render.');
+        console.log('ok');
+        })();
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_phase8_git_operation_busy_disables_cached_push_action_with_progress_label():
+    script = textwrap.dedent(
+        """
+        (() => {
+        const fs = require('fs');
+        const vm = require('vm');
+        const source = fs.readFileSync('static/ops-legacy-git.js', 'utf8');
+        const context = {
+          console,
+          window: { HermesOpsModules: {} },
+          setTimeout,
+          clearTimeout,
+        };
+        vm.createContext(context);
+        vm.runInContext(source, context);
+
+        const OPS = {
+          gitBusyByProject: { 'project-1': 'push' },
+          gitPlansByProject: {},
+          gitOperationsByProject: {},
+          gitStatusByProject: {
+            'project-1': {
+              projectId: 'project-1',
+              coreBranch: 'Summons',
+              branch: 'Summons',
+              upstream: 'origin/Summons',
+              ahead: 0,
+              behind: 0,
+              dirty: true,
+              conflicts: 0,
+              counts: { files: 16, untracked: 7, conflicts: 0 },
+            },
+          },
+        };
+
+        const git = context.window.HermesOpsModules.git.bindDashboard({
+          OPS,
+          api: async () => ({}),
+          projectUrl: (projectId, suffix) => `/api/ops/projects/${projectId}${suffix}`,
+          renderCurrentOpsView: () => {},
+          showToast: () => {},
+          esc: (value) => String(value == null ? '' : value),
+          svg: { refresh: '', git: '', check: '' },
+        });
+
+        const html = git.renderProjectGitQuickAction({ id: 'project-1', coreBranch: 'Summons' });
+        const button = html.match(/<button[^>]*data-ops-action="git-push-execute"[^>]*>/);
+        if (!button) throw new Error('Push action button did not render.');
+        if (!button[0].includes('disabled')) throw new Error('Active push operation did not disable the push action.');
+        if (!html.includes('Pushing...')) throw new Error('Active push operation did not show progress label.');
+        console.log('ok');
+        })();
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
 def test_phase8_push_refreshes_projects_and_detail_after_task_promotion():
     script = textwrap.dedent(
         """
@@ -325,6 +452,9 @@ def test_phase8_push_refreshes_projects_and_detail_after_task_promotion():
         const git = context.window.HermesOpsModules.git.bindDashboard({
           OPS,
           api: async (path, options) => {
+            if (OPS.gitBusyByProject['project-1'] !== 'push') {
+              throw new Error('Push operation did not set push-specific busy mode.');
+            }
             apiCalls.push({ path, body: JSON.parse(options.body || '{}') });
             return {
               operation: {

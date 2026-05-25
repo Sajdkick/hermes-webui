@@ -1,9 +1,10 @@
 """
-Sprint 20 Tests: Voice input (mic button) via Web Speech API.
+Sprint 20 Tests: Voice input (mic button) via the shared transcription pipeline.
 
 These tests verify the static assets contain the correct HTML structure,
-CSS rules, and JS logic for the mic feature — all of which runs purely in
-the browser with no server-side component.
+CSS rules, and JS logic for the mic feature. Chat and Ops should share the
+same Web Speech API-first controller with a MediaRecorder `/api/transcribe`
+fallback instead of maintaining divergent browser-side pipelines.
 """
 import re
 import urllib.request
@@ -18,19 +19,26 @@ def get_text(path):
         return r.read().decode(), r.status
 
 
+def get_voice_pipeline_js():
+    """Return the Chat mic binder plus the shared voice-input pipeline it delegates to."""
+    boot_js, _ = get_text("/static/boot.js")
+    voice_js, _ = get_text("/static/voice-input.js")
+    return boot_js + "\n" + voice_js
+
+
 # ── index.html ────────────────────────────────────────────────────────────
 
 
 def test_mic_button_present_in_html():
     """index.html must contain the mic button with id='btnMic'."""
-    html, status = get_text("/")
+    html, status = get_text("/index.html")
     assert status == 200
     assert 'id="btnMic"' in html
 
 
 def test_mic_button_has_mic_btn_class():
     """btnMic must carry the mic-btn CSS class for styling hooks."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     # Tolerate additional utility classes (e.g. has-tooltip from #1775).
     import re
     assert re.search(r'class="[^"]*\bicon-btn\b[^"]*\bmic-btn\b[^"]*"', html), \
@@ -39,7 +47,7 @@ def test_mic_button_has_mic_btn_class():
 
 def test_mic_button_hidden_by_default():
     """btnMic starts hidden (display:none) — JS shows it only if supported."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     # The button element should have display:none in its style attribute
     assert 'id="btnMic"' in html
     btn_match = re.search(r'id="btnMic"[^>]*>', html)
@@ -49,7 +57,7 @@ def test_mic_button_hidden_by_default():
 
 def test_mic_button_has_title():
     """btnMic should have a descriptive title for accessibility."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     btn_match = re.search(r'id="btnMic"[^>]*>', html)
     assert btn_match
     assert 'title=' in btn_match.group(0)
@@ -57,13 +65,13 @@ def test_mic_button_has_title():
 
 def test_mic_status_div_present():
     """index.html must contain the #micStatus listening indicator."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     assert 'id="micStatus"' in html
 
 
 def test_mic_status_hidden_by_default():
     """#micStatus starts hidden — only shown during active recording."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     status_match = re.search(r'id="micStatus"[^>]*>', html)
     assert status_match, "#micStatus element not found"
     assert 'display:none' in status_match.group(0)
@@ -71,7 +79,7 @@ def test_mic_status_hidden_by_default():
 
 def test_mic_status_has_mic_dot():
     """#micStatus must contain a .mic-dot element for the pulse animation."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     # mic-dot should appear after micStatus
     idx_status = html.find('id="micStatus"')
     idx_dot = html.find('mic-dot', idx_status)
@@ -81,13 +89,13 @@ def test_mic_status_has_mic_dot():
 
 def test_mic_status_has_listening_text():
     """#micStatus should display a 'Listening' label."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     assert 'Listening' in html
 
 
 def test_mic_button_svg_microphone_shape():
     """btnMic SVG must include the rect (mic body) and path (mic arc)."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     # Find mic button section
     btn_start = html.find('id="btnMic"')
     btn_end = html.find('</button>', btn_start) + len('</button>')
@@ -99,7 +107,7 @@ def test_mic_button_svg_microphone_shape():
 
 def test_mic_button_inside_composer_left():
     """btnMic must be inside .composer-left, next to the attach button."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     composer_left_start = html.find('class="composer-left"')
     composer_left_end = html.find('</div>', composer_left_start)
     section = html[composer_left_start:composer_left_end]
@@ -189,16 +197,71 @@ def test_boot_js_serves_ok():
     assert status == 200
 
 
+def test_voice_input_js_serves_ok():
+    """voice-input.js must be served successfully as the shared mic pipeline."""
+    _, status = get_text("/static/voice-input.js")
+    assert status == 200
+
+
+def test_chat_loads_shared_voice_pipeline_before_boot():
+    """Chat shell must load the shared voice pipeline before boot binds btnMic."""
+    html, _ = get_text("/index.html")
+    voice_idx = html.find('static/voice-input.js')
+    boot_idx = html.find('static/boot.js')
+    assert voice_idx != -1
+    assert boot_idx != -1
+    assert voice_idx < boot_idx
+
+
+def test_ops_loads_shared_voice_pipeline_before_dashboard():
+    """Ops shell must load the same shared voice pipeline before dashboard modules bind dictation."""
+    html_path = pathlib.Path(__file__).parent.parent.joinpath("static/ops-legacy.html")
+    html = html_path.read_text(encoding="utf-8")
+    voice_idx = html.find('static/voice-input.js')
+    dashboard_idx = html.find('static/ops-legacy-dashboard.js')
+    assert voice_idx != -1
+    assert dashboard_idx != -1
+    assert voice_idx < dashboard_idx
+
+
+def test_ops_dashboard_passes_shared_voice_pipeline_to_modules():
+    """Ops dashboard context must pass HermesVoiceInput into both dictation modules."""
+    dashboard_js = pathlib.Path(__file__).parent.parent.joinpath("static/ops-legacy-dashboard.js").read_text(encoding="utf-8")
+    assert "window.HermesVoiceInput" in dashboard_js
+    assert dashboard_js.count("voiceInput:VOICE_INPUT") >= 2
+    assert "taskFormDictationSupported:!!(VOICE_INPUT" in dashboard_js
+    assert "quickTaskDictationSupported:!!(VOICE_INPUT" in dashboard_js
+
+
+def test_ops_task_dictation_uses_shared_voice_controller():
+    """Ops Quick Task and project task forms must use the shared voice controller, not a private transcribe bridge."""
+    root = pathlib.Path(__file__).parent.parent
+    home_js = root.joinpath("static/ops-legacy-home.js").read_text(encoding="utf-8")
+    project_js = root.joinpath("static/ops-legacy-project-detail.js").read_text(encoding="utf-8")
+    for js in (home_js, project_js):
+        assert "VoiceInputRef.createController" in js
+        assert "AgentBridgeRef.sessions.transcribeAudio" not in js
+        assert "function transcribeAudio" not in js
+
+
+def test_ops_quick_task_image_helpers_still_defined():
+    """Ops home module binding must keep Quick Task image helpers used by dashboard exports/actions."""
+    home_js = pathlib.Path(__file__).parent.parent.joinpath("static/ops-legacy-home.js").read_text(encoding="utf-8")
+    for helper in ("clearQuickTaskImages", "addQuickTaskImages", "removeQuickTaskImage"):
+        assert f"function {helper}" in home_js
+        assert helper in home_js[home_js.find("return {"):]
+
+
 def test_boot_js_speech_recognition_check():
     """boot.js must check for SpeechRecognition (with webkit fallback)."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert 'SpeechRecognition' in js
     assert 'webkitSpeechRecognition' in js
 
 
 def test_boot_js_recognition_config():
     """boot.js must configure recognition.continuous, interimResults, and lang."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert 'recognition.continuous' in js
     assert 'recognition.interimResults' in js
     assert 'recognition.lang' in js
@@ -206,19 +269,19 @@ def test_boot_js_recognition_config():
 
 def test_boot_js_recognition_not_continuous():
     """recognition.continuous must be false (auto-stop after silence)."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert 'recognition.continuous=false' in js or 'recognition.continuous = false' in js
 
 
 def test_boot_js_recognition_interim_results():
     """recognition.interimResults must be true (live transcription preview)."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert 'recognition.interimResults=true' in js or 'recognition.interimResults = true' in js
 
 
 def test_boot_js_recognition_lang_en():
     """recognition.lang must be set (static en-US or dynamic via _locale._speech)."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     # Accept either the old static value or the new locale-driven assignment
     assert (
         "recognition.lang='en-US'" in js
@@ -229,62 +292,62 @@ def test_boot_js_recognition_lang_en():
 
 def test_boot_js_onresult_handler():
     """boot.js must define recognition.onresult to handle transcription."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert 'recognition.onresult' in js
 
 
 def test_boot_js_onend_handler():
     """boot.js must define recognition.onend to reset state when recording stops."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert 'recognition.onend' in js
 
 
 def test_boot_js_onerror_handler():
     """boot.js must define recognition.onerror for graceful error handling."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert 'recognition.onerror' in js
 
 
 def test_boot_js_not_allowed_error_message():
     """onerror must handle 'not-allowed' with a user-friendly message."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert 'not-allowed' in js
     assert 'permission' in js.lower() or 'denied' in js.lower() or 'access' in js.lower()
 
 
 def test_boot_js_no_speech_error_message():
     """onerror must handle 'no-speech' with a user-friendly message."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert 'no-speech' in js
 
 
 def test_boot_js_network_error_message():
     """onerror must handle 'network' error."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert "'network'" in js or '"network"' in js
 
 
 def test_boot_js_mic_active_flag():
     """boot.js must track recording state via _micActive flag."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert '_micActive' in js
 
 
 def test_boot_js_mic_recording_class_toggle():
     """boot.js must toggle 'recording' CSS class on the mic button."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert "'recording'" in js or '"recording"' in js
 
 
 def test_boot_js_mic_status_toggle():
     """boot.js must show/hide #micStatus during recording."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert 'micStatus' in js
 
 
 def test_boot_js_send_stops_mic():
     """btnSend primary action path must stop mic before sending."""
-    boot_js, _ = get_text("/static/boot.js")
+    boot_js = get_voice_pipeline_js()
     ui_js, _ = get_text("/static/ui.js")
     send_onclick_idx = boot_js.find("$('btnSend').onclick")
     assert send_onclick_idx != -1
@@ -297,34 +360,35 @@ def test_boot_js_send_stops_mic():
 
 
 def test_boot_js_btn_mic_onclick():
-    """boot.js must attach an onclick handler to btnMic."""
-    js, _ = get_text("/static/boot.js")
-    assert 'btn.onclick' in js or "btnMic.onclick" in js or "$('btnMic').onclick" in js
+    """The shared voice controller must attach an onclick handler for the mic button."""
+    js = get_voice_pipeline_js()
+    assert 'HermesVoiceInput' in js
+    assert 'button.onclick' in js
 
 
 def test_boot_js_recognition_start():
     """boot.js must call recognition.start() to begin recording."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert 'recognition.start()' in js
 
 
 def test_boot_js_recognition_stop():
     """boot.js must call recognition.stop() to end recording."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert 'recognition.stop()' in js
 
 
 def test_boot_js_iife_guard():
     """Mic logic must be wrapped in an IIFE so it doesn't pollute global scope."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     # IIFE pattern: (function(){...})() or (() => {...})()
     assert '(function(){' in js or '(function () {' in js
 
 
 def test_boot_js_browser_unsupported_guard_uses_fallback_capabilities():
     """boot.js must keep the mic available when either speech recognition OR recorder capture exists."""
-    js, _ = get_text("/static/boot.js")
-    assert 'navigator.mediaDevices' in js
+    js = get_voice_pipeline_js()
+    assert 'navigatorRef.mediaDevices' in js or 'navigator.mediaDevices' in js
     assert 'getUserMedia' in js
     assert 'MediaRecorder' in js
     assert '_canRecordAudio' in js or 'canRecordAudio' in js, \
@@ -333,9 +397,9 @@ def test_boot_js_browser_unsupported_guard_uses_fallback_capabilities():
 
 def test_boot_js_media_recorder_fallback_posts_to_transcribe_api():
     """Desktop fallback must send recorded audio to /api/transcribe for transcription."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert 'api/transcribe' in js
-    assert 'fetch(' in js
+    assert 'fetchRef' in js
 
 
 def test_routes_define_transcribe_endpoint():
@@ -346,19 +410,19 @@ def test_routes_define_transcribe_endpoint():
 
 def test_boot_js_shows_mic_button_when_any_voice_path_is_supported():
     """boot.js must reveal btnMic when speech recognition or recorder fallback is available."""
-    js, _ = get_text("/static/boot.js")
-    assert "btn.style.display=''" in js or 'btn.style.display = ""' in js
+    js = get_voice_pipeline_js()
+    assert "button.style.display=''" in js or 'button.style.display = ""' in js
 
 
 def test_boot_js_show_toast_on_error():
     """boot.js must call showToast() for mic errors."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert 'showToast' in js
 
 
 def test_boot_js_autoresize_called():
     """boot.js must call autoResize() after updating textarea from transcript."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert 'autoResize()' in js
 
 
@@ -366,60 +430,44 @@ def test_boot_js_autoresize_called():
 
 
 def test_boot_js_prefix_variable_declared():
-    """boot.js must declare _prefix variable to snapshot pre-existing textarea content."""
-    js, _ = get_text("/static/boot.js")
-    assert "_prefix" in js
+    """Shared mic pipeline must declare prefix state to snapshot pre-existing composer text."""
+    js = get_voice_pipeline_js()
+    assert "let prefix" in js
 
 
 def test_boot_js_prefix_captured_on_start():
-    """_prefix must be set from ta.value when the user starts recording."""
-    js, _ = get_text("/static/boot.js")
-    # _prefix assignment must happen in the btn.onclick else branch (before recognition.start)
-    btn_onclick_idx = js.find("btn.onclick")
-    btn_onclick_end = js.find("};", btn_onclick_idx)
-    onclick_body = js[btn_onclick_idx:btn_onclick_end]
-    assert "_prefix=ta.value" in onclick_body or "_prefix = ta.value" in onclick_body
+    """prefix must be captured from the current text when the user starts recording."""
+    js = get_voice_pipeline_js()
+    assert "prefix=getText()" in js or "prefix = getText()" in js
 
 
 def test_boot_js_onresult_prepends_prefix():
-    """onresult must include _prefix when writing to textarea (append, not replace)."""
-    js, _ = get_text("/static/boot.js")
-    onresult_idx = js.find("recognition.onresult")
-    onresult_end = js.find("};", onresult_idx)
-    onresult_body = js[onresult_idx:onresult_end]
-    # ta.value must be set to _prefix + something, not just the transcript alone
-    assert "_prefix" in onresult_body
+    """onresult must include prefix when writing to textarea (append, not replace)."""
+    js = get_voice_pipeline_js()
+    assert "setText(appendTranscriptText(prefix,final||interim),'preview')" in js
 
 
 def test_boot_js_onend_commits_with_prefix():
-    """onend must commit _prefix + _finalText so appended text survives after recognition ends."""
-    js, _ = get_text("/static/boot.js")
-    onend_idx = js.find("recognition.onend")
-    onend_end = js.find("};", onend_idx)
-    onend_body = js[onend_idx:onend_end]
-    assert "_prefix" in onend_body
+    """onend must commit prefix + finalText so appended text survives after recognition ends."""
+    js = get_voice_pipeline_js()
+    assert "const committed=finalText?appendTranscriptText(prefix,finalText):getText()" in js
 
 
 def test_boot_js_prefix_reset_on_stop():
-    """_prefix must be reset when recording stops so next session starts clean."""
-    js, _ = get_text("/static/boot.js")
-    # _setRecording(false) clears both _finalText and _prefix
-    set_rec_idx = js.find("function _setRecording")
-    set_rec_end = js.find("}", set_rec_idx) + 1
-    fn_body = js[set_rec_idx:set_rec_end]
-    assert "_prefix" in fn_body
+    """prefix must be reset when recording stops so next session starts clean."""
+    js = get_voice_pipeline_js()
+    assert "function setRecording" in js
+    assert "prefix=''" in js or 'prefix=""' in js
 
 
 def test_boot_js_auto_space_between_prefix_and_transcript():
-    """onend must insert a space between existing text and new transcript when needed."""
-    js, _ = get_text("/static/boot.js")
-    onend_idx = js.find("recognition.onend")
-    onend_end = js.find("};", onend_idx)
-    onend_body = js[onend_idx:onend_end]
-    # Should handle spacing — look for trimStart or endsWith(' ') check
-    has_spacing = ("trimStart" in onend_body or "endsWith(' ')" in onend_body
-                   or "endsWith(\" \")" in onend_body or "endsWith('\\n')" in onend_body)
-    assert has_spacing, "onend should handle spacing between prefix and new transcript"
+    """shared append helper must insert a space between existing text and new transcript when needed."""
+    js = get_voice_pipeline_js()
+    helper_idx = js.find("function appendTranscriptText")
+    assert helper_idx != -1
+    helper_body = js[helper_idx:helper_idx + 500]
+    has_spacing = ("trimStart" in helper_body and "endsWith(' ')" in helper_body and "endsWith('\\n')" in helper_body)
+    assert has_spacing, "appendTranscriptText should handle spacing between prefix and new transcript"
 
 
 # ── Regression: existing behaviour unchanged ──────────────────────────────
@@ -427,23 +475,23 @@ def test_boot_js_auto_space_between_prefix_and_transcript():
 
 def test_attach_button_still_wired():
     """btnAttach onclick must still be wired up (no regression)."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert "$('btnAttach').onclick" in js
 
 
 def test_file_input_onchange_still_wired():
     """fileInput onchange must still be wired up (no regression)."""
-    js, _ = get_text("/static/boot.js")
+    js = get_voice_pipeline_js()
     assert "$('fileInput').onchange" in js
 
 
 def test_index_html_still_has_send_button():
     """btnSend must still be present in index.html (no regression)."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     assert 'id="btnSend"' in html
 
 
 def test_index_html_still_has_attach_button():
     """btnAttach must still be present in index.html (no regression)."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     assert 'id="btnAttach"' in html

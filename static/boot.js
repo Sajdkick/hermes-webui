@@ -342,206 +342,44 @@ $('btnSend').onclick=()=>{
 $('mainChat')?.addEventListener('pointerdown', closeMobileWorkspacePanelFromChat);
 $('btnAttach').onclick=e=>{if(e&&e.preventDefault)e.preventDefault();$('fileInput').value='';$('fileInput').click();};
 
-// ── Voice input (Web Speech API + MediaRecorder fallback) ───────────────────
+// ── Voice input (shared Web Speech API + MediaRecorder fallback) ─────────────
 (function(){
-  const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
-  const _canRecordAudio=!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia&&window.MediaRecorder);
-  if(!SpeechRecognition&&!_canRecordAudio) return; // Browser unsupported — mic button stays hidden
-
-  // Persist SR failure across reloads (e.g. Tailscale/network error)
-  const _micForceMediaRecorderKey='mic_force_mediarecorder';
-  let _forceMediaRecorder=!SpeechRecognition||localStorage.getItem(_micForceMediaRecorderKey)==='1';
-
+  const voiceInput=window.HermesVoiceInput;
   const btn=$('btnMic');
   const status=$('micStatus');
   const ta=$('msg');
+  if(!voiceInput||typeof voiceInput.createController!=='function'||!btn||!status||!ta)return;
   const statusText=status?status.querySelector('.status-text'):null;
-  btn.style.display=''; // Show button — browser supports speech recognition or recording fallback
-
-  let recognition=(!_forceMediaRecorder&&SpeechRecognition)?new SpeechRecognition():null;
-  let mediaRecorder=null;
-  let mediaStream=null;
-  let audioChunks=[];
-  let _finalText='';
-  let _prefix='';
-  let _isRecording=false;
-
-  function _setRecording(on){
-    window._micActive=on;
-    btn.classList.toggle('recording',on);
-    // Active-state title flips so the tooltip is honest about what
-    // pressing the button will do (#1488).
-    _setButtonTooltip(btn, on ? t('voice_dictate_active') : t('voice_dictate'));
-    status.style.display=on?'':'none';
-    if(statusText) statusText.textContent=on?'Listening':'Listening';
-    if(!on){ _finalText=''; _prefix=''; }
-  }
-
-  function _commitTranscript(text){
-    const clean=(text||'').trim();
-    const committed=clean
-      ? (_prefix&&!_prefix.endsWith(' ')&&!_prefix.endsWith('\n')
-          ? _prefix+' '+clean.trimStart()
-          : _prefix+clean)
-      : ta.value;
-    ta.value=committed;
-    autoResize();
-    if(window._micPendingSend){
+  const controller=voiceInput.createController({
+    button:btn,
+    statusEl:status,
+    statusTextEl:statusText,
+    textarea:ta,
+    getText:()=>ta.value,
+    setText:value=>{ta.value=String(value||'');autoResize();},
+    onActiveChange:on=>{window._micActive=!!on;},
+    onTranscribingChange:on=>setComposerStatus(on?'Transcribing…':''),
+    hasPendingSend:()=>!!window._micPendingSend,
+    clearPendingSend:()=>{window._micPendingSend=false;},
+    onPendingSend:()=>{
       window._micPendingSend=false;
       send();
-    }
-  }
-
-  async function _transcribeBlob(blob){
-    const ext=(blob.type&&blob.type.includes('ogg'))?'ogg':'webm';
-    const form=new FormData();
-    form.append('file',new File([blob],`voice-input.${ext}`,{type:blob.type||`audio/${ext}`}));
-    setComposerStatus('Transcribing…');
-    try{
-      const res=await fetch('api/transcribe',{method:'POST',body:form});
-      const data=await res.json().catch(()=>({}));
-      if(!res.ok) throw new Error(data.error||'Transcription failed');
-      _commitTranscript(data.transcript||'');
-    }catch(err){
-      window._micPendingSend=false;
-      showToast(err.message||t('mic_network'));
-    }finally{
-      setComposerStatus('');
-    }
-  }
-
-  function _stopTracks(){
-    if(mediaStream){
-      mediaStream.getTracks().forEach(track=>track.stop());
-      mediaStream=null;
-    }
-  }
-
-  function _stopMic(){
-    if(!window._micActive) return;
-    if(recognition){
-      recognition.stop();
-      return;
-    }
-    if(mediaRecorder&&mediaRecorder.state!=='inactive'){
-      mediaRecorder.stop();
-      return;
-    }
-    _setRecording(false);
-    _stopTracks();
-  }
-  window._stopMic=_stopMic; // expose for send-guard above
-
-  if(recognition && !_forceMediaRecorder){
-    recognition.continuous=false;
-    recognition.interimResults=true;
-    recognition.lang=(typeof _locale!=='undefined'&&_locale._speech)||'en-US';
-
-    recognition.onstart=()=>{ _finalText=''; };
-
-    recognition.onresult=(event)=>{
-      let interim='';
-      let final=_finalText;
-      for(let i=event.resultIndex;i<event.results.length;i++){
-        const t=event.results[i][0].transcript;
-        if(event.results[i].isFinal){ final+=t; _finalText=final; }
-        else{ interim+=t; }
-      }
-      ta.value=_prefix+(final||interim);
-      autoResize();
-    };
-
-    recognition.onend=()=>{
-      const committed=_finalText
-        ? (_prefix&&!_prefix.endsWith(' ')&&!_prefix.endsWith('\n')
-            ? _prefix+' '+_finalText.trimStart()
-            : _prefix+_finalText)
-        : ta.value;
-      _setRecording(false);
-      ta.value=committed;
-      autoResize();
-      if(window._micPendingSend){
-        window._micPendingSend=false;
-        send();
-      }
-    };
-
-    recognition.onerror=(event)=>{
-      _setRecording(false);
-      window._micPendingSend=false;
-      _isRecording=false;
-      if(event.error==='network'||event.error==='not-allowed'){
-        // Persist SR failure: next reload will skip SpeechRecognition
-        localStorage.setItem(_micForceMediaRecorderKey,'1');
-        _forceMediaRecorder=true;
-        recognition=null;
-      }
-      const msgs={
-        'not-allowed':t('mic_denied'),
-        'no-speech':t('mic_no_speech'),
-        'network':t('mic_network'),
-      };
-      showToast(msgs[event.error]||t('mic_error')+event.error);
-    };
-  }
-
-  btn.onclick=async()=>{
-    // Race-condition guard: ignore rapid double-clicks
-    if(_isRecording){
-      _stopMic();
-      _isRecording=false;
-      return;
-    }
-    if(window._micActive){
-      _stopMic();
-      return;
-    }
-    _isRecording=true;
-    _finalText='';
-    _prefix=ta.value;
-    if(recognition && !_forceMediaRecorder){
-      recognition.start();
-      _setRecording(true);
-      return;
-    }
-    if(!_canRecordAudio){
-      _isRecording=false;
-      showToast(t('mic_network'));
-      return;
-    }
-    try{
-      mediaStream=await navigator.mediaDevices.getUserMedia({audio:true});
-      const preferredTypes=['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/ogg'];
-      const mimeType=preferredTypes.find(type=>window.MediaRecorder.isTypeSupported?.(type))||'';
-      mediaRecorder=new MediaRecorder(mediaStream,mimeType?{mimeType}:undefined);
-      audioChunks=[];
-      mediaRecorder.ondataavailable=e=>{if(e.data&&e.data.size)audioChunks.push(e.data);};
-      mediaRecorder.onerror=()=>{
-        _isRecording=false;
-        _setRecording(false);
-        window._micPendingSend=false;
-        _stopTracks();
-        showToast(t('mic_network'));
-      };
-      mediaRecorder.onstop=async()=>{
-        _isRecording=false;
-        const blob=new Blob(audioChunks,{type:mediaRecorder.mimeType||mimeType||'audio/webm'});
-        _setRecording(false);
-        _stopTracks();
-        if(blob.size){ await _transcribeBlob(blob); }
-        else if(window._micPendingSend){
-          window._micPendingSend=false;
-        }
-      };
-      mediaRecorder.start();
-      _setRecording(true);
-    }catch(err){
-      _isRecording=false;
-      window._micPendingSend=false;
-      _stopTracks();
-      showToast(t('mic_denied'));
-    }
-  };
+    },
+    showToast:message=>showToast(message),
+    setButtonTooltip:(element,title)=>_setButtonTooltip(element,title),
+    inactiveTitle:()=>t('voice_dictate'),
+    activeTitle:()=>t('voice_dictate_active'),
+    lang:()=> (typeof _locale!=='undefined'&&_locale._speech)||'en-US',
+    messages:{
+      micDenied:()=>t('mic_denied'),
+      noSpeech:()=>t('mic_no_speech'),
+      micNetwork:()=>t('mic_network'),
+      micError:error=>t('mic_error')+error,
+      transcriptionFailed:'Transcription failed',
+      unsupported:()=>t('mic_network'),
+    },
+  });
+  window._stopMic=()=>controller.stop();
 })();
 window._micActive=window._micActive||false;
 window._micPendingSend=window._micPendingSend||false;

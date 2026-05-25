@@ -672,12 +672,14 @@
       }
     }
 
-    async function ensureTaskSession(match,projectOverride){
+    async function ensureTaskSession(match,projectOverride,options){
       const project=projectOverride||OPS.currentProject;
       if(!project)throw new Error('Project not found.');
+      const opts=options&&typeof options==='object'?options:{};
       const {epic,task}=match;
       await api(projectUrl(project.id,'/ensure-workspace'),{method:'POST',body:JSON.stringify({})});
       const modelState=currentOpsModelState();
+      const forceNewSession=opts.forceNewSession===true||opts.forceNew===true||opts.skipExistingLookup===true;
       const payload={
         workspace:projectPath(project),
         model:modelState.model||undefined,
@@ -685,6 +687,10 @@
         profile:currentOpsProfile(project),
         title:task.text.slice(0,80)||'Project task',
       };
+      if(forceNewSession){
+        payload.forceNew=true;
+        payload.skipExistingLookup=true;
+      }
       const data=await AgentBridgeRef.sessions.ensureTask(project.id,task.id,payload);
       const session=data&&data.session;
       if(!session||!session.session_id)throw new Error('Unable to create task session.');
@@ -722,7 +728,7 @@
       const openInspectAfterStart=opts.openInspectAfterStart===true;
       setBusy(true);
       try{
-        const {sessionId,sessionKey,alreadyRunning,epic,task}=await ensureTaskSession(match,project);
+        const {sessionId,sessionKey,alreadyRunning,epic,task}=await ensureTaskSession(match,project,opts);
         await loadSession(sessionKey||sessionId,{force:true});
         selectLoadedOpsSessionProfile(currentOpsProfile(project));
         await renderSessionList();
@@ -774,19 +780,56 @@
       return executeTaskMatch(OPS.currentProject,match,options);
     }
 
-    async function ensureProjectEpic(projectId,title){
-      let data=OPS.taskDataByProject[projectId]||await reloadProjectTasks(projectId);
+    function rememberProjectTask(projectId,epic,task){
+      const projectKey=String(projectId||'').trim();
+      const epicKey=String(epic&&epic.id||'').trim();
+      if(!projectKey||!epicKey)return;
+      const targets=[];
+      const cached=OPS.taskDataByProject&&OPS.taskDataByProject[projectKey];
+      if(cached)targets.push(cached);
+      if(OPS.currentProject&&OPS.currentProject.id===projectKey&&OPS.taskData&&OPS.taskData!==cached)targets.push(OPS.taskData);
+      targets.forEach(data=>{
+        if(!data||!Array.isArray(data.epics))return;
+        let epicEntry=data.epics.find(entry=>String(entry&&entry.id||'').trim()===epicKey);
+        if(!epicEntry){
+          epicEntry={...epic,tasks:Array.isArray(epic.tasks)?epic.tasks.slice():[]};
+          data.epics=[...data.epics,epicEntry];
+        }
+        if(!task||!task.id)return;
+        const taskKey=String(task.id||'').trim();
+        const tasks=Array.isArray(epicEntry.tasks)?epicEntry.tasks.slice():[];
+        const index=tasks.findIndex(entry=>String(entry&&entry.id||'').trim()===taskKey);
+        if(index>=0)tasks[index]={...tasks[index],...task};
+        else tasks.push(task);
+        epicEntry.tasks=tasks;
+      });
+    }
+
+    async function ensureProjectEpic(projectId,title,options){
+      const opts=options&&typeof options==='object'?options:{};
+      const projectKey=String(projectId||'').trim();
       const normalizedTitle=String(title||'').trim().toLowerCase();
+      const cached=(OPS.taskDataByProject&&OPS.taskDataByProject[projectKey])||(OPS.currentProject&&OPS.currentProject.id===projectKey?OPS.taskData:null);
+      const cachedEpic=cached&&Array.isArray(cached.epics)
+        ? cached.epics.find(entry=>String(entry.title||'').trim().toLowerCase()===normalizedTitle)
+        : null;
+      if(cachedEpic)return cachedEpic;
+      if(opts.lean===true||opts.skipReload===true){
+        const ensured=await api(projectUrl(projectKey,'/epics/ensure'),{method:'POST',body:JSON.stringify({title})});
+        if(ensured&&ensured.epic)rememberProjectTask(projectKey,ensured.epic,null);
+        return ensured&&ensured.epic;
+      }
+      let data=await reloadProjectTasks(projectKey);
       let epic=(data.epics||[]).find(entry=>String(entry.title||'').trim().toLowerCase()===normalizedTitle);
       if(epic)return epic;
-      const created=await api(projectUrl(projectId,'/epics'),{method:'POST',body:JSON.stringify({title})});
-      data=await reloadProjectTasks(projectId);
+      const created=await api(projectUrl(projectKey,'/epics'),{method:'POST',body:JSON.stringify({title})});
+      data=await reloadProjectTasks(projectKey);
       epic=(data.epics||[]).find(entry=>entry.id===(created.epic&&created.epic.id));
       return epic||created.epic;
     }
 
     async function ensureQuickTaskEpic(projectId){
-      return ensureProjectEpic(projectId,'Quick tasks');
+      return ensureProjectEpic(projectId,'Quick tasks',{lean:true});
     }
 
     async function executeReadyTasksWithAi(projectId){
@@ -865,7 +908,9 @@
           OPS.quickTaskStatusKind='info';
           if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
           try{
-            await uploadQuickTaskImages(project.id,created.task.id,pendingQuickTaskImages);
+            const uploadedImages=await uploadQuickTaskImages(project.id,created.task.id,pendingQuickTaskImages);
+            const imagePaths=uploadedImages.map(image=>String(image&&image.path||'').trim()).filter(Boolean);
+            if(imagePaths.length)created.task={...created.task,images:imagePaths.join(', ')};
           }catch(uploadErr){
             const message=uploadErr&&uploadErr.message?uploadErr.message:'Unable to upload screenshots.';
             OPS.quickTaskStatus=`Quick task created, but screenshots could not be uploaded: ${message}`;
@@ -874,8 +919,8 @@
             return;
           }
         }
-        const data=await reloadProjectTasks(project.id);
-        const match=findTaskInData(data,created.task&&created.task.id)||{epic,task:created.task};
+        const match={epic,task:created.task};
+        rememberProjectTask(project.id,epic,created.task);
         const pendingQuickTaskFiles=pendingQuickTaskImages.map(entry=>entry&&entry.file).filter(Boolean);
         OPS.quickTaskText='';
         clearQuickTaskImages();
@@ -889,7 +934,7 @@
         OPS.quickTaskStatusKind='info';
         if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
         try{
-          await executeTaskMatch(project,match,{files:pendingQuickTaskFiles,goalMode,openInspectAfterStart:true});
+          await executeTaskMatch(project,match,{files:pendingQuickTaskFiles,goalMode,openInspectAfterStart:true,forceNewSession:true});
           OPS.quickTaskStatus=goalMode?'Quick task created and goal started.':'Quick task created and execution started.';
           OPS.quickTaskStatusKind='success';
         }catch(execErr){

@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from api import ops_sessions
+from api import ops_projects, ops_sessions
 from api.models import all_sessions
 
 
@@ -29,6 +29,7 @@ _ACTIVE_RUN_STATUSES = {
     "waiting-input",
     "waiting-approval",
 }
+_VISIBLE_RUN_STATUSES = _ACTIVE_RUN_STATUSES | {"failed", "stopped", "succeeded"}
 
 
 class SessionActivityError(Exception):
@@ -169,6 +170,9 @@ def _session_aliases(session: dict | None) -> set[str]:
         value = str(session.get(field) or "").strip()
         if value:
             aliases.add(value)
+    member_ids = session.get("_lineage_member_ids")
+    if isinstance(member_ids, (list, tuple, set)):
+        aliases.update(str(value).strip() for value in member_ids if str(value or "").strip())
     return aliases
 
 
@@ -305,6 +309,290 @@ def _activity_last_output_at(session: dict, run: dict) -> float | None:
     return None
 
 
+def _normalize_run_status(value) -> str:
+    return str(value or "").strip().lower().replace("_", "-").replace(" ", "-")
+
+
+def _text(value, *, limit: int = 512) -> str:
+    if not isinstance(value, str):
+        value = "" if value is None else str(value)
+    return value.strip()[:limit]
+
+
+def _session_sort_key(session: dict) -> float:
+    return max(
+        _epoch_seconds(session.get("last_message_at")),
+        _epoch_seconds(session.get("updated_at")),
+        _epoch_seconds(session.get("created_at")),
+        0.0,
+    )
+
+
+def _run_sort_key(run: dict) -> float:
+    return max(
+        _epoch_seconds(run.get("updatedAt") or run.get("updated_at")),
+        _epoch_seconds(run.get("completedAt") or run.get("completed_at")),
+        _epoch_seconds(run.get("createdAt") or run.get("created_at")),
+        0.0,
+    )
+
+
+def _minimal_ops_projects_by_id() -> dict[str, dict]:
+    """Return project metadata without task counts, git probes, or sidecar scans."""
+    try:
+        raw_projects = ops_projects._read_projects()
+    except Exception:
+        return {}
+
+    projects: dict[str, dict] = {}
+    for project in raw_projects:
+        if not isinstance(project, dict):
+            continue
+        project_id = str(project.get("id") or "").strip()
+        if not project_id:
+            continue
+        item = dict(project)
+        path = str(item.get("path") or item.get("resolvedPath") or "").strip()
+        if path and not item.get("resolvedPath"):
+            try:
+                item["resolvedPath"] = str(Path(path).expanduser().resolve())
+            except Exception:
+                item["resolvedPath"] = path
+        item.setdefault("fullName", item.get("name") or project_id)
+        projects[project_id] = item
+    return projects
+
+
+def _project_id_for_session(session: dict) -> str:
+    return str(
+        session.get("ops_project_id")
+        or session.get("projectId")
+        or session.get("project_id")
+        or ""
+    ).strip()
+
+
+def _candidate_task_files(project: dict) -> list[Path]:
+    path = str(project.get("path") or project.get("resolvedPath") or "").strip()
+    if not path:
+        return []
+    try:
+        root = Path(path).expanduser().resolve()
+    except Exception:
+        root = Path(path).expanduser()
+    tasks_dir = root / getattr(ops_projects, "TASKS_DIR_NAME", "project_tasks")
+    sanitize = getattr(ops_projects, "_sanitize_branch_file_name", lambda value: _text(value, limit=128) or "default")
+    default_scope = getattr(ops_projects, "DEFAULT_TASKS_SCOPE", "default")
+    branches = [
+        project.get("tasksBranch"),
+        project.get("coreBranch"),
+        default_scope,
+        "main",
+        "master",
+    ]
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+
+    def add(candidate: Path) -> None:
+        try:
+            key = candidate.resolve()
+        except Exception:
+            key = candidate
+        if key not in seen:
+            seen.add(key)
+            candidates.append(candidate)
+
+    for branch in branches:
+        branch_name = _text(branch, limit=128)
+        if branch_name:
+            add(tasks_dir / f"{sanitize(branch_name)}.json")
+    add(root / getattr(ops_projects, "LEGACY_TASKS_FILE_NAME", "project_tasks.json"))
+    try:
+        extras = sorted(
+            tasks_dir.glob("*.json"),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )
+    except Exception:
+        extras = []
+    for candidate in extras[:12]:
+        add(candidate)
+    return candidates
+
+
+def _load_project_tasks_by_id(project: dict) -> dict[str, dict]:
+    """Read task text/done state without resolving session sidecars."""
+    tasks_by_id: dict[str, dict] = {}
+    normalize_payload = getattr(ops_projects, "_normalize_tasks_payload", None)
+    for path in _candidate_task_files(project):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if callable(normalize_payload):
+            try:
+                payload = normalize_payload(payload)[0]
+            except Exception:
+                pass
+        epics = payload.get("epics") or [] if isinstance(payload, dict) else []
+        for epic in epics:
+            epic_title = _text((epic or {}).get("title"), limit=256)
+            for task in (epic or {}).get("tasks") or []:
+                if not isinstance(task, dict):
+                    continue
+                task_id = _text(task.get("id"), limit=128)
+                if not task_id or task_id in tasks_by_id:
+                    continue
+                task_context = dict(task)
+                if epic_title:
+                    task_context["epicTitle"] = epic_title
+                tasks_by_id[task_id] = task_context
+    return tasks_by_id
+
+
+def _read_raw_ops_runs() -> list[dict]:
+    """Read run records once without per-run enrichment."""
+    try:
+        from api import ops_runs
+
+        lock = getattr(ops_runs, "_LOCK", None)
+        if lock is not None:
+            with lock:
+                return [dict(run) for run in ops_runs._read_runs()]
+        return [dict(run) for run in ops_runs._read_runs()]
+    except Exception:
+        return []
+
+
+def _run_task_context(run: dict, project: dict | None, task_cache: dict[str, dict[str, dict]]) -> dict | None:
+    project_id = _text(run.get("projectId") or run.get("project_id"), limit=128)
+    task_id = _text(run.get("taskId") or run.get("task_id"), limit=128)
+    metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    if project and project_id and project_id not in task_cache:
+        task_cache[project_id] = _load_project_tasks_by_id(project)
+    task = (task_cache.get(project_id) or {}).get(task_id)
+    if isinstance(task, dict):
+        return dict(task)
+    task_text = _text(metadata.get("taskText") or metadata.get("task_text") or run.get("title"), limit=512)
+    if task_id or task_text:
+        return {
+            "id": task_id,
+            "text": task_text,
+            "done": False,
+        }
+    return None
+
+
+def _project_context_for_session(session: dict, project_by_id: dict[str, dict]) -> dict | None:
+    project_id = _project_id_for_session(session)
+    if project_id and project_id in project_by_id:
+        return project_by_id[project_id]
+    workspace = str(session.get("workspace") or "").rstrip("/")
+    if not workspace:
+        return None
+    for project in project_by_id.values():
+        project_path = str(project.get("resolvedPath") or project.get("path") or "").rstrip("/")
+        if project_path and project_path == workspace:
+            return project
+    return None
+
+
+def _lean_activity_source() -> dict:
+    """Build the activity list from cheap indexes and raw run records only.
+
+    The rich Ops sessions endpoint intentionally resolves projects, tasks,
+    linkages, runs, pending requests, readable output, and session sidecars. The
+    activity poller runs every few seconds, so it must avoid that N+1 enrichment
+    path and use already-indexed session summaries plus a single raw runs read.
+    """
+    try:
+        session_summaries = [session for session in all_sessions() if isinstance(session, dict)]
+    except Exception:
+        session_summaries = []
+
+    try:
+        from api.session_auto_archive import archive_stale_sessions
+
+        archive_result = archive_stale_sessions(session_summaries)
+        if int(archive_result.get("archived") or 0) > 0:
+            session_summaries = [session for session in all_sessions() if isinstance(session, dict)]
+    except Exception:
+        pass
+
+    try:
+        session_summaries = ops_sessions.session_sidecars._with_parent_lineage_metadata(session_summaries)
+    except Exception:
+        pass
+
+    project_by_id = _minimal_ops_projects_by_id()
+    task_cache: dict[str, dict[str, dict]] = {}
+    logical_sessions: dict[str, dict] = {}
+    alias_to_session_id: dict[str, str] = {}
+    for session in session_summaries:
+        if not isinstance(session, dict) or session.get("archived"):
+            continue
+        lineage_root = str(session.get("_lineage_root_id") or session.get("session_id") or "").strip()
+        session_id = str(session.get("session_id") or "").strip()
+        if not lineage_root or not session_id:
+            continue
+        current = logical_sessions.get(lineage_root)
+        if not current or ops_sessions._ops_task_session_rank(session) >= ops_sessions._ops_task_session_rank(current):
+            logical_sessions[lineage_root] = dict(session)
+    session_by_id: dict[str, dict] = {}
+    for session in logical_sessions.values():
+        session_id = str(session.get("session_id") or "").strip()
+        if not session_id:
+            continue
+        session_by_id[session_id] = session
+        for alias in _session_aliases(session):
+            alias_to_session_id[alias] = session_id
+
+    run_context_by_session_id: dict[str, dict] = {}
+    for raw_run in _read_raw_ops_runs():
+        status = _normalize_run_status(raw_run.get("status")) or "running"
+        if status not in _VISIBLE_RUN_STATUSES:
+            continue
+        stored_session_id = _text(raw_run.get("sessionId") or raw_run.get("session_id"), limit=128)
+        if not stored_session_id:
+            continue
+        session_id = alias_to_session_id.get(stored_session_id)
+        if not session_id:
+            metadata = raw_run.get("metadata") if isinstance(raw_run.get("metadata"), dict) else {}
+            resolved_session_id = _text(metadata.get("resolvedSessionId") or metadata.get("resolved_session_id"), limit=128)
+            session_id = alias_to_session_id.get(resolved_session_id)
+        if not session_id:
+            continue
+        session = session_by_id.get(session_id)
+        if not isinstance(session, dict) or session.get("archived"):
+            continue
+        run = dict(raw_run)
+        run["status"] = status
+        run.setdefault("pendingRequestCount", 0)
+        run.setdefault("readableOutput", {"available": False})
+        project_id = _text(run.get("projectId") or run.get("project_id") or _project_id_for_session(session), limit=128)
+        project = project_by_id.get(project_id) or _project_context_for_session(session, project_by_id)
+        task = _run_task_context(run, project, task_cache)
+        current = run_context_by_session_id.get(session_id)
+        if not current or _run_sort_key(run) >= _run_sort_key(current.get("run") or {}):
+            run_context_by_session_id[session_id] = {"run": run, "project": project, "task": task}
+
+    enriched_sessions: list[dict] = []
+    for session in sorted(logical_sessions.values(), key=_session_sort_key, reverse=True):
+        session_id = str(session.get("session_id") or "").strip()
+        context = run_context_by_session_id.get(session_id) or {}
+        project = context.get("project") or _project_context_for_session(session, project_by_id)
+        task = context.get("task")
+        run = context.get("run")
+        if run or _session_has_live_stream(session):
+            enriched_sessions.append(ops_sessions._enrich_session_summary(session, project, task, run))
+
+    try:
+        enriched_sessions = ops_sessions._dedupe_ops_task_sessions(enriched_sessions)
+    except Exception:
+        enriched_sessions.sort(key=_session_sort_key, reverse=True)
+    return {"sessions": enriched_sessions}
+
+
 def _serialize_activity_session(session: dict, assignment_map: dict[str, str]) -> dict:
     run = session.get("ops_run") if isinstance(session.get("ops_run"), dict) else {}
     group_id = None
@@ -348,13 +636,7 @@ def _serialize_activity_session(session: dict, assignment_map: dict[str, str]) -
 
 
 def _list_ops_activity_source() -> dict:
-    try:
-        return ops_sessions.list_ops_sessions(activity_only=True)
-    except TypeError:
-        # Tests and older compatibility shims may monkeypatch list_ops_sessions
-        # with the historical no-argument callable. Fall back without losing the
-        # endpoint entirely.
-        return ops_sessions.list_ops_sessions()
+    return _lean_activity_source()
 
 
 def list_session_activity() -> dict:

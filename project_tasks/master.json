@@ -68,10 +68,13 @@
         {
           "id": "6b066c28-7946-488a-870d-3c629df8ab0e",
           "text": "When I click the session under the active sessions in the ops dashboard I should be taken to the session, right now nothing happens.",
-          "done": false,
+          "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-06T05:34:08.622Z",
+          "completedAt": "2026-05-06T09:16:15.687Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T09:20:05.759Z",
           "createdBy": {
             "id": "pontus",
             "label": "Pontus"
@@ -79,8 +82,7 @@
           "updatedBy": {
             "id": "pontus",
             "label": "Pontus"
-          },
-          "qaStatus": "ready-for-test"
+          }
         },
         {
           "id": "b29732a6-e9ce-45c0-8571-48b7b1057cae",
@@ -121,23 +123,6 @@
           }
         },
         {
-          "id": "54f6c2fc-790c-4880-94ee-34f187660d2c",
-          "text": "I seem to only be getting done notifications and not any play notifications. I want you to analyse the project in depth and make sure that we have play notifications correctly set up.",
-          "done": false,
-          "dependencies": [],
-          "grade": "green",
-          "createdAt": "2026-05-06T05:34:30.642Z",
-          "createdBy": {
-            "id": "pontus",
-            "label": "Pontus"
-          },
-          "updatedBy": {
-            "id": "pontus",
-            "label": "Pontus"
-          },
-          "qaStatus": "ready-for-test"
-        },
-        {
           "id": "3e2ab248-2a62-426b-97bb-3ecb5f600848",
           "text": "The quick task runner UI lacks the toggle for setting the task as a goal, look at how it is done in cloud terminal",
           "done": true,
@@ -159,46 +144,252 @@
         {
           "id": "39b6f4be-8856-420a-a13a-44823a3504a0",
           "text": "We need a button to go back to the ops dashboard from the project / epics page",
-          "done": false,
+          "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-06T07:08:07.791Z",
-          "qaStatus": "ready-for-test"
+          "completedAt": "2026-05-06T08:04:10.885Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T08:12:16.374Z"
         },
         {
           "id": "7d15e668-ebc7-4322-b187-6938e1c20a3b",
           "text": "When i have the dorpdown in the quick task UI to select a project, it deselects and closes every 5 seconds",
-          "done": false,
+          "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-06T07:18:13.806Z",
-          "qaStatus": "ready-for-test"
+          "completedAt": "2026-05-06T12:02:25.997Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T12:03:11.235Z"
         },
         {
           "id": "0fa534cd-7465-4c7c-932b-3e2ea289c0cb",
           "text": "We dont need to automatically navigate to the archived tav when we archive tasks.",
-          "done": false,
+          "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-06T07:19:07.592Z",
-          "qaStatus": "ready-for-test"
+          "completedAt": "2026-05-06T07:44:36.343Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T07:46:23.735Z"
         },
         {
           "id": "dd8e0298-2ed9-493d-ba49-8c88eb913b2a",
           "text": "We dont need the run activity section in the project/epics page",
-          "done": false,
+          "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-06T07:20:07.472Z",
-          "qaStatus": "ready-for-test"
+          "completedAt": "2026-05-06T08:04:56.223Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T08:12:16.374Z"
         },
         {
           "id": "6651fc7f-3cd4-49cc-90e6-4c5a5c450391",
           "text": "I want you to add the Execute ready tasks button to the project epics page, look at cloud terminal how its implemented",
-          "done": false,
+          "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-06T07:20:41.712Z",
+          "completedAt": "2026-05-06T07:43:57.791Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T07:44:22.785Z"
+        },
+        {
+          "id": "81cf2106-ec2a-4b55-aa50-d6c09af6cbe7",
+          "text": "The UI can be really unresponsive. E.g when i click complete on a task it takes a couple of second for it to be marked as complete. I want you to analyze the UI under the /ops and make it all really snappy",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T07:45:32.978Z",
+          "completedAt": "2026-05-06T08:04:58.224Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T08:12:16.374Z"
+        },
+        {
+          "id": "d06b32b4-fdf0-45d0-b50a-bd8f410cf062",
+          "text": "PRessing the push button on a project in the project view fails with \"Could not find username...\" i am not getting this in cloud terminal so i want you to look at what we are doing differentlyand fix it.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T08:01:01.324Z",
+          "completedAt": "2026-05-06T09:18:31.481Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T09:20:05.759Z"
+        },
+        {
+          "id": "5c562103-93ee-40d6-a817-91051e1605b8",
+          "text": "The UI in the project epics page still refreshes every 5 seconds, if i have scrolled in the create section it scrolls back up, if the advanced projects tools is open it closes e.t.c. Fix this.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T08:06:25.498Z",
+          "completedAt": "2026-05-06T12:03:02.200Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T12:03:11.235Z"
+        },
+        {
+          "id": "89f30ea0-b7a2-4c76-9ea4-23bf594c2cfa",
+          "text": "The ops dashboard button in the project epics page just redirects you back to the epics page?",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T08:09:35.518Z",
+          "completedAt": "2026-05-06T09:19:36.943Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T09:20:05.759Z"
+        },
+        {
+          "id": "69127552-d724-49e2-ba21-552aafd68e4b",
+          "text": "Marking a task as needs more work, and archiving tasks, feels really unresponsive and takes a couple of seconds after you have clicked. This is a general trend as most interactions are slugish. I want you to analyze the code in depth (for everything below /ops) and make the UI snappy,",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T09:21:41.845Z",
+          "completedAt": "2026-05-06T12:03:13.694Z",
+          "archived": true,
+          "archivedAt": "2026-05-06T12:06:34.118Z"
+        },
+        {
+          "id": "409caf9e-7ca0-4f0b-948d-bdfa3e652687",
+          "text": "The projects have the sessions under them in the ops project view which is great, but it should be collapsable so that sessions dont take up to much space. They should be collapsed by default",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T12:02:16.272Z",
+          "completedAt": "2026-05-07T09:16:58.278Z",
+          "archived": true,
+          "archivedAt": "2026-05-12T06:51:45.337Z"
+        },
+        {
+          "id": "3c43e16f-51be-4bae-9c32-c386a04a8c48",
+          "text": "Even though a task has play configured, it still only sends a done notification. It should automatocally build e.t.c. and provide a play notification instead. Look at how its done in cloud terminal.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T13:51:21.284Z",
+          "completedAt": "2026-05-18T07:57:48.500Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "950e05ea-8ca6-4826-a84a-3f4fa62ef68f",
+          "text": "The ui is really slow to react when clicking the add task button",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T13:51:46.607Z",
+          "completedAt": "2026-05-07T09:17:04.119Z",
+          "archived": true,
+          "archivedAt": "2026-05-12T06:51:45.337Z"
+        },
+        {
+          "id": "bb5aefe7-5709-4dfa-8094-971f34b35b2f",
+          "text": "I want a record button when making tasks in the epics page so i can easily record a task through voice",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-06T13:52:45.846Z",
+          "completedAt": "2026-05-07T09:17:12.540Z",
+          "archived": true,
+          "archivedAt": "2026-05-12T06:51:45.337Z"
+        },
+        {
+          "id": "8d54a550-eb85-4a9a-9207-27e3f9cd9913",
+          "text": "The record button needs to be next to the new task inputfield",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-07T04:46:49.884Z",
+          "completedAt": "2026-05-07T09:17:14.263Z",
+          "archived": true,
+          "archivedAt": "2026-05-12T06:51:45.337Z"
+        },
+        {
+          "id": "b38cabed-57ed-4d9b-b8a7-941abfd12024",
+          "text": "When inclick the delete session button it is really slow to react which feels bad",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-07T04:48:04.585Z",
+          "completedAt": "2026-05-07T09:17:20.688Z",
+          "archived": true,
+          "archivedAt": "2026-05-12T06:51:45.337Z"
+        },
+        {
+          "id": "a6340247-f43b-4b69-90f8-121a588f83f1",
+          "text": "Loading the ops dashboard takes a really long time",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-07T04:48:37.263Z",
+          "completedAt": "2026-05-07T09:17:26.620Z",
+          "archived": true,
+          "archivedAt": "2026-05-12T06:51:45.337Z"
+        },
+        {
+          "id": "ba53bbcd-d1e1-49c0-a20c-b2395a080dc4",
+          "text": "I want to make the ops dashboard the landing page",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-07T04:50:42.887Z",
+          "completedAt": "2026-05-07T09:17:29.804Z",
+          "archived": true,
+          "archivedAt": "2026-05-12T06:51:45.337Z"
+        },
+        {
+          "id": "0befc8e4-995d-43ae-8fcf-a28efff5ce05",
+          "text": "The projects epics page takes a really long time to load",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-07T09:11:47.287Z",
+          "completedAt": "2026-05-18T07:57:51.176Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "807b058a-ac80-4b74-a103-aca6ee7d8ad5",
+          "text": "It looks like profiles for tasks for specific projects is broken, even though i have assigned a profile to a project it uses default",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-07T09:14:40.746Z",
+          "completedAt": "2026-05-18T07:57:53.941Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "6fb04aa7-5f5d-463f-943b-6afb6946d0bb",
+          "text": "There is still some discrepancies between how Cloud Terminal and Hermes works. In the ops dashboard, that is meant to mimic the main menu of Cloud Terminal. We have the active sessions section where we show the active sessions. And we do currently see the acquisitions in the ops dashboard. But they don't show as much information as they did in Cloud Terminal. For instance, you can see the build status and stuff like that. So I want you to look at Cloud Terminal. See how we do that in that active sessions section. And make sure that we have parity in the ops dashboard active sessions section.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-08T05:22:52.059Z",
+          "completedAt": "2026-05-18T07:57:57.541Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "57a42187-f8a9-4d7d-a7fd-fe6e15ddd7f5",
+          "text": "There's still really weird bugs when it comes to reloading the sessions. When you have a chat opened, it works. And then when you close down your phone or close down the tab on your computer, and then go back and try to reconnect to that chat session, it more often than not just shows a stale chat. Like if you sent a message, it answered to that, and then you send another message and close everything. When you get back, it shows how it looked before you even sent the latest message. So you can really confuse to be like, okay, what is the actual state? You don't think it's done, so you wait, but it's actually done. And to fix that, you often need to go to another chat and then go back to that chat and reload it. That more often than not fixes it. So I want you to fix that and make sure that it actually behaves smoothly so you don't have to worry about, oh, is it actually up to date? Is it stuck? What's wrong with UI? Because that's a really bad user experience.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-08T05:24:41.769Z",
+          "completedAt": "2026-05-18T07:58:02.893Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "ec97d90f-00ef-43be-bfb3-e6ed26ee8102",
+          "text": "When clicking the \"needs-more-work\" button and add a text, it works but it takes a couple of seconds for it to update the task in the UI. Make this fast and snappy.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-18T08:13:42.701Z",
           "qaStatus": "ready-for-test"
         }
       ],
@@ -263,21 +454,765 @@
             "label": "Pontus"
           },
           "lastSessionAt": "2026-05-06T07:06:05.058Z"
-        }
-      ]
-    },
-    {
-      "id": "e1735f35-fd29-4f7e-be85-ff36bbeb57aa",
-      "title": "AI automation",
-      "tasks": [
+        },
         {
-          "id": "ec08e920-b996-4470-ae2c-2aee713d3eb3",
-          "text": "Analyze the current branch tasks JSON file and implement tasks one-by-one without waiting for user input. Focus only on tasks that are actionable now: status \"ready\" and status \"needs-more-work\". Keep working sequentially until there are no actionable tasks left.\nBefore starting execution, read AGENTS.md for shared project instructions.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "id": "ed9c89fe-8ba2-40f0-b1dd-f3b2e9f9aa29",
+          "text": "Something is wrong with the notifications. I recently ran a section in the summons project where it was focusing on making the arena size more flexible. And it finished, but it didn't send a notification, not a done notification, not a play notification, so I want you to figure out what's up with that.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-08T05:06:31.347Z",
+          "completedAt": "2026-05-18T07:58:15.322Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "018f92be-1d3c-4f9b-b86c-d80a939e0847",
+          "text": "I'm constantly running into an issue where a session ends because it has exceeded the maximum amount of tool calls it can make. And I've been looking around but I can't find any UI for increasing this limit. So I want you to inspect and see how I change this limit and also give me some context on why there is such a limit, like what possibly be the reason to limit this kind of thing.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-10T08:37:38.976Z",
+          "startedAt": "2026-05-10T08:37:39.954Z",
+          "completedAt": "2026-05-18T07:58:18.358Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "8180ab64-c806-403e-8d5b-7c3b31659870",
+          "text": "In the ops dashboard on the active sessions in the active sessions tab I won't add a close session button to the right of the active session section.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-12T05:17:25.580Z",
+          "completedAt": "2026-05-18T07:58:28.323Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "b1873e3e-45c9-4e65-b82b-9cc4c14b930f",
+          "text": "I want to exapand the quick task runner so in addition to the \"create & run\" button, we have a create button that just adds the task to the project. And another button that executes all ready tasks (the same button we see in the epics page)",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-12T05:59:29.725Z",
+          "completedAt": "2026-05-18T07:58:31.994Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "3099872d-ca92-4352-add5-fb5ca8040752",
+          "text": "Its really hard to see if a session has triggered a build and will send a play notification, so i want you to have it send the play notification immediately, but have it be locked and say build in progress while its building. I also want you to clear old play notifications from this project when it creates a new one so old ones dont linger.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-12T06:51:01.620Z",
+          "completedAt": "2026-05-18T07:58:35.052Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "0d4471f4-6129-42a8-a698-731b7624dca8",
+          "text": "The name for sessions in the active sessions section in the ops dashboard is just the repo name, since almost all project are from the same repo they all just share the same name and we cant see which project the session is connected to. It needs to show the branch name instead.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-12T06:57:15.167Z",
+          "completedAt": "2026-05-18T07:58:38.748Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "a58bff53-93cc-4b34-a158-091e5589ca24",
+          "text": "It takes a really long time for the active sessions in the active sessions section in the OPS dashboard to load, is through which to make this faster.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-12T11:45:19.805Z",
+          "completedAt": "2026-05-18T07:58:43.542Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "13a74796-36d7-485e-899c-09e9368994e2",
+          "text": "It takes a really long time for the notifications to load in the Ops dashboard. It's their way to make them load faster?",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-12T11:45:44.819Z",
+          "completedAt": "2026-05-18T07:58:46.033Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "c215811d-d6f8-4de8-b641-1e3d17100876",
+          "text": "Most of the features that I've added to Hermes, I've ported from another Cloud Terminal project, and one of those was the gather information skill and tool. It was used alongside CT runtime to add reports and logs, temporary logs into the code, where the AI could then ask the user to go in and replicate an issue or something. And it would then get immediate reports that it could look and see what happens. So if the user's running into an issue and the agent didn't know what to cost it, it could add logs in relevant areas, ask the user to reproduce it, and then it would have reports ready to be used. I want you to look at the current state of this, and I want you to make sure it's properly ported into the Hermes environment. And also that we have skills to use it.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-12T11:49:15.295Z",
+          "completedAt": "2026-05-20T19:24:02.343Z"
+        },
+        {
+          "id": "8e21956c-32c5-41d2-a80e-38d58d60e7c0",
+          "text": "A main feature in the old Cloud terminal was that when we clicked the play notification, we could take it into play to inspect the project. And while we were doing so, we had a little pop-up that we could hide or open and go into a little floating icon where we would have direct access to the session that triggered this play notification. The idea behind that was that we could see the chat while having the object opened and we could see what it was doing, what it wanted us to test. So we could see if it works, we could give immediate feedback while we were playing the project. I want you to look at the current state of this and ensure that it's in place. Important to know that we shouldn't just copy the Cloud terminal version. We should implement a true native Hermes version.",
           "done": false,
           "dependencies": [],
           "grade": "green",
-          "createdAt": "2026-05-06T07:21:21.106Z",
-          "startedAt": "2026-05-06T07:21:21.812Z",
+          "createdAt": "2026-05-12T11:50:50.276Z",
+          "qaStatus": "needs-more-work",
+          "moreWork": "It still doesnt work, its gray with a sad face instead."
+        },
+        {
+          "id": "7bef3c0e-fbd5-4372-845a-3109d9e11229",
+          "text": "I want to make it so that when we manually build a project, it creates a play notification",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-12T17:30:56.343Z",
+          "completedAt": "2026-05-18T08:04:15.555Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "7ac81c5e-f6e8-4dc6-801e-b32b72e52c26",
+          "text": "I started a build from the project page and it created a build notification. But it constantly appears and dissappears. It shoud remain consistent while it builds.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-12T18:07:56.665Z",
+          "completedAt": "2026-05-18T08:04:23.274Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "4abb4e5c-2918-4eec-b952-d1ab9113dd9a",
+          "text": "Closing sessions using the button on the session in the active sessions section in the ops dashboard is really slow and unresponsive. Make it snappy and fast.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-13T05:49:47.060Z",
+          "completedAt": "2026-05-18T08:04:26.422Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "6a2de3c3-fa60-42cd-9b1e-22b2fc90b8e5",
+          "text": "Clicking a session in te active sessions section of the ops dashboard to open the session view is really slow to respond. make it faster.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-13T05:51:14.857Z",
+          "completedAt": "2026-05-18T08:04:30.390Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "1ca04eb3-3f09-481a-b855-f55e873cd655",
+          "text": "Right now we are running hermes and cloud terminal kind of in parallel. If you look at the cloud terminal project you can see that we can switch between dev, prod , and hermes. This \"works\" but there are some bugs. The one i want you to fix is about deployments. Right now deployments stop working if i deployed them in dev, and then switch the hermes. They start working again if i switch back to dev, but i want you to make it so that deployments work regardless of if you are in dev, hermes, or prod. Very important that you don't break current deployments while you fix this.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-13T05:53:50.324Z",
+          "startedAt": "2026-05-13T09:23:20.922Z",
+          "completedAt": "2026-05-18T08:04:40.182Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "8986e937-976a-4117-b948-26440826ce58",
+          "text": "Clicking a session in the active session section in the ops dashboard doesnt take you to the session, it takes you to the ops dashboard?",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-13T06:45:46.674Z",
+          "completedAt": "2026-05-18T08:04:48.222Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "965c3cea-4c2c-479e-90ef-5a61e2e9eca8",
+          "text": "I want to make it so that on the sessions in the Active Sessions section, in the Up to Dashboard, we can see the first X amount of characters in the task, as we can see which session belongs to each task.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-13T17:17:19.459Z",
+          "completedAt": "2026-05-20T19:25:42.501Z"
+        },
+        {
+          "id": "15a2be91-9342-4df0-9805-c5a5c140c5f1",
+          "text": "There's still some wrong documentation around using the Hermes runtime skill, because sometimes it's still a reference to the CT runtime skill instead. And it seems like the Gather Information skill is also in a bad shape, because I got this message from an AI that was trying to use it. So I want you to analyze all this and fix it so as in the future, know how to use it proper.\n\nThe message:\n\"The gather-information skill was missing the Hermes WebUI failure mode I hit (ct-runtime unavailable plus missing HERMES_WEBUI_* runtime context), so I’m patching that reusable skill with the fallback pattern before I finish.\"",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-13T17:39:06.594Z",
+          "completedAt": "2026-05-18T08:04:57.853Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "b65b799a-b76e-4f3d-a632-09829066b0f4",
+          "text": "There seems to be a bug in the Active Session section of the Office Dashboard where if you have multiple sessions that all go into the same project, that when you click the different sessions, you can take into the same session. So if you have different sessions for one project, they all connect to one session, it seems.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-13T17:40:48.732Z",
+          "completedAt": "2026-05-18T08:05:06.505Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "215b5c7b-c115-49ac-9fc3-1d50c8628957",
+          "text": "I got this error trying to send a message?\n\nError: Failed to execute 'setItem' on 'Storage': Setting the value of 'hermes-webui-inflight' exceeded the quota.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-13T17:48:34.700Z",
+          "completedAt": "2026-05-18T08:05:12.468Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "576dbf31-06c9-487a-9cfe-c060c97f745b",
+          "text": "Something's wrong with the readable outputs. It seems like it's always attached to a session, so it's not like one readable output per session, because I can go into a completely unrelated session and see the same readable outputs if I just scroll up. And that's another thing. It shouldn't be put there, it shouldn't be put as an overlay on top of the shaft. With a clear like close readable output button, so it's really easy to see that this is the message and when you're done, you click close and you can continue on.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-13T17:51:19.296Z",
+          "completedAt": "2026-05-18T08:05:21.058Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "ab84e898-7e73-4d01-8a14-c38f7e7242dd",
+          "text": "Something is wrong with the play notification. I just had a session finish and was supposed to send a play notification, and we recently modified the play notification so that when we send one or rather we send one immediately and it says building until it's done and then it says play. That did not happen when that session finished. All I could see was an old play notification. So something is wrong with how sessions trigger play notifications. How it should work is that as soon as it's done with its task, it should start building the project, which should send a build notification and when that build is done, that build notification should turn into a play notification. Make sure that is the case.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-13T19:19:51.969Z",
+          "completedAt": "2026-05-18T08:05:25.947Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "ca9ca845-9585-479e-aa7d-06561528e252",
+          "text": "updated hermes agent and bow ibget this error: Error: Provider 'openai-codex' is set in config.yaml but no API key was found. Set the OPENAI-CODEX_API_KEY environment variable, or switch to a different provider with hermes model.\n\nI should be logged in with cdex oauth and use my chatgpt subscription?",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-13T23:51:07.401Z",
+          "startedAt": "2026-05-13T23:51:07.875Z",
+          "completedAt": "2026-05-18T08:05:30.724Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z",
+          "createdBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "startedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "updatedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          }
+        },
+        {
+          "id": "a855c585-98a1-4b2f-9e4c-847d98f6fa43",
+          "text": "Theres something wrong ith the pla notification pipeline. I started a task in the morning, and i checked back in it before i went to bed. At that point i saw a build notification, and i verified that it was indeed building. This is strange since it finished the task hours ago, so it was supposed to have been done building already, so we should have seen a play notification immeditaly.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-14T18:11:20.125Z",
+          "completedAt": "2026-05-18T08:05:33.264Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "606cd8e8-c267-4947-8008-f07b29cfb407",
+          "text": "I want to make it so that the sessions opened from the ops dashboard are more simplistic. Right now you get the entire hermes web ui which feels overwhelming when i just want to inspect the chat for that session. Is it possible to hide the side panels e.t.c.? And only show the chat and a back button that takes you to the dashboard?",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-15T08:09:23.659Z",
+          "completedAt": "2026-05-18T08:05:36.871Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "5f279106-3745-40ed-8f75-c02acca32fdb",
+          "text": "The way the dashboard and tasks is setup, its ment to have its own hermes profile for each project, which gets automatically selected for that session when it starts, the same way it automaticalöy sets the workspace ti the project folder. This doesnt work right now.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-15T08:11:16.428Z",
+          "completedAt": "2026-05-18T08:05:40.812Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "9e97db2a-1a20-47f6-9374-4d32a2decd30",
+          "text": "You need to remove the codex status label, it isnt relevant in hermes",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-15T11:02:39.538Z",
+          "completedAt": "2026-05-18T08:05:43.512Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "f29ab583-bbc3-49c5-ae47-122e81c530c0",
+          "text": "Suddenly building the summons project fails. Says its missing a play pipeline? But a play confif shouldnt be needed",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-15T17:47:04.914Z",
+          "completedAt": "2026-05-18T08:05:47.526Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "1667e558-008f-4c61-a6f8-272fe1a1f20f",
+          "text": "Theres a bug where a session can create a duplicate of it self? See the two with the same task. Fix this.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-15T17:48:52.229Z",
+          "completedAt": "2026-05-18T08:05:49.621Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "48ee0ce1-c5eb-401f-a2ae-0168553405c4",
+          "text": "I am gettin the same from the execute all tasks button. Why are we starting sessions in different wags? Shouldnt they all go through the same pipe?\n\nError: Provider 'openai-codex' is set in config.yaml but no API key was found. Set the OPENAI-CODEX_API_KEY environment variable, or switch to a different provider with hermes model.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-15T18:00:25.126Z",
+          "startedAt": "2026-05-15T18:00:26.550Z",
+          "completedAt": "2026-05-18T08:05:54.484Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "57f55231-5a8a-4607-b778-28f5ed35eb88",
+          "text": "Closing a session through tge active sessions section innthe ops dashboard is really unresponsive, can take up to 20 seconds for a session to close afrer you have clicked the close session button.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-15T23:50:40.899Z",
+          "completedAt": "2026-05-18T08:05:57.930Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "2dff726c-2917-4d8c-a8e5-f2ed60da2ea7",
+          "text": "Something is wrong about tge message render order in the session chat. When the AI is done it shows the users message at the bottom, and the response above it.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-15T23:51:59.694Z",
+          "completedAt": "2026-05-18T08:06:00.897Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "23d555c5-8526-4bfd-b838-5524832861b0",
+          "text": "If i get disconnected from a session i always have to close it and reopen it to make sure it correctly reconnects. This is despite it saying it successfully reconnected.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-15T23:53:06.511Z",
+          "completedAt": "2026-05-18T08:06:05.683Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "ac6a1395-991c-4294-ba00-a792b915b6ab",
+          "text": "Sometomes clicking close session in the ops dashboard doesnt close the session, even though i get a pop up saying session closed.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-15T23:56:22.005Z",
+          "completedAt": "2026-05-18T08:06:08.928Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "dcac3f0d-a0cf-4efc-b6e9-510aa5c454f4",
+          "text": "When i have a build notification it is there for one second, then disappears fo 1 second, is there aain for one second, then  gone. It does this untilits done building. Make it stable",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T00:05:55.372Z",
+          "completedAt": "2026-05-18T08:06:16.831Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "e343264a-4f58-4404-beb0-dda3270e576d",
+          "text": "There is a bug where if i create a session in the ops dashboard, it creates just one session initially but overtime the session might duplicate, so that at least innthe active sessions section of the ops dashboard it looks like there are several sessions for the same task.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T06:13:58.159Z",
+          "startedAt": "2026-05-16T06:13:58.680Z",
+          "completedAt": "2026-05-18T08:06:22.848Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "f55aa611-e686-45dd-b0ab-f67da0255aaa",
+          "text": "When i run a task from the quick task section it opens the session so i can see the entire hermes UI. It should open it in the simple view the same as we do whem we click a session in the active session section.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T06:40:55.951Z",
+          "completedAt": "2026-05-18T08:06:31.231Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "bec98f7b-225b-428e-bdd3-a727eeb888de",
+          "text": "There is still a bug where build notifications only trigger when I have the phone open. I can have a session running and once it finishes, it won't send a build notification immediately. It won't start building immediately, rather. It waits until I open the phone and then it starts building. The whole idea is that once it's done, it automatically starts building so that I don't have to wait for it to finish building, so that when I open the phone, it's already done. The only reason I should ever see a build notification is that I actually go in while it's building, so I want you to fix this.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T07:12:01.661Z",
+          "completedAt": "2026-05-18T08:06:44.364Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "6f9cb5f9-e3e2-4b0d-95cb-02308f0940e3",
+          "text": "Inwant to make it so that when we get a play fallback/fail notification it has the entore logs attached inna scrollview section so you can easily see what caused the build to fail.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T07:20:24.940Z",
+          "completedAt": "2026-05-18T08:06:40.237Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "aaca97e2-b37a-43a1-8b8c-2c8d313ea787",
+          "text": "There's still a bug where I can't build a project in the project view, and if it doesn't have a play config, the play configs aren't necessary. So I want you to really look through this entire play pipeline and clean up the UI, clean it up. So this bug doesn't occur anymore because it's been fixed in the past, but now it's back. So look at the root of the issue and the symptom affix it.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T07:36:31.199Z",
+          "completedAt": "2026-05-18T08:06:51.510Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "5e9d1376-4181-46ab-adfe-4b4feedc6879",
+          "text": "There is still a bug where when we go into a session or other when we connect to a session, it more often than not fails to reconnect and it shows a stale version of the chat. To fix it, I have to leave the chat and then switch another chat and go back in to really make it refresh. This is very cumbersome, so I want you to look at the simple session viewer where we only see the chat and the input field. The one where you get to when you click the sessions in the active sessions view in the dashboard and I want you to add in the top right corner refresh button that does this automatically. So when I click it, it should act as if I go away from the session, reload another session, then go back to this session to reload it, make it like a forced automatic refresh.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T08:28:29.102Z",
+          "completedAt": "2026-05-18T08:06:56.127Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "ff2518af-a990-44ce-9394-bfb75a1f1dfe",
+          "text": "There are two build buttons on the projects in the project page",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T08:57:38.057Z",
+          "completedAt": "2026-05-18T08:06:58.300Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "4a3af5fb-16d1-41bf-801b-e7cf38c995ea",
+          "text": "Theres a bug where the log views when building keep crolling to the top when i try to scroll down. This happens both in the project view and in the play fail notofocations. It shouldnt jump at all while scrolling, and when we are at tge bottom it should keep scrolling so the bottom is always visible.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T09:00:24.806Z",
+          "completedAt": "2026-05-18T08:07:01.003Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "d72745e9-b403-4c63-abad-55111fc203d1",
+          "text": "Something is wrong with play notifications. I've been iterating on the summer's project and it created a play notification once, I think. Then it just felt like it reused the same one because the notification I kept playing when I looked closely at the time it said that it was built several hours ago. And I actually had to go into the project to manually restart the project or have it to rebuild so I could see the new changes. So this is obviously not what I want. Maybe it's just a matter of restarting the server if you are starting the project, if you realize that it's already up, but this should be fixed, it should be rebuilt every time when a session finishes and yeah, start building.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T12:13:20.282Z",
+          "completedAt": "2026-05-18T08:07:10.011Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "34f8698d-0f2b-4a79-8a8c-ff4e3dbc9736",
+          "text": "We have this feature where if we click a play notification and start to play the project, we should get a pop-up that shows the session, the simplified session view in this pop-up, which means that we can play the project and have a very easy access to the session that is currently working on the project. So if you see, so feedback once again, we can just quickly pop into the chat. I can see the pop-up, but I'm not seeing that it works. It just shows like a broken link icon, and it's just great. So take a look at that and fix that.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T12:14:20.809Z",
+          "completedAt": "2026-05-18T08:07:18.117Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "279abca1-c3ca-4f62-b6ea-24fb433c17c1",
+          "text": "There's still a bug where when we create a task through the quick task runner, it opens the session as it should, but it opens it with full Hermes view. It should use the simplified view of the same window when we click a session in the active session section in the dashboard, so we just see the chat and the input field, nothing else.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T12:15:25.658Z",
+          "completedAt": "2026-05-18T08:07:23.615Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "8efefebb-651a-4164-8e7a-90f41bbed938",
+          "text": "We need to take a look at how we're doing readable outputs, because right now it feels very tied to cloud terminal, because it keeps breaking. And the way I wanted to work is that when it creates a readable output, it should take over the say simplified session views. You should be rendered on top of the shed. And then you should display everything and at the bottom you should have a close readable output. Right now I don't think it works at all. Previously when it worked kind of, it created a readable output at the top, like above the shed, not on top of rendered over it. And it felt like all sessions were sharing a readable output. Readable outputs should not be shared between sessions. Each session should have their own readable output.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T12:16:56.881Z",
+          "completedAt": "2026-05-18T08:07:28.142Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "826be284-fa5f-4c11-9519-f45c3c4c6c7a",
+          "text": "Plain notifications are still broken and a project finishes. I think if it's an obsession finishes and I think it's already in a play state, it doesn't restart. So I'm just stuck on the old play build. It should restart and create a new build notification even if it's already running like it should close it down and start it again.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T17:28:21.515Z",
+          "startedAt": "2026-05-16T17:28:22.691Z",
+          "completedAt": "2026-05-18T08:07:31.165Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "e71e104e-72b5-438a-bd76-a5425fc681f8",
+          "text": "Screenshots sttached in the quick task rjnner doesnt seem to get sent to the session or attached to the task.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T19:54:59.228Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "4f336b36-f338-4b71-a47d-cf3d35119cc9",
+          "text": "Theres a bug where i currently have a summons session in the active sessions section of the ops dashboard, but when i open it it opens an old version? It looks like a pretty old message is the atest one, and i cant see my last X messages to it. It remains like that evwn when i refresh? Analyze thiöe code in depth and fix this. Dont just find a solution, analyze the code and find the root cause of these issues and why its so easy to write code that causes these errors. Then find a solution that fixes this on a fundamental level that makes it harder for these kinds of bigs to emerge.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T19:59:29.800Z",
+          "completedAt": "2026-05-18T08:07:51.302Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "c24c59d4-a5af-4344-a37b-63200bf6533f",
+          "text": "I get this error trying to push the summons project, see the attached screenshot.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-17T08:50:56.379Z",
+          "startedAt": "2026-05-17T08:50:58.602Z",
+          "completedAt": "2026-05-18T08:07:54.604Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "96619b90-ab5b-46fe-8889-3c7a42bb91a2",
+          "text": "The refresh button in the simplified session view is not identical to switching in and out of session to refresh it, because sometimes when I refresh using the button while it's running, I can see that it goes from maybe 50 tool calls to back to one. So something wrong is happening on the front end, reuse the refresh button. And there's also another bug where sometimes both the back to a dashboard button and the refresh button in this simplified chat view just stops working. And I can't click them, I can't interact with them at all. So I have to shut down or use the back button on the phone to go back. So yeah, I want you to analyze these issues and fix them.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-17T13:32:32.751Z",
+          "completedAt": "2026-05-20T19:25:55.822Z"
+        },
+        {
+          "id": "29d9c676-e1d4-4109-ae2c-e9c0b4278b21",
+          "text": "Closing a session by clicking the Closed Session button in the Up to Dashboard under the Active Session section is really unresponsive. I can click, and then the pop-up shows up immediately. I click Confirm to close it, and then I can wait several seconds for it to actually disappear. And sometimes it doesn't even disappear, that all is not closed at all. So I want you to look at this and make this more stable, so it's really snappy and fast.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-17T13:55:12.197Z",
+          "completedAt": "2026-05-18T08:08:51.883Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "612dd194-0a7c-4d0e-8065-a558e2129697",
+          "text": "I have a session that refuses to get closed. I go to the active session section in the OPS dashboard, and I click close session on the summons task that is about the playback issues, and it says that the session is actually closed, etc. but it's still there. I can't get rid of it.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-17T17:10:40.954Z",
+          "completedAt": "2026-05-18T08:09:07.942Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "a5a50cce-6266-4e7a-9e37-d364ef1446aa",
+          "text": "I'm having issues with opening sessions from the active session section in the OPS dashboard. When I click the task for the Hermes Web UI, where it has the Analyze the Curient Project task file and execute blah blah blah. That's the task. It's the older one, not the one that's curing the running. When I open that one, it just opens an empty session. I can't even see the messages sent to it. It's loading the wrong session when I click it for some reason. I'm having issues with these before, where I opened a session and it opened a still older version of the chat, where I couldn't see a lot of my previous messages. Something is very wrong here. I want you to analyze this and make sure that you find the root cause of why sessions that are being opened this way can be very weird and open wrong shots, etc. So yeah, get to the root of it.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-17T17:12:32.232Z",
+          "completedAt": "2026-05-18T08:09:20.719Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "e2e5c325-00a9-4877-9d16-110678c0c0dd",
+          "text": "I want to add a small indicator on the individual sections in the active sessions section of the OPS dashboard where we indicate if it's currently running or not, like if it's working on something, because when we open the session, we can very clearly see, like, yeah, this is working, this is the current status, it's been doing this many tool calls, et cetera. I just want to add a small indicator on the little session preview in the active sessions section in the OPS dashboard so I can see the status and glance of all these sessions.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-17T17:13:43.085Z",
+          "completedAt": "2026-05-20T19:26:25.159Z"
+        },
+        {
+          "id": "6f81c4dd-5a3e-407c-bb25-7402536ccfca",
+          "text": "I want to make it so that when assertion finishes, it starts building the project. It was attached to. And if that build fails, I want to automatically take the logs and send them back into that session with the text. The build failed, these are the logs, analyze them and fix the issue. Because this way we can have it all to repair and the build if it introduced some bugs.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-17T17:14:40.250Z",
+          "completedAt": "2026-05-18T08:09:58.631Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "44259116-c387-4f36-8dd9-90fc77efd409",
+          "text": "I want you to figure out why the session tied to the summons project didnt trigger a build when it finished. At least i dont think it did, i cant see a build notification or a play notification. Is it relevant that last time it tried to build it failed?",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-17T18:13:34.925Z",
+          "startedAt": "2026-05-17T18:13:37.486Z",
+          "completedAt": "2026-05-18T08:10:04.028Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "4b4155ce-feed-46a0-8f73-bc57b64635e3",
+          "text": "Theres a really stubborn bug. In the project view on the summons project the build button is grayed out because it says play is not configured. I have told an agent to fix this earlier because a project doesnt need to have a specific play configuration as all projects can run on the same one. The config requirement is a legacy system that somehow still lives and creates bugs. I want you to analyze the code in depth and fix this. Dont just find a solution, analyze the code and find the root cause of these issues and why its so easy to write code that causes these errors. Then find a solution that fixes this on a fundamental level that makes it harder for these kinds of bigs to emerge.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-17T20:03:13.854Z",
+          "startedAt": "2026-05-17T20:03:15.731Z",
+          "completedAt": "2026-05-18T08:10:06.887Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "bd4d70fb-4647-4754-8f25-52fedcc9e720",
+          "text": "But dismissing notifications is really unresponsive. I click the dismiss button and it can take several seconds before they actually disappear. Fix this is really snappy and nice to use.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-18T04:36:49.122Z",
+          "completedAt": "2026-05-18T08:10:10.174Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "232f9999-5e94-4eef-abe3-62cccbcfc460",
+          "text": "I've been trying to fix this bug for quite some time now, and I've constantly failed. When I close a session in the active session section of the Ops dashboard, it takes forever for it to actually close, if it even does, sometimes I press close, and it just sits there, even though it comes up as a pop of the session closed, so that UI is really unresponsive and it feels terrible to use, so I want you to analyze what's going on and fix this. Dont just find a solution, analyze the code and find the root cause of these issues and why its so easy to write code that causes these errors. Then find a solution that fixes this on a fundamental level that makes it harder for these kinds of bigs to emerge.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-18T04:37:50.931Z",
+          "completedAt": "2026-05-18T08:10:14.259Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "d54a249d-bc41-453e-b3b7-ac6274cbe049",
+          "text": "Currently, I have three active sessions in the OPS dashboard under the active sessions section. And two are connected to the summons project, and one is connected to the Hermus Web UI project, and you're here in the running in the Hermus Web UI session. I have an issue where no matter what I do, I can't really close the two sessions that are connected to the summons project. I don't know why, but when I press close session in the OPS dashboard, it comes up confirmation, I confirm, and it comes up a little pop-up that says session closed, but it's still there. I can't get rid of it for some reason, so I want you to analyze them in depth and figure out why it's keeping them from actually being closed, getting closed.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-18T06:00:18.781Z",
+          "startedAt": "2026-05-18T06:00:21.356Z",
+          "completedAt": "2026-05-18T08:10:17.287Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "a6aedd73-4aab-48a8-bce4-52bba4b369b3",
+          "text": "I want to be able to create a new workspace at a folder that doesnt exist, and when i do it will automatically create an empty folder at that path. We already have UI for creating a workspace, but it only allows you to do it at existing folders.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-18T07:34:20.789Z",
+          "completedAt": "2026-05-18T08:12:37.004Z",
+          "archived": true,
+          "archivedAt": "2026-05-18T08:12:47.062Z"
+        },
+        {
+          "id": "3a13bffb-39b6-42b4-bca2-f9bc925cfa47",
+          "text": "Adding tasks through the new task UI in the project/epics page is really annoying as it constantly deselects the inputfield every 5 seconds or so. Fix this.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-18T08:16:31.343Z",
+          "completedAt": "2026-05-20T19:26:54.365Z"
+        },
+        {
+          "id": "71fa99ea-937c-4e2b-8049-835aceb4436c",
+          "text": "There is something wrong with how we work with profiles. We need to be able to have multiple profiles active at once, across different chats. So i can start a task for the summons project, and have it use the summons profile, and then start a task in the hermes web ui project, and have it use the hermes profile. Right now it seems like we can only have one profile active at once, so the latest profile takes over. Atleast thats what the UI shows, i see that it uses hermes even in my summons project tasks.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-18T08:46:59.001Z",
+          "completedAt": "2026-05-20T19:27:00.250Z"
+        },
+        {
+          "id": "c39ca6d2-2e02-464c-b4b2-8284c76dd46a",
+          "text": "All 1 upload(s) failed: Allmänna Arvsfonden 2025-20260519T045417Z-3-001.zip: <html>\n<head><title>413 Request Entity Too Large</title></head>\n<body>\n<center><h1>413 Request Entity Too Large</h1></center>\n<hr><center>nginx/1.24.0 (Ubuntu)</center>\n</body>\n</html>\n<!-- a padding to disable MSIE and Chrome friendly error page -->\n<!-- a padding to disable MSIE and Chrome friendly error page -->\n<!-- a padding to disable MSIE and Chrome friendly error page -->\n<!-- a padding to disable MSIE and Chrome friendly error page -->\n<!-- a padding to disable MSIE and Chrome friendly error page -->\n<!-- a padding to disable MSIE and Chrome friendly error page -->\n\n\nI am getting these errors uploading a large file to a workspace",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-19T05:30:16.574Z",
+          "startedAt": "2026-05-19T05:30:19.932Z",
+          "completedAt": "2026-05-20T19:28:09.017Z"
+        },
+        {
+          "id": "8c31da20-f74c-4ca7-b569-edfd34bd4401",
+          "text": "The transcribe button built into hermed web ui that is used in the Chat UI seems more reliably than the one we are using under the ops dashboard. Make them use the same transcribe pipeline.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-21T14:14:49.852Z",
+          "startedAt": "2026-05-21T14:14:50.858Z",
+          "lastSessionAt": "2026-05-21T20:06:00.195Z"
+        },
+        {
+          "id": "320e3649-b1dc-45ad-b633-d155eee70c47",
+          "text": "Something is wrong with how we connect sessions in the active sessions section in the ops dashboard with the actual session. Most of the time it works, but now the currently act8ve summons session that is supposed to be attached to the session where we evaluate the performance of the simulation, but instead it opens up a really old session where we fixed a build error? What is going wrong here?",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-21T20:15:08.961Z"
+        },
+        {
+          "id": "935be0d6-9530-4d2c-b725-6a5601adef5a",
+          "text": "I made some changes to hermes to properly archive old sessions, and i restarted hermes to load the changes. But it didnt start back up after restart.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-25T05:12:52.775Z",
+          "startedAt": "2026-05-25T05:12:53.175Z",
           "createdBy": {
             "id": "pontus",
             "label": "Pontus"
@@ -290,9 +1225,162 @@
             "id": "pontus",
             "label": "Pontus"
           },
-          "sessionId": "a4084ce4-7f0b-46c8-a793-4f9940fdfc50",
-          "lastSessionAt": "2026-05-06T07:21:21.812Z",
-          "inProgress": true
+          "sessionId": "3ee941d0-3a30-4124-97c2-7a3bd1d0c7f0",
+          "lastSessionAt": "2026-05-25T05:12:53.175Z",
+          "qaStatus": "not-synced"
+        }
+      ]
+    },
+    {
+      "id": "f3c9a582-463e-46bb-a33f-17959fab0785",
+      "title": "AI automation",
+      "tasks": [
+        {
+          "id": "a65e5ab4-539f-4a03-bc07-17648573d655",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-15T21:08:59.291Z",
+          "startedAt": "2026-05-15T21:09:02.876Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "be4b5dff-b46c-4cc5-9b45-7d7c40ba643f",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-15T23:57:08.151Z",
+          "startedAt": "2026-05-15T23:57:08.926Z",
+          "inProgress": true,
+          "lastSessionAt": "2026-05-15T23:57:08.926Z"
+        },
+        {
+          "id": "bd3e9513-5c5b-4a80-b68a-ccaa212d8def",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T07:09:47.824Z",
+          "startedAt": "2026-05-16T07:09:49.008Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "1afb81b7-5ef5-4a42-acb9-5af13ddd733c",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T07:36:33.517Z",
+          "startedAt": "2026-05-16T07:36:34.677Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "964bb655-d193-480d-91fd-b40406ff86a5",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T08:28:30.867Z",
+          "startedAt": "2026-05-16T08:28:31.571Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "a48c37e7-1da5-45fe-9b86-0a6683eaefdc",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T09:01:34.044Z",
+          "startedAt": "2026-05-16T09:01:35.332Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "78ef2dca-c315-4780-8fbb-f65189b2a2b3",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-16T12:14:35.815Z",
+          "startedAt": "2026-05-16T12:14:37.105Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "6734370d-cfe0-4427-b7ed-1c7522d729a7",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-17T06:55:18.542Z",
+          "startedAt": "2026-05-17T06:55:20.194Z",
+          "lastSessionAt": "2026-05-17T13:54:11.696Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "bb3aae57-e5c5-4b69-b100-4bc61a0d79bc",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-17T14:28:11.710Z",
+          "startedAt": "2026-05-17T14:28:15.195Z",
+          "inProgress": true,
+          "sessionId": "342b9d74c36c",
+          "lastSessionAt": "2026-05-17T14:28:15.195Z"
+        },
+        {
+          "id": "9f0cdd4c-edcc-4fcb-965a-927b2437272d",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-17T17:14:49.487Z",
+          "startedAt": "2026-05-17T17:14:52.295Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "b2006508-ae2f-4492-98cb-a6c55ca6795b",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-18T04:37:57.248Z",
+          "startedAt": "2026-05-18T04:37:59.384Z",
+          "inProgress": true,
+          "sessionId": "cd21ded9811a",
+          "lastSessionAt": "2026-05-18T04:37:59.384Z"
+        },
+        {
+          "id": "de17b182-829c-49c2-9b80-eada6dea147e",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-18T07:34:25.205Z",
+          "startedAt": "2026-05-18T07:34:30.925Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "cbab3ce5-7c6b-4407-b7e0-9c6d4eed8795",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-18T08:23:59.300Z",
+          "startedAt": "2026-05-18T08:24:02.036Z",
+          "lastSessionAt": "2026-05-18T12:43:33.144Z"
+        },
+        {
+          "id": "24be5cf0-b779-4122-ae97-86b02fca6c01",
+          "text": "Investigate why some Hermes WebUI-launched project sessions omit the `HERMES_WEBUI_RUNTIME_*` / request-input bridge env in the agent process so `hermes-runtime doctor --json` reports missing runtime API/request-input context and agents have to fall back to manual runtime workflows.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-25T05:23:00.000Z",
+          "markers": [
+            "AI suggestion"
+          ]
         }
       ]
     }
