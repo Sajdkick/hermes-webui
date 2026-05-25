@@ -1227,7 +1227,7 @@
           },
           "sessionId": "3ee941d0-3a30-4124-97c2-7a3bd1d0c7f0",
           "lastSessionAt": "2026-05-25T05:12:53.175Z",
-          "qaStatus": "not-synced"
+          "qaStatus": "ready-for-test"
         }
       ]
     },
@@ -1253,8 +1253,11 @@
           "grade": "green",
           "createdAt": "2026-05-15T23:57:08.151Z",
           "startedAt": "2026-05-15T23:57:08.926Z",
-          "inProgress": true,
-          "lastSessionAt": "2026-05-15T23:57:08.926Z"
+          "qaStatus": "ready-for-test",
+          "updatedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          }
         },
         {
           "id": "bd3e9513-5c5b-4a80-b68a-ccaa212d8def",
@@ -1325,9 +1328,11 @@
           "grade": "green",
           "createdAt": "2026-05-17T14:28:11.710Z",
           "startedAt": "2026-05-17T14:28:15.195Z",
-          "inProgress": true,
-          "sessionId": "342b9d74c36c",
-          "lastSessionAt": "2026-05-17T14:28:15.195Z"
+          "qaStatus": "ready-for-test",
+          "updatedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          }
         },
         {
           "id": "9f0cdd4c-edcc-4fcb-965a-927b2437272d",
@@ -1347,9 +1352,11 @@
           "grade": "green",
           "createdAt": "2026-05-18T04:37:57.248Z",
           "startedAt": "2026-05-18T04:37:59.384Z",
-          "inProgress": true,
-          "sessionId": "cd21ded9811a",
-          "lastSessionAt": "2026-05-18T04:37:59.384Z"
+          "qaStatus": "ready-for-test",
+          "updatedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          }
         },
         {
           "id": "de17b182-829c-49c2-9b80-eada6dea147e",
