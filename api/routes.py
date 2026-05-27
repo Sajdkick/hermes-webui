@@ -2385,6 +2385,15 @@ def _is_cli_session_for_settings(session: dict) -> bool:
     )
 
 
+def _normalize_sidebar_source_flags(session: dict) -> dict:
+    """Return a sidebar row with the frontend CLI flag matching source metadata."""
+    if not isinstance(session, dict):
+        return session
+    normalized = dict(session)
+    normalized["is_cli_session"] = is_cli_session_row(normalized)
+    return normalized
+
+
 CLI_VISIBLE_SESSION_CAP = 20
 
 
@@ -2414,7 +2423,11 @@ def _merge_cli_sidebar_metadata(ui_session: dict, cli_meta: dict) -> dict:
     if not cli_meta:
         return dict(ui_session)
     merged = dict(ui_session)
-    merged["is_cli_session"] = True
+    # Only preserve the CLI flag when the imported metadata is actually a CLI
+    # row. WebUI sessions are also mirrored into state.db; treating every
+    # matching state row as CLI hides long WebUI continuations from the default
+    # sidebar source tab.
+    merged["is_cli_session"] = is_cli_session_row(cli_meta)
     for key in (
         "source_tag",
         "raw_source",
@@ -4415,6 +4428,7 @@ def handle_get(handler, parsed) -> bool:
             diag.stage("load_settings")
             settings = load_settings()
             show_cli_sessions = bool(settings.get("show_cli_sessions"))
+            webui_sessions = [_normalize_sidebar_source_flags(s) for s in webui_sessions]
             if show_cli_sessions:
                 diag.stage("get_cli_sessions")
                 cli = get_cli_sessions()
@@ -4432,6 +4446,7 @@ def handle_get(handler, parsed) -> bool:
                         for key in ("source_tag", "raw_source", "session_source", "source_label"):
                             if not s.get(key) and meta.get(key):
                                 s[key] = meta[key]
+                webui_sessions = [_normalize_sidebar_source_flags(s) for s in webui_sessions]
                 # Apply the same CLI visibility semantics to imported local copies so
                 # low-value imported artifacts do not leak into the sidebar.
                 webui_sessions = [s for s in webui_sessions if is_cli_session_row_visible(s)]

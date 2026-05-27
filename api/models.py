@@ -2295,7 +2295,18 @@ def _enrich_sidebar_lineage_metadata(sessions: list[dict]) -> None:
         if sid in metadata:
             entry = dict(metadata[sid])
             state_db_title = entry.pop('_state_db_title', None)
+            state_db_source = entry.pop('_state_db_source', None)
+            state_db_source_tag = entry.pop('_state_db_source_tag', None)
+            state_db_raw_source = entry.pop('_state_db_raw_source', None)
+            state_db_session_source = entry.pop('_state_db_session_source', None)
+            state_db_source_label = entry.pop('_state_db_source_label', None)
             session.update(entry)
+            if state_db_source == 'webui':
+                session['source_tag'] = state_db_source_tag
+                session['raw_source'] = state_db_raw_source
+                session['session_source'] = state_db_session_source
+                session['source_label'] = state_db_source_label
+                session['is_cli_session'] = False
             title = session.get('title')
             if (
                 state_db_title
