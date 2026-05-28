@@ -15,6 +15,7 @@
 
 - Gateway-backed WebUI chat now forwards configured prefill/session-recall context and a compact WebUI session-context block into delegated Gateway turns, so browser sessions retain note recall, connected-platform awareness, and delivery hints instead of sending only the latest user message. If the dynamic prefill script fails, WebUI falls back to the configured static router prefill when available.
 - Oversized WebUI startup prefill payloads now respect a configurable context budget (`webui_prefill_context_max_chars` / `HERMES_WEBUI_PREFILL_CONTEXT_MAX_CHARS`, default 12,000 chars). When a dynamic prefill script exceeds the budget and a compact static prefill file is configured, WebUI falls back to the compact file; otherwise it injects a small retrieval instruction instead of dumping the full note/body payload into every new chat.
+- Sidebar now keeps the newest active continuation visible when it has more recent activity than an older fuller pre-compression snapshot in the same lineage. Adds lineage-aware dedupe for WebUI-origin state-db projections, restores normal context-only turns into the visible transcript after compression while preserving order, and recognizes `[Session Arc Summary]` as a compression marker so it isn't backfilled into the chat transcript.
 
 ## [v0.51.156] — 2026-05-28 — Release EB (stage-batch38 — 2-PR Tier B cleanup: WebUI request/runtime hardening + chat-start provider fallback)
 
