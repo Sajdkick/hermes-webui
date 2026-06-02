@@ -63,7 +63,7 @@ def test_load_session_clears_saved_stale_404_and_rethrows_to_boot():
     assert "localStorage.removeItem('hermes-webui-session')" in block, (
         "loadSession must clear stale saved session IDs on 404"
     )
-    assert "_loadingSessionId = null" in block, (
+    assert "_clearSessionLoad(sid, loadToken);" in block, (
         "loadSession must clear the in-flight load marker before rethrowing"
     )
     assert re.search(r"throw\s+e", block), (

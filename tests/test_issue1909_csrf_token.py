@@ -161,7 +161,7 @@ def test_index_shell_injects_session_bound_csrf_token(monkeypatch):
 
     try:
         handler = _FakeHandler({"Cookie": f"{auth.COOKIE_NAME}={cookie}"})
-        assert routes.handle_get(handler, SimpleNamespace(path="/", query="")) is True
+        assert routes.handle_get(handler, SimpleNamespace(path="/index.html", query="")) is True
         assert captured["content_type"] == "text/html; charset=utf-8"
         assert f"csrfToken:{token!r}".replace("'", '"') in captured["body"]
     finally:

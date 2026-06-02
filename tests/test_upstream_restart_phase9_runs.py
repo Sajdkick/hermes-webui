@@ -106,6 +106,15 @@ def test_phase9_task_launch_creates_run_activity_and_readable_output_route(monke
     assert listing_payload["runs"][0]["id"] == run["id"]
     assert listing_payload["runs"][0]["status"] == "running"
 
+    summary_listing = _FakeHandler()
+    assert handle_get(summary_listing, urlparse(f"http://example.com/api/ops/runs/summary?projectId={project['id']}")) is True
+    summary_payload = _response_json(summary_listing)
+    assert summary_payload["summary"] is True
+    assert summary_payload["count"] == 1
+    assert summary_payload["runs"][0]["id"] == run["id"]
+    assert "requests" not in summary_payload["runs"][0]
+    assert "readableOutput" not in summary_payload["runs"][0]
+
     compat_create = _FakeHandler(
         {
             "projectId": project["id"],
@@ -335,3 +344,46 @@ def test_phase9_ops_ui_renders_run_activity_panel():
         text=True,
     )
     assert completed.stdout.strip() == "ok"
+
+
+def test_phase9_run_summary_skips_rich_enrichment(monkeypatch, tmp_path):
+    from api import ops_runs
+
+    runs_file = tmp_path / "runs.json"
+    monkeypatch.setattr(ops_runs, "OPS_RUNS_FILE", runs_file)
+    runs_file.parent.mkdir(parents=True, exist_ok=True)
+    runs_file.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "run-1",
+                    "projectId": "project-1",
+                    "taskId": "task-1",
+                    "sessionId": "session-1",
+                    "title": "Quick summary",
+                    "summary": "Finished.",
+                    "status": "succeeded",
+                    "createdAt": "2026-05-03T10:00:00Z",
+                    "updatedAt": "2026-05-03T10:01:00Z",
+                    "metadata": {"projectName": "Hermes", "taskText": "Do work"},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        ops_runs,
+        "_enrich_run",
+        lambda run: (_ for _ in ()).throw(AssertionError("summary route should not enrich runs")),
+    )
+
+    payload = ops_runs.list_ops_run_summaries({"projectId": "project-1"})
+
+    assert payload["summary"] is True
+    assert payload["count"] == 1
+    [run] = payload["runs"]
+    assert run["id"] == "run-1"
+    assert run["projectName"] == "Hermes"
+    assert run["taskText"] == "Do work"
+    assert "requests" not in run
+    assert "readableOutput" not in run

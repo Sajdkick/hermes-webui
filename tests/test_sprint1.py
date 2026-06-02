@@ -352,22 +352,29 @@ def test_upload_respects_attachment_dir_env(monkeypatch, tmp_path):
     assert _session_attachment_dir("session-123") == inbox.resolve() / "session-123"
 
 
-def test_upload_too_large(cleanup_test_sessions):
-    """Uploading a file over MAX_UPLOAD_BYTES is rejected (413 or connection closed)."""
-    sid, _ = make_session_tracked(cleanup_test_sessions)
+def test_upload_too_large(monkeypatch):
+    """Uploading a request over MAX_UPLOAD_BYTES is rejected before reading the body."""
+    from api import upload
 
-    # 21MB > 20MB limit
-    big = b"x" * (21 * 1024 * 1024)
-    try:
-        result, status = post_multipart("/api/upload", {"session_id": sid}, {
-            "file": ("big.bin", big)
-        })
-        # If we get a response it should be 413
-        assert status == 413, f"Expected 413, got {status}: {result}"
-    except (urllib.error.URLError, ConnectionResetError, BrokenPipeError):
-        # Server closed connection after reading Content-Length > limit before body
-        # This is also valid rejection behavior
-        pass
+    captured = {}
+
+    def fake_json(_handler, payload, status=200, **_kwargs):
+        captured["payload"] = payload
+        captured["status"] = status
+        return payload
+
+    class FakeHandler:
+        headers = {
+            "Content-Type": "multipart/form-data; boundary=test",
+            "Content-Length": str(upload.MAX_UPLOAD_BYTES + 1),
+        }
+        rfile = io.BytesIO(b"")
+
+    monkeypatch.setattr(upload, "j", fake_json)
+    upload.handle_upload(FakeHandler())
+
+    assert captured["status"] == 413
+    assert "File too large" in captured["payload"]["error"]
 
 
 def test_upload_no_file_field(cleanup_test_sessions):

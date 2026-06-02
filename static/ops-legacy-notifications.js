@@ -39,12 +39,15 @@
     function startNotificationPolling(){
       if(notificationPollTimer)return;
       notificationPollTimer=setInterval(async()=>{
-        if(!windowRef._opsDashboardOpen)return;
+        if(!windowRef._opsDashboardOpen||OPS.notificationPollBusy)return;
+        OPS.notificationPollBusy=true;
         try{
           await loadNotifications();
           if(OPS.view==='home'&&!isHomeQuickTaskFieldActive())renderCurrentOpsView();
         }catch(e){
           // Keep polling quiet; explicit refresh surfaces errors.
+        }finally{
+          OPS.notificationPollBusy=false;
         }
       },5000);
     }
@@ -90,35 +93,40 @@
     }
 
     async function loadNotificationDiagnostics(options){
+      const settings=options||{};
       OPS.notificationBusy=true;
       try{
-        const [settings,monitor,logs,subscriptions,pushStatus,autoApproval]=await Promise.all([
+        const includeMonitor=settings.includeMonitor!==false;
+        const includeDetails=settings.lightweight!==true;
+        const [notificationSettings,monitor,logs,subscriptions,pushStatus,autoApproval]=await Promise.all([
           AgentBridgeRef.notifications.settings(),
-          AgentBridgeRef.notifications.monitor(),
-          AgentBridgeRef.notifications.logs({limit:5}),
-          AgentBridgeRef.notifications.pushSubscriptions().catch(()=>({subscriptions:[]})),
-          AgentBridgeRef.notifications.pushStatus().catch(()=>null),
+          includeMonitor?AgentBridgeRef.notifications.monitor():Promise.resolve(OPS.notificationMonitor||null),
+          includeDetails?AgentBridgeRef.notifications.logs({limit:5}):Promise.resolve({logs:OPS.notificationLogs||[]}),
+          includeDetails?AgentBridgeRef.notifications.pushSubscriptions().catch(()=>({subscriptions:[]})):Promise.resolve({subscriptions:OPS.notificationPushSubscriptions||[]}),
+          includeDetails?AgentBridgeRef.notifications.pushStatus().catch(()=>null):Promise.resolve(OPS.notificationPushStatus||null),
           AgentBridgeRef.notifications.autoApproval().catch(()=>({policy:{enabled:false,rules:[]}})),
         ]);
-        OPS.notificationSettings=settings;
-        OPS.notificationMonitor=monitor;
+        OPS.notificationSettings=notificationSettings;
+        if(monitor)OPS.notificationMonitor=monitor;
         OPS.notificationLogs=Array.isArray(logs.logs)?logs.logs:[];
         OPS.notificationPushSubscriptions=Array.isArray(subscriptions.subscriptions)?subscriptions.subscriptions:[];
         OPS.notificationPushStatus=pushStatus;
         OPS.notificationAutoApprovalPolicy=(autoApproval&&autoApproval.policy)||{enabled:false,rules:[]};
-        OPS.notificationBrowserPush=await readBrowserPushState(OPS.notificationPushSubscriptions,pushStatus).catch(error=>({
-          supported:false,
-          secure:false,
-          permission:'',
-          subscribed:false,
-          canSubscribe:false,
-          canUnsubscribe:false,
-          reason:error&&error.message?error.message:'Browser push unavailable.',
-        }));
-        return {settings,monitor,logs,subscriptions,pushStatus,autoApproval};
+        if(includeDetails){
+          OPS.notificationBrowserPush=await readBrowserPushState(OPS.notificationPushSubscriptions,pushStatus).catch(error=>({
+            supported:false,
+            secure:false,
+            permission:'',
+            subscribed:false,
+            canSubscribe:false,
+            canUnsubscribe:false,
+            reason:error&&error.message?error.message:'Browser push unavailable.',
+          }));
+        }
+        return {settings:notificationSettings,monitor,logs,subscriptions,pushStatus,autoApproval};
       }finally{
         OPS.notificationBusy=false;
-        if(!options||options.render!==false)renderCurrentOpsView();
+        if(!settings||settings.render!==false)renderCurrentOpsView();
       }
     }
 

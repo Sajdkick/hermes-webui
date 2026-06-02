@@ -230,6 +230,79 @@ def test_goal_endpoint_sets_goal_and_starts_kickoff_stream(monkeypatch, tmp_path
     assert started[0]["model_provider"] == "openai-codex"
 
 
+def test_goal_endpoint_keeps_project_owned_session_profile_on_kickoff(monkeypatch, tmp_path):
+    """POST /api/goal must not retag an empty project-owned session from the UI profile."""
+    from api import goals as webui_goals
+    from api import routes
+
+    class FakeState:
+        goal = "finish summons task"
+        status = "active"
+        turns_used = 0
+        max_turns = 20
+        last_verdict = None
+        last_reason = None
+        paused_reason = None
+
+    class FakeGoalManager:
+        def __init__(self, session_id, default_max_turns=20):
+            self.session_id = session_id
+            self.default_max_turns = default_max_turns
+
+        def set(self, goal):
+            state = FakeState()
+            state.goal = goal
+            return state
+
+    class FakeSession:
+        session_id = "sid-summons-goal-route"
+        profile = "summons"
+        project_id = "summons"
+        source_tag = None
+        worktree_path = None
+        workspace = str(tmp_path)
+        model = "gpt-5.5"
+        model_provider = "openai-codex"
+        messages = []
+        context_messages = []
+        pending_user_message = None
+        active_stream_id = None
+
+    session = FakeSession()
+    monkeypatch.setattr(webui_goals, "GoalManager", FakeGoalManager)
+    monkeypatch.setattr(routes, "get_session", lambda sid: session)
+    monkeypatch.setattr(routes, "resolve_trusted_workspace", lambda workspace: tmp_path)
+    monkeypatch.setattr(
+        routes,
+        "_resolve_compatible_session_model_state",
+        lambda model, provider: (model, provider, False),
+    )
+    started_profiles = []
+
+    def fake_start(session, **kwargs):
+        started_profiles.append(session.profile)
+        return {"stream_id": "goal-stream", "session_id": session.session_id, "pending_started_at": 123.0}
+
+    monkeypatch.setattr(routes, "_start_chat_stream_for_session", fake_start)
+    monkeypatch.setattr(routes, "j", lambda handler, payload, status=200, **kwargs: {"status": status, "payload": payload})
+
+    result = routes._handle_goal_command(
+        object(),
+        {
+            "session_id": "sid-summons-goal-route",
+            "args": "finish summons task",
+            "workspace": str(tmp_path),
+            "model": "gpt-5.5",
+            "model_provider": "openai-codex",
+            "profile": "default",
+        },
+    )
+
+    assert result["status"] == 200
+    assert session.profile == "summons"
+    assert started_profiles == ["summons"]
+
+
 def test_routes_register_goal_endpoint_and_kickoff_stream():
     assert 'if parsed.path == "/api/goal"' in ROUTES_PY
     assert "return _handle_goal_command(handler, body)" in ROUTES_PY

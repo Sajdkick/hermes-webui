@@ -363,11 +363,9 @@ def _enrich_run(run: dict) -> dict:
         },
         "runUrl": run_url(str(run.get("id") or "")),
     }
-    play_metadata = _maybe_start_play_pipeline_for_terminal_run(enriched, previous_status=stored_status)
-    if play_metadata:
-        metadata = enriched.get("metadata") if isinstance(enriched.get("metadata"), dict) else {}
-        enriched["metadata"] = _json_safe({**metadata, **play_metadata})
-        enriched["updatedAt"] = play_metadata.get("playPipelineTriggeredAt") or play_metadata.get("playPipelineAttemptedAt") or enriched["updatedAt"]
+    # Read-side enrichment must stay read-only.  Play/run lifecycle handoff is
+    # handled by explicit write/completion paths such as update_ops_run() and
+    # complete_ops_runs_for_session(), not GET/list/detail routes.
     return enriched
 
 
@@ -440,7 +438,35 @@ def create_ops_run(body: dict | None = None) -> dict:
     return run
 
 
-def list_ops_runs(filters: dict | None = None) -> dict:
+def _run_summary(run: dict) -> dict:
+    raw_metadata = run.get("metadata")
+    metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
+    project_id = _text(run.get("projectId"), limit=128)
+    task_id = _text(run.get("taskId"), limit=128)
+    session_id = _text(run.get("sessionId"), limit=128)
+    run_id = _text(run.get("id"), limit=128)
+    return {
+        "id": run_id,
+        "projectId": project_id,
+        "project_id": project_id,
+        "taskId": task_id,
+        "task_id": task_id,
+        "sessionId": session_id,
+        "session_id": session_id,
+        "title": _text(run.get("title"), limit=256) or "Task run",
+        "summary": _text(run.get("summary"), limit=4000),
+        "status": _status(run.get("status"), default="running"),
+        "createdAt": _text(run.get("createdAt"), limit=64),
+        "updatedAt": _text(run.get("updatedAt"), limit=64),
+        "completedAt": _text(run.get("completedAt"), limit=64),
+        "metadata": _json_safe(metadata),
+        "projectName": _text(metadata.get("projectName"), limit=256),
+        "taskText": _text(metadata.get("taskText"), limit=512),
+        "runUrl": run_url(run_id) if run_id else "",
+    }
+
+
+def _filtered_raw_runs(filters: dict | None = None, *, include_session_filter: bool = True) -> list[dict]:
     filters = filters or {}
     project_id = _text(filters.get("projectId") or filters.get("project_id"), limit=128)
     task_id = _text(filters.get("taskId") or filters.get("task_id"), limit=128)
@@ -455,8 +481,31 @@ def list_ops_runs(filters: dict | None = None) -> dict:
         runs = [run for run in runs if _text(run.get("projectId"), limit=128) == project_id]
     if task_id:
         runs = [run for run in runs if _text(run.get("taskId"), limit=128) == task_id]
+    if include_session_filter and session_id:
+        runs = [run for run in runs if _text(run.get("sessionId"), limit=128) == session_id]
     if status:
         runs = [run for run in runs if _status(run.get("status"), default="running") == status]
+    return runs
+
+
+def list_ops_run_summaries(filters: dict | None = None) -> dict:
+    filters = filters or {}
+    runs = [_run_summary(run) for run in _filtered_raw_runs(filters)]
+    runs.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+    limit_raw = filters.get("limit")
+    try:
+        limit = max(0, int(limit_raw)) if limit_raw not in (None, "") else 0
+    except (TypeError, ValueError):
+        raise OpsRunError("Run limit is invalid.")
+    if limit:
+        runs = runs[:limit]
+    return {"runs": runs, "count": len(runs), "summary": True}
+
+
+def list_ops_runs(filters: dict | None = None) -> dict:
+    filters = filters or {}
+    session_id = _text(filters.get("sessionId") or filters.get("session_id"), limit=128)
+    runs = _filtered_raw_runs(filters, include_session_filter=False)
     enriched = [_enrich_run(run) for run in runs]
     if session_id:
         filtered = []
@@ -536,12 +585,12 @@ def _maybe_start_play_pipeline_for_terminal_run(run: dict, *, previous_status: s
     if metadata.get("playPipelineTriggeredAt") and not force:
         return
     try:
-        from api import play_pipeline
+        from api import core_play
 
-        config_info = play_pipeline.get_project_play_config_file_info(project_id)
+        config_info = core_play.get_project_play_config_file_info(project_id)
         if config_info.get("valid") is not True:
             return
-        status_payload = play_pipeline.start_project_play_pipeline(
+        status_payload = core_play.start_project_play(
             project_id,
             {
                 "runId": _text(run.get("id"), limit=128),

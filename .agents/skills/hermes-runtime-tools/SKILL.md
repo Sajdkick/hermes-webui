@@ -70,6 +70,14 @@ Use `hermes-runtime` as the Hermes WebUI Play/inspect bridge. In a correctly wir
 - Treat managed screenshots as best-effort. If runtime screenshot capture is not available, use browser tools or a manual Play-equivalent verification path and report the runtime limitation separately.
 - Keep screenshot file names short and task-specific. Mention saved screenshot paths when you used them.
 
+## Core API boundary extraction
+
+When the task is to extract or refactor Hermes WebUI Play/runtime/project/deployment code into a core/runtime boundary, do **not** assume Cloud Terminal must consume the new boundary. If the user scopes Cloud Terminal as legacy/reference-only, keep all changes inside Hermes and use Cloud Terminal only as design evidence.
+
+Use the boundary-first pattern from `references/core-play-boundary-extraction.md` for Play-only slices: add a small in-process facade such as `api/core_play.py`, keep `api/play_pipeline.py` as the implementation for the first slice, route every Ops Play caller through the facade, preserve route shapes/error behavior, document the contract, and prove no behavior changed with focused Play/runtime tests.
+
+For broader `/api/core` extraction and Ops Deployments work, use `references/core-api-deployments-boundary.md`: keep Core shell-neutral, add compatibility shims for legacy `/api/ops` routes, make the dedicated Deployments view load provider/project deployment data from `/api/core`, and preserve legacy project capability shapes unless explicitly migrating them.
+
 ## Manual Play-equivalent fallback
 
 This fallback is a workaround for the current session, not the desired steady state for Hermes WebUI-launched agents. The previous Summons flick-arrow investigation was successfully solved with `hermes-gather-information`, manual build/start, browser inspection, and targeted tests, but a correctly wired WebUI project session should still make `hermes-runtime doctor --json` pass.
@@ -108,3 +116,5 @@ If `hermes-runtime doctor --json` reports missing WebUI runtime context in the a
 ## References
 
 - `references/cloud-terminal-runtime-migration.md` — cleanup checklist and rationale for replacing Cloud Terminal-era runtime guidance with Hermes runtime usage.
+- `references/core-play-boundary-extraction.md` — proven Hermes-only Play core boundary pattern, contract shape, caller list, verification gate, and pitfalls.
+- `references/core-api-deployments-boundary.md` — broader Hermes Core API extraction and Ops Deployments page pattern, including Core route/domain shape, legacy Ops compatibility shims, and verification pitfalls.

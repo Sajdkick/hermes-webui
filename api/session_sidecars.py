@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,15 @@ def _sidecar_path(session_id: str) -> Path:
     return _sidecar_dir() / f"{_validate_session_id(session_id)}.json"
 
 
+_SIDECAR_INDEX_LOCK = threading.RLock()
+_SIDECAR_INDEX_CACHE: dict[str, Any] = {}
+
+
+def _invalidate_sidecar_index() -> None:
+    with _SIDECAR_INDEX_LOCK:
+        _SIDECAR_INDEX_CACHE.clear()
+
+
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -49,6 +59,78 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     tmp_path = path.with_name(f"{path.name}.tmp")
     tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp_path.replace(path)
+    _invalidate_sidecar_index()
+
+
+def _linkage_sort_key(linkage: dict[str, Any]) -> tuple[str, str]:
+    return (
+        str(linkage.get("updatedAt") or linkage.get("linkedAt") or ""),
+        str(linkage.get("sessionId") or ""),
+    )
+
+
+def _sidecar_file_snapshot() -> tuple[list[tuple[Path, int, int]], tuple[str, tuple[tuple[str, int, int], ...]]]:
+    directory = _sidecar_dir()
+    entries: list[tuple[Path, int, int]] = []
+    try:
+        paths = sorted(directory.glob("*.json"))
+    except OSError:
+        paths = []
+    for path in paths:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        entries.append((path, int(stat.st_mtime_ns), int(stat.st_size)))
+    fingerprint = (
+        str(directory),
+        tuple((path.name, mtime_ns, size) for path, mtime_ns, size in entries),
+    )
+    return entries, fingerprint
+
+
+def _load_sidecar_index() -> dict[str, Any]:
+    entries, fingerprint = _sidecar_file_snapshot()
+    with _SIDECAR_INDEX_LOCK:
+        cached = _SIDECAR_INDEX_CACHE.get("index")
+        if isinstance(cached, dict) and cached.get("fingerprint") == fingerprint:
+            return cached
+
+    records: list[dict[str, Any]] = []
+    by_project: dict[str, list[dict[str, Any]]] = {}
+    by_project_task: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    by_session: dict[str, dict[str, Any]] = {}
+    for path, _mtime_ns, _size in entries:
+        try:
+            payload = _read_json(path)
+        except SessionSidecarError:
+            continue
+        if not isinstance(payload, dict) or not payload:
+            continue
+        record = dict(payload)
+        records.append(record)
+        session_id = str(record.get("sessionId") or "").strip()
+        project_id = str(record.get("projectId") or "").strip()
+        task_id = str(record.get("taskId") or "").strip()
+        if session_id:
+            by_session[session_id] = record
+        if project_id:
+            by_project.setdefault(project_id, []).append(record)
+            if task_id:
+                by_project_task.setdefault((project_id, task_id), []).append(record)
+    records.sort(key=_linkage_sort_key, reverse=True)
+    for bucket in list(by_project.values()) + list(by_project_task.values()):
+        bucket.sort(key=_linkage_sort_key, reverse=True)
+    index = {
+        "fingerprint": fingerprint,
+        "records": records,
+        "by_project": by_project,
+        "by_project_task": by_project_task,
+        "by_session": by_session,
+    }
+    with _SIDECAR_INDEX_LOCK:
+        _SIDECAR_INDEX_CACHE["index"] = index
+    return index
 
 
 def _session_summary(session_id: str) -> dict[str, Any] | None:
@@ -394,34 +476,105 @@ def list_project_linkage_records(project_id: str) -> list[dict[str, Any]]:
     project_key = str(project_id or "").strip()
     if not project_key:
         raise SessionSidecarError("Project id is required.")
-    result = []
-    for path in sorted(_sidecar_dir().glob("*.json")):
-        try:
-            payload = _read_json(path)
-        except SessionSidecarError:
+    index = _load_sidecar_index()
+    by_project = index.get("by_project") if isinstance(index, dict) else {}
+    records = by_project.get(project_key, []) if isinstance(by_project, dict) else []
+    return [dict(record) for record in records if isinstance(record, dict)]
+
+
+def _best_summary(left: dict[str, Any] | None, right: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not left:
+        return dict(right) if isinstance(right, dict) else None
+    if not right:
+        return dict(left)
+    return dict(max((left, right), key=_canonical_session_rank))
+
+
+def _session_summary_alias_index() -> dict[str, dict[str, Any]]:
+    try:
+        summaries = _with_parent_lineage_metadata(
+            [session for session in all_sessions() if isinstance(session, dict)]
+        )
+    except Exception:
+        summaries = []
+    by_alias: dict[str, dict[str, Any]] = {}
+    for summary in summaries:
+        if not isinstance(summary, dict):
             continue
-        if not payload or payload.get("projectId") != project_key:
+        for alias in _session_aliases(summary):
+            by_alias[alias] = _best_summary(by_alias.get(alias), summary) or {}
+    return by_alias
+
+
+def _summary_from_alias_index(session_id: str, alias_index: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    key = str(session_id or "").strip()
+    if not key:
+        return None
+    indexed = alias_index.get(key)
+    if indexed:
+        return dict(indexed)
+    return _session_summary(key)
+
+
+def _sidecar_group_best_summary(
+    payload: dict[str, Any],
+    records: list[dict[str, Any]],
+    summaries_by_session: dict[str, dict[str, Any] | None],
+) -> dict[str, Any] | None:
+    project_key = str(payload.get("projectId") or "").strip()
+    task_key = str(payload.get("taskId") or "").strip()
+    run_key = str(payload.get("runId") or "").strip()
+    if not project_key or not task_key:
+        return None
+    best: dict[str, Any] | None = None
+    for record in records:
+        if not isinstance(record, dict):
             continue
-        result.append(dict(payload))
-    result.sort(
-        key=lambda linkage: (
-            str(linkage.get("updatedAt") or linkage.get("linkedAt") or ""),
-            str(linkage.get("sessionId") or ""),
-        ),
-        reverse=True,
-    )
-    return result
+        if str(record.get("projectId") or "").strip() != project_key:
+            continue
+        if str(record.get("taskId") or "").strip() != task_key:
+            continue
+        record_run = str(record.get("runId") or "").strip()
+        if run_key and record_run and record_run != run_key:
+            continue
+        candidate_id = str(record.get("sessionId") or "").strip()
+        candidate = summaries_by_session.get(candidate_id)
+        best = _best_summary(best, candidate)
+    return best
+
+
+def _linkage_response(payload: dict[str, Any], summary: dict[str, Any] | None) -> dict[str, Any]:
+    key = str(payload.get("sessionId") or "").strip()
+    resolved_id = str((summary or {}).get("session_id") or key).strip() or key
+    lineage_root_id = str((summary or {}).get("_lineage_root_id") or key).strip() or key
+    lineage_tip_id = str((summary or {}).get("_lineage_tip_id") or resolved_id).strip() or resolved_id
+    return {
+        **payload,
+        "linkedSessionId": key,
+        "sessionId": resolved_id,
+        "lineageRootId": lineage_root_id,
+        "lineageTipId": lineage_tip_id,
+        "session": summary,
+        "sessionUrl": _session_url(resolved_id),
+        "available": summary is not None,
+    }
 
 
 def list_project_linkages(project_id: str) -> list[dict[str, Any]]:
+    records = list_project_linkage_records(project_id)
+    alias_index = _session_summary_alias_index()
+    summaries_by_session: dict[str, dict[str, Any] | None] = {}
+    for payload in records:
+        session_id = str(payload.get("sessionId") or "").strip()
+        if session_id and session_id not in summaries_by_session:
+            summaries_by_session[session_id] = _summary_from_alias_index(session_id, alias_index)
+
     result = []
-    for payload in list_project_linkage_records(project_id):
-        try:
-            linkage = get_session_linkage(str(payload.get("sessionId") or ""))
-        except SessionSidecarError:
-            continue
-        if linkage:
-            result.append(linkage)
+    for payload in records:
+        session_id = str(payload.get("sessionId") or "").strip()
+        summary = summaries_by_session.get(session_id)
+        summary = _best_summary(summary, _sidecar_group_best_summary(payload, records, summaries_by_session))
+        result.append(_linkage_response(payload, summary))
     result.sort(
         key=lambda linkage: (
             str(linkage.get("updatedAt") or linkage.get("linkedAt") or ""),

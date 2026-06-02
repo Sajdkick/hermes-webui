@@ -429,6 +429,13 @@ def check_auth(handler, parsed) -> bool:
     # Public paths don't require auth
     if parsed.path in PUBLIC_PATHS or parsed.path.startswith('/static/') or parsed.path.startswith('/session/static/'):
         return True
+    try:
+        from api import core_deployments
+
+        if core_deployments.is_deployment_public_request(handler, parsed):
+            return True
+    except Exception:
+        pass
     # Check session cookie
     cookie_val = parse_cookie(handler)
     if cookie_val and verify_session(cookie_val):

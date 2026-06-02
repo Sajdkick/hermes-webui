@@ -66,7 +66,7 @@ def test_boot_js_served(cleanup_test_sessions):
 
 def test_app_js_no_longer_referenced_in_html(cleanup_test_sessions):
     """index.html must not reference the old monolithic app.js."""
-    html = get_text("/")
+    html = get_text("/index.html")
     assert 'src="static/app.js"' not in html
     # All split modules must be present with the server-injected cache-busting version query.
     for module in ["ui.js", "workspace.js", "sessions.js", "messages.js", "panels.js", "boot.js"]:
@@ -74,7 +74,7 @@ def test_app_js_no_longer_referenced_in_html(cleanup_test_sessions):
 
 def test_module_load_order_correct(cleanup_test_sessions):
     """ui.js must appear before sessions.js which must appear before boot.js."""
-    html = get_text("/")
+    html = get_text("/index.html")
     ui_pos = html.find('src="static/ui.js?v=')
     ws_pos = html.find('src="static/workspace.js?v=')
     sess_pos = html.find('src="static/sessions.js?v=')

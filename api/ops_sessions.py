@@ -232,10 +232,10 @@ def _profile_config_defaults(profile: str | None) -> tuple[str | None, str | Non
     return default_model or None, provider
 
 
-def _project_session_defaults(project: dict) -> tuple[str | None, str | None]:
+def _project_session_defaults(project: dict, profile: str | None = None) -> tuple[str | None, str | None]:
     explicit_model = str(project.get("defaultModel") or "").strip() or None
     explicit_provider = str(project.get("defaultModelProvider") or "").strip().lower() or None
-    profile = _project_execution_profile(project)
+    profile = profile or _project_execution_profile(project)
     if explicit_model:
         if explicit_provider:
             return explicit_model, explicit_provider
@@ -276,6 +276,18 @@ def project_profile(project: dict) -> str | None:
 
 def project_session_defaults(project: dict) -> tuple[str | None, str | None]:
     return _project_session_defaults(project)
+
+
+def _linked_session_matches_launch_defaults(session, profile: str, model: str | None, model_provider: str | None) -> bool:
+    if str(getattr(session, "profile", "") or "").strip() != str(profile or "").strip():
+        return False
+    if model and str(getattr(session, "model", "") or "").strip() != str(model or "").strip():
+        return False
+    if model_provider:
+        session_provider = str(getattr(session, "model_provider", "") or "").strip().lower()
+        if session_provider != str(model_provider or "").strip().lower():
+            return False
+    return True
 
 
 def _load_linked_session_for_launch(linkage: dict | None):
@@ -483,13 +495,9 @@ def list_ops_sessions(project_id: str | None = None, activity_only: bool = False
                         if normalized_run_id in needed_run_ids:
                             run_by_id[normalized_run_id] = run
                 else:
-                    for run_id in needed_run_ids:
-                        try:
-                            run = ops_runs.get_ops_run(run_id)
-                        except Exception:
-                            continue
+                    for run in ops_runs.list_ops_run_summaries({"projectId": pid}).get("runs") or []:
                         normalized_run_id = str((run or {}).get("id") or "").strip()
-                        if normalized_run_id:
+                        if normalized_run_id in needed_run_ids:
                             run_by_id[normalized_run_id] = run
             except Exception:
                 run_by_id = {}
@@ -585,8 +593,20 @@ def launch_task_session(project_id: str, task_id: str, body: dict | None = None)
     project = resolved["project"]
     task = resolved["task"]
     force_new_session = _payload_force_new_session(body)
+    requested_profile = _payload_profile(body)
+    profile = _project_execution_profile(project)
+    if requested_profile and requested_profile != profile:
+        logger.info(
+            "Ignoring task-launch request profile %r for project %s; using project profile %r",
+            requested_profile,
+            project.get("id"),
+            profile,
+        )
+    model, model_provider = _payload_session_defaults(body)
+    if not model:
+        model, model_provider = _project_session_defaults(project, profile)
     existing = None if force_new_session else _find_existing_task_session(project["id"], task["id"])
-    if existing:
+    if existing and _linked_session_matches_launch_defaults(existing["session"], profile, model, model_provider):
         session = existing["session"]
         if getattr(session, "archived", False):
             session.archived = False
@@ -619,19 +639,6 @@ def launch_task_session(project_id: str, task_id: str, body: dict | None = None)
             "runUrl": run_url,
             "reused": True,
         }
-
-    requested_profile = _payload_profile(body)
-    profile = _project_execution_profile(project)
-    if requested_profile and requested_profile != profile:
-        logger.info(
-            "Ignoring task-launch request profile %r for project %s; using project profile %r",
-            requested_profile,
-            project.get("id"),
-            profile,
-        )
-    model, model_provider = _payload_session_defaults(body)
-    if not model:
-        model, model_provider = _project_session_defaults(project)
 
     session = new_session(
         workspace=_task_workspace(project),

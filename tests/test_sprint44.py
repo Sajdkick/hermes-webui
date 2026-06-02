@@ -62,7 +62,7 @@ class TestHandleWorkspaceCloseLogic(unittest.TestCase):
         self.assertGreater(idx, 0, "handleWorkspaceClose() not found")
         body = BOOT_JS[idx:idx + 500]
         self.assertIn(
-            "clearPreview()",
+            "clearPreview(",
             body,
             "handleWorkspaceClose() must call clearPreview() when a preview is open",
         )

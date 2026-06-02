@@ -9,6 +9,7 @@ from api import ops_projects, ops_sessions
 
 
 _PROJECTS_RE = re.compile(r"^/api/ops/projects/?$")
+_PROJECTS_SUMMARY_RE = re.compile(r"^/api/ops/projects/summary/?$")
 _PROJECT_RE = re.compile(r"^/api/ops/projects/([^/]+)/?$")
 _PROJECT_UPDATE_RE = re.compile(r"^/api/ops/projects/([^/]+)/update/?$")
 _PROJECT_SETTINGS_RE = re.compile(r"^/api/ops/projects/([^/]+)/settings/?$")
@@ -34,6 +35,10 @@ def handle_get(handler, parsed) -> bool:
     try:
         if _PROJECTS_RE.match(parsed.path):
             j(handler, ops_projects.list_ops_projects())
+            return True
+
+        if _PROJECTS_SUMMARY_RE.match(parsed.path):
+            j(handler, ops_projects.list_ops_project_summaries())
             return True
 
         match = _PROJECT_RE.match(parsed.path)

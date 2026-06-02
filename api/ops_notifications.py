@@ -570,14 +570,9 @@ def list_pending_notifications(project_id: str | None = None) -> dict:
                     _clarify_notification(linkage, task_context, clarify["pending"], int(clarify.get("pending_count") or 0))
                 )
         try:
-            from api import ops_runs, play_pipeline
+            from api import core_play
 
-            # Refresh/enrich runs before reading Play status.  Enrichment is the
-            # path that notices a linked task session has finished and starts
-            # the configured Play pipeline, so notification polling must do it
-            # before deciding which Play notification to show.
-            ops_runs.list_ops_runs({"projectId": project["id"]})
-            play_status = play_pipeline.build_project_play_status(project["id"])
+            play_status = core_play.get_project_play_status(project["id"])
             play_notification = _play_notification(project, play_status)
         except Exception:
             play_status = {}

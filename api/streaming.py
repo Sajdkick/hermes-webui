@@ -2445,7 +2445,11 @@ def _merge_display_messages_after_agent_result(previous_display, previous_contex
             first_response_idx = next(
                 (
                     idx for idx, m in enumerate(candidates[:current_user_idx])
-                    if isinstance(m, dict) and m.get('role') in ('assistant', 'tool')
+                    if (
+                        isinstance(m, dict)
+                        and m.get('role') in ('assistant', 'tool')
+                        and not _is_context_compression_marker(m)
+                    )
                 ),
                 None,
             )
@@ -3179,6 +3183,8 @@ def _run_agent_streaming(
     _checkpoint_stop = None
     _ckpt_thread = None
     _agent_lock = None
+    _hermes_home_override_token = None
+    _reset_hermes_home_override = None
     try:
         s = get_session(session_id)
         update_active_run(stream_id, phase="running", session_id=session_id)
@@ -3242,6 +3248,15 @@ def _run_agent_streaming(
             session_id,
             _profile_home,
         )
+        if _profile_home:
+            try:
+                _hermes_constants = __import__('hermes_constants')
+                _reset_hermes_home_override = getattr(_hermes_constants, 'reset_hermes_home_override', None)
+                _set_hermes_home_override = getattr(_hermes_constants, 'set_hermes_home_override')
+                _hermes_home_override_token = _set_hermes_home_override(_profile_home)
+            except Exception:
+                _reset_hermes_home_override = None
+                _hermes_home_override_token = None
         _set_thread_env(**_thread_env)
         _readable_output_process_env = {
             key: value
@@ -5313,6 +5328,11 @@ def _run_agent_streaming(
                 and getattr(s, 'pending_user_message', None)):
             update_active_run(stream_id, phase="finalizing")
             _last_resort_sync_from_core(s, stream_id, _agent_lock)
+        if _hermes_home_override_token is not None and _reset_hermes_home_override is not None:
+            try:
+                _reset_hermes_home_override(_hermes_home_override_token)
+            except Exception:
+                logger.debug("Failed to reset Hermes home context override", exc_info=True)
         _clear_thread_env()  # TD1: always clear thread-local context
         with STREAMS_LOCK:
             STREAMS.pop(stream_id, None)

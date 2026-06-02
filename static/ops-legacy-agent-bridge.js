@@ -212,7 +212,13 @@
       sessionId:String(source.sessionId||source.session_id||source.session&&source.session.session_id||'').trim(),
       projectId:String(source.projectId||source.project_id||source.project&&source.project.id||'').trim(),
       taskId:String(source.taskId||source.task_id||source.task&&source.task.id||'').trim(),
-      projectName:String(source.project&&source.project.name||source.project&&source.project.fullName||'').trim(),
+      projectName:String(
+        source.projectName
+        || source.project_name
+        || source.project&&source.project.name
+        || source.project&&source.project.fullName
+        || ''
+      ).trim(),
       status,
       summary:String(source.summary||'').trim(),
     };
@@ -245,7 +251,7 @@
   }
 
   async function listCompatDoneNotifications(){
-    const response=await api('/api/ops/runs').catch(()=>({runs:[]}));
+    const response=await api('/api/ops/runs/summary').catch(()=>({runs:[]}));
     const items=Array.isArray(response&&response.runs)?response.runs:[];
     const cutoff=Math.floor(Date.now()/1000)-(24*60*60);
     return items
@@ -655,7 +661,7 @@
     },
     runs:{
       list(params={}){
-        return api(`/api/ops/runs${q(params)}`);
+        return api(`/api/ops/runs/summary${q(params)}`);
       },
       staleScan(payload){
         return api('/api/ops/runs/stale-scan',{method:'POST',body:JSON.stringify(payload||{})});

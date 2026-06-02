@@ -137,6 +137,81 @@ def test_phase2_project_routes_round_trip_branch_scoped_tasks(monkeypatch, tmp_p
     assert created_epic["tasks"][0]["flags"] == ["blocked"]
 
 
+def test_phase2_project_summary_route_skips_task_counts(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
+    repo = tmp_path / "summary-project"
+    repo.mkdir()
+
+    from api import ops_projects
+    from api.routes import handle_get, handle_post
+
+    create = _FakeHandler({"name": "Summary Project", "path": str(repo), "coreBranch": "main"})
+    assert handle_post(create, urlparse("http://example.com/api/ops/projects")) is True
+    project = _response_json(create)["project"]
+    monkeypatch.setattr(
+        ops_projects,
+        "_task_counts",
+        lambda _project: (_ for _ in ()).throw(AssertionError("summary listing read task counts")),
+    )
+
+    listing = _FakeHandler()
+    assert handle_get(listing, urlparse("http://example.com/api/ops/projects/summary")) is True
+    payload = _response_json(listing)
+
+    assert payload["summary"] is True
+    assert payload["projects"][0]["id"] == project["id"]
+    assert payload["projects"][0]["resolvedPath"] == str(repo.resolve())
+    assert "taskCount" not in payload["projects"][0]
+    assert "epicCount" not in payload["projects"][0]
+
+
+def test_phase2_project_list_hides_pytest_tmp_path_projects(monkeypatch):
+    from api import ops_projects
+
+    projects = [
+        {
+            "id": "real-project",
+            "name": "Real Project",
+            "fullName": "Real Project",
+            "slug": "real-project",
+            "path": "/workspace/real-project",
+            "coreBranch": "main",
+            "active": True,
+            "createdAt": "2026-05-27T00:00:00.000Z",
+        },
+        {
+            "id": "tmp-project",
+            "name": "tmp",
+            "fullName": "tmp",
+            "slug": "tmp",
+            "path": "/tmp",
+            "coreBranch": "main",
+            "active": True,
+            "createdAt": "2026-05-27T00:00:00.000Z",
+        },
+        {
+            "id": "pytest-project",
+            "name": "test_same_session_profile_swit0",
+            "fullName": "test_same_session_profile_swit0",
+            "slug": "test-same-session-profile-swit0",
+            "path": "/tmp/pytest-of-ubuntu/pytest-1140/test_same_session_profile_swit0",
+            "coreBranch": "main",
+            "active": True,
+            "createdAt": "2026-05-27T00:00:00.000Z",
+        },
+    ]
+    monkeypatch.setattr(ops_projects, "_projects_dir", lambda: Path("/home/ubuntu/cloud-terminal-data/projects"))
+    monkeypatch.setattr(ops_projects, "_read_projects", lambda: list(projects))
+    monkeypatch.setattr(ops_projects, "_task_counts", lambda _project: {})
+
+    summary_ids = {project["id"] for project in ops_projects.list_ops_project_summaries()["projects"]}
+    full_ids = {project["id"] for project in ops_projects.list_ops_projects()["projects"]}
+
+    assert summary_ids == {"real-project", "tmp-project"}
+    assert full_ids == {"real-project", "tmp-project"}
+
+
+
 def test_phase2_shell_includes_projects_asset_and_payload():
     from api.routes import handle_get
 

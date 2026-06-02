@@ -124,13 +124,8 @@ class TestPageShowBfcacheHandler:
         filtered view. Re-rendering from cache with the now-empty filter
         repopulates the list."""
         src = read('static/boot.js')
-        m = re.search(
-            r"addEventListener\(\s*['\"]pageshow['\"].*?\}\s*\)",
-            src,
-            re.DOTALL,
-        )
-        assert m
-        body = m.group(0)
+        idx = src.index("window.addEventListener('pageshow'")
+        body = src[idx:idx + 5000]
         assert 'renderSessionListFromCache' in body or 'renderSessionList' in body, (
             "pageshow handler must re-render the list after clearing the filter "
             "so the stale filtered DOM is replaced with the full list"

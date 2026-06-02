@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote
 
 from api.helpers import bad, j
 from api import session_activity
@@ -16,11 +16,17 @@ _SESSION_ACTIVITY_GROUP_DELETE_RE = re.compile(r"^/api/sessions/activity/groups/
 _SESSION_ACTIVITY_ASSIGNMENT_RE = re.compile(r"^/api/sessions/activity/group-assignment/?$")
 
 
+def _truthy_query_flag(parsed, name: str) -> bool:
+    values = parse_qs(parsed.query or "").get(name) or []
+    return any(str(value or "").strip().lower() in {"1", "true", "yes", "on"} for value in values)
+
+
 def handle_get(handler, parsed) -> bool:
     if not _SESSION_ACTIVITY_RE.match(parsed.path):
         return False
     try:
-        j(handler, session_activity.list_session_activity())
+        allow_rich_fallback = _truthy_query_flag(parsed, "rich_fallback") or _truthy_query_flag(parsed, "rich")
+        j(handler, session_activity.list_session_activity(allow_rich_fallback=allow_rich_fallback))
     except session_activity.SessionActivityError as exc:
         bad(handler, str(exc), exc.status)
         return True

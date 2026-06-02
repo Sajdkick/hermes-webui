@@ -67,3 +67,39 @@ def test_profile_switch_replaces_overlapping_keys(monkeypatch, tmp_path):
     assert os.environ.get("OPENAI_API_KEY") == "secret-from-p2"
     assert os.environ.get("ONLY_P1") is None
     assert os.environ.get("ONLY_P2") == "two"
+
+
+def test_streaming_sets_context_local_hermes_home_override_for_agent_tools():
+    """Direct WebUI chats must not rely on process-global HERMES_HOME during tool calls."""
+    src = Path("api/streaming.py").read_text(encoding="utf-8")
+    setup_idx = src.index("_thread_env = _build_agent_thread_env(")
+    set_idx = src.index("set_hermes_home_override", setup_idx)
+    thread_env_idx = src.index("_set_thread_env(**_thread_env)", setup_idx)
+    reset_idx = src.index("_reset_hermes_home_override(_hermes_home_override_token)", set_idx)
+    clear_idx = src.index("_clear_thread_env()", reset_idx)
+
+    assert set_idx < thread_env_idx
+    assert reset_idx < clear_idx
+
+
+def test_terminal_subprocess_env_prefers_context_hermes_home_override(monkeypatch, tmp_path):
+    """Hermes Agent local terminal env should bridge context-local HERMES_HOME to shells."""
+    import api.config  # noqa: F401 - ensures hermes-agent is on sys.path
+    hermes_constants = importlib.import_module("hermes_constants")
+    local_env = importlib.import_module("tools.environments.local")
+
+    reset_hermes_home_override = hermes_constants.reset_hermes_home_override
+    set_hermes_home_override = hermes_constants.set_hermes_home_override
+    _make_run_env = local_env._make_run_env
+
+    process_home = tmp_path / "profiles" / "summons"
+    session_home = tmp_path / "profiles" / "laxlyftet"
+    monkeypatch.setenv("HERMES_HOME", str(process_home))
+
+    token = set_hermes_home_override(session_home)
+    try:
+        run_env = _make_run_env({})
+    finally:
+        reset_hermes_home_override(token)
+
+    assert run_env["HERMES_HOME"] == str(session_home)

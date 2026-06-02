@@ -386,6 +386,7 @@ def test_launch_task_session_uses_project_profile_over_payload(monkeypatch, tmp_
     }
     task = {"id": "task-1", "text": "Fix profile routing"}
     created = {}
+    defaults_called = []
 
     class CreatedSession:
         session_id = "session-task"
@@ -424,11 +425,12 @@ def test_launch_task_session_uses_project_profile_over_payload(monkeypatch, tmp_
         lambda project_id, task_id: {"project": project, "task": task},
     )
     monkeypatch.setattr(ops_sessions, "new_session", fake_new_session)
-    monkeypatch.setattr(
-        ops_sessions,
-        "_profile_config_defaults",
-        lambda profile: ("project-default-model", "project-provider"),
-    )
+
+    def fake_profile_defaults(profile):
+        defaults_called.append(profile)
+        return "project-default-model", "project-provider"
+
+    monkeypatch.setattr(ops_sessions, "_profile_config_defaults", fake_profile_defaults)
     monkeypatch.setattr(
         ops_sessions.ops_projects,
         "update_ops_project_task",
@@ -454,6 +456,7 @@ def test_launch_task_session_uses_project_profile_over_payload(monkeypatch, tmp_
 
     assert created["profile"] == "hermes-webui"
     assert result["session"]["profile"] == "hermes-webui"
+    assert defaults_called == ["hermes-webui"]
 
 
 def test_launch_task_session_defaults_blank_project_profile_to_default(monkeypatch, tmp_path):

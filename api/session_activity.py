@@ -497,6 +497,65 @@ def _project_context_for_session(session: dict, project_by_id: dict[str, dict]) 
     return None
 
 
+def _sidecar_records_for_runs(raw_runs: list[dict]) -> list[dict]:
+    """Load lightweight sidecar records for projects referenced by raw runs."""
+    project_ids = {
+        _text(run.get("projectId") or run.get("project_id"), limit=128)
+        for run in raw_runs
+        if isinstance(run, dict)
+    }
+    records: list[dict] = []
+    for project_id in sorted(project_ids):
+        if not project_id:
+            continue
+        try:
+            records.extend(ops_sessions.session_sidecars.list_project_linkage_records(project_id))
+        except Exception:
+            continue
+    return [record for record in records if isinstance(record, dict)]
+
+
+def _best_activity_session_id(candidate_ids: set[str], session_by_id: dict[str, dict]) -> str:
+    candidates = [session_by_id[session_id] for session_id in candidate_ids if session_id in session_by_id]
+    if not candidates:
+        return ""
+    best = max(candidates, key=_session_sort_key)
+    return _text(best.get("session_id"), limit=128)
+
+
+def _sidecar_activity_aliases(
+    raw_runs: list[dict],
+    alias_to_session_id: dict[str, str],
+    session_by_id: dict[str, dict],
+) -> tuple[dict[str, str], dict[tuple[str, str], str]]:
+    """Map Ops run/task ids to currently visible logical sessions via sidecars.
+
+    The activity poller intentionally starts from the cheap sidebar session list,
+    which hides many pre-compression snapshots. A run can still point at a hidden
+    root or hidden continuation while a visible sibling/snapshot has the same
+    task/run sidecar. Use those sidecars as aliases so incomplete Ops tasks do
+    not vanish from activity just because compression hid the stored run ids.
+    """
+    run_aliases: dict[str, set[str]] = {}
+    task_aliases: dict[tuple[str, str], set[str]] = {}
+    for record in _sidecar_records_for_runs(raw_runs):
+        record_session_id = _text(record.get("sessionId") or record.get("session_id"), limit=128)
+        mapped_session_id = alias_to_session_id.get(record_session_id)
+        if not mapped_session_id or mapped_session_id not in session_by_id:
+            continue
+        run_id = _text(record.get("runId") or record.get("run_id"), limit=128)
+        if run_id:
+            run_aliases.setdefault(run_id, set()).add(mapped_session_id)
+        project_id = _text(record.get("projectId") or record.get("project_id"), limit=128)
+        task_id = _text(record.get("taskId") or record.get("task_id"), limit=128)
+        if project_id and task_id:
+            task_aliases.setdefault((project_id, task_id), set()).add(mapped_session_id)
+    return (
+        {run_id: _best_activity_session_id(ids, session_by_id) for run_id, ids in run_aliases.items()},
+        {key: _best_activity_session_id(ids, session_by_id) for key, ids in task_aliases.items()},
+    )
+
+
 def _lean_activity_source() -> dict:
     """Build the activity list from cheap indexes and raw run records only.
 
@@ -548,7 +607,9 @@ def _lean_activity_source() -> dict:
             alias_to_session_id[alias] = session_id
 
     run_context_by_session_id: dict[str, dict] = {}
-    for raw_run in _read_raw_ops_runs():
+    raw_runs = _read_raw_ops_runs()
+    sidecar_run_aliases, sidecar_task_aliases = _sidecar_activity_aliases(raw_runs, alias_to_session_id, session_by_id)
+    for raw_run in raw_runs:
         status = _normalize_run_status(raw_run.get("status")) or "running"
         if status not in _VISIBLE_RUN_STATUSES:
             continue
@@ -560,6 +621,15 @@ def _lean_activity_source() -> dict:
             metadata = raw_run.get("metadata") if isinstance(raw_run.get("metadata"), dict) else {}
             resolved_session_id = _text(metadata.get("resolvedSessionId") or metadata.get("resolved_session_id"), limit=128)
             session_id = alias_to_session_id.get(resolved_session_id)
+        if not session_id:
+            run_id = _text(raw_run.get("id") or raw_run.get("runId") or raw_run.get("run_id"), limit=128)
+            session_id = sidecar_run_aliases.get(run_id, "")
+        if not session_id:
+            project_task_key = (
+                _text(raw_run.get("projectId") or raw_run.get("project_id"), limit=128),
+                _text(raw_run.get("taskId") or raw_run.get("task_id"), limit=128),
+            )
+            session_id = sidecar_task_aliases.get(project_task_key, "")
         if not session_id:
             continue
         session = session_by_id.get(session_id)
@@ -635,11 +705,47 @@ def _serialize_activity_session(session: dict, assignment_map: dict[str, str]) -
     }
 
 
-def _list_ops_activity_source() -> dict:
-    return _lean_activity_source()
+def _truthy_env(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def list_session_activity() -> dict:
+def _session_activity_rich_fallback_enabled() -> bool:
+    return _truthy_env(os.getenv("HERMES_WEBUI_SESSION_ACTIVITY_RICH_FALLBACK"))
+
+
+def _rich_ops_activity_source() -> dict | None:
+    try:
+        fallback = ops_sessions.list_ops_sessions()
+    except Exception:
+        return None
+    return fallback if isinstance(fallback, dict) else None
+
+
+def _list_ops_activity_source(*, allow_rich_fallback: bool | None = None) -> dict:
+    rich_fallback_requested = (
+        _session_activity_rich_fallback_enabled()
+        if allow_rich_fallback is None
+        else bool(allow_rich_fallback)
+    )
+    try:
+        source = _lean_activity_source()
+    except Exception:
+        fallback = _rich_ops_activity_source()
+        if fallback is not None:
+            return fallback
+        raise
+    # An empty lean result is authoritative for the poller. Falling back to the
+    # rich Ops session route just to prove emptiness can turn a cheap activity
+    # refresh into a multi-second global enrichment pass.
+    if source.get("sessions") or not rich_fallback_requested:
+        return source
+    fallback = _rich_ops_activity_source()
+    if isinstance(fallback, dict) and fallback.get("sessions"):
+        return fallback
+    return source
+
+
+def list_session_activity(*, allow_rich_fallback: bool | None = None) -> dict:
     state = _read_state()
     assignment_map = {
         str(entry.get("sessionId") or "").strip(): str(entry.get("groupId") or "").strip()
@@ -647,7 +753,7 @@ def list_session_activity() -> dict:
         if str(entry.get("sessionId") or "").strip() and str(entry.get("groupId") or "").strip()
     }
     try:
-        source = _list_ops_activity_source()
+        source = _list_ops_activity_source(allow_rich_fallback=allow_rich_fallback)
     except Exception:
         source = {"sessions": []}
     sessions = [

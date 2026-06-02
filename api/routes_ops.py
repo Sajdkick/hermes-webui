@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from api import (
     routes_ops_database,
+    routes_ops_deployments,
     routes_ops_git,
     routes_ops_github,
     routes_ops_notifications,
@@ -25,6 +26,8 @@ def handle_get(handler, parsed) -> bool:
     if routes_ops_github.handle_get(handler, parsed):
         return True
     if routes_ops_database.handle_get(handler, parsed):
+        return True
+    if routes_ops_deployments.handle_get(handler, parsed):
         return True
     if routes_ops_git.handle_get(handler, parsed):
         return True
@@ -51,6 +54,8 @@ def handle_post(handler, parsed, body: dict) -> bool:
     if routes_ops_github.handle_post(handler, parsed, body):
         return True
     if routes_ops_database.handle_post(handler, parsed, body):
+        return True
+    if routes_ops_deployments.handle_post(handler, parsed, body):
         return True
     if routes_ops_git.handle_post(handler, parsed, body):
         return True

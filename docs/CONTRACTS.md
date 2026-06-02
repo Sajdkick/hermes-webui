@@ -33,6 +33,14 @@ does not change runtime behavior, maintainer policy, bot behavior, or CI gates.
   execution behind an adapter boundary. Use this for adapter-seam, control-plane,
   runner, sidecar, or execution-ownership work; do not treat it as authorization
   to implement those slices.
+- [`docs/core-api-contract.md`](core-api-contract.md): implemented in-process
+  `/api/core` boundary for shell-neutral project, deployment, database, Git,
+  runtime-tools, host, task, and session-asset capabilities. Use this before
+  adding new Ops/Cloud Terminal-style runtime routes or UI consumers.
+- [`docs/core-play-contract.md`](core-play-contract.md): implemented in-process
+  boundary for Hermes Ops Play config, status, logs, start/stop/restart, proxy,
+  and failed-build repair handoff. Use this for Play workflow changes before
+  importing or modifying the underlying implementation module directly.
 - [`docs/rfcs/turn-journal.md`](rfcs/turn-journal.md): proposed crash-safe
   write-ahead journal for browser-originated chat turns.
 - [`docs/rfcs/README.md`](rfcs/README.md): RFC conventions and current RFC index.

@@ -287,9 +287,11 @@ class TestIndexHtmlIntegration:
 
     def test_index_route_url_encodes_asset_version(self):
         src = ROUTES.read_text(encoding="utf-8")
-        idx = src.find('parsed.path in ("/", "/index.html")')
+        idx = src.find('parsed.path == "/index.html" or parsed.path.startswith("/session/")')
         if idx == -1:
-            idx = src.find('parsed.path.startswith("/session/")')
+            idx = src.find('parsed.path in ("/", "/index.html")')
+        if idx == -1:
+            idx = src.find('quote(WEBUI_VERSION, safe="")')
         assert idx != -1, "routes.py must handle /, /index.html, and /session/<id>"
         block = src[idx:idx + 800]
         assert "quote(WEBUI_VERSION, safe=\"\")" in block, (

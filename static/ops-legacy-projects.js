@@ -470,10 +470,12 @@
       return rows;
     }
 
-    async function loadProjects(){
+    async function loadProjects(options){
+      const opts=options&&typeof options==='object'?options:{};
       const token=++activeProjectsLoadToken;
+      const projectsPath=opts.summary?'/api/ops/projects/summary':'/api/ops/projects';
       const [data,profileData]=await Promise.all([
-        api('/api/ops/projects'),
+        api(projectsPath),
         AgentBridgeRef.profiles.list().catch(()=>null),
       ]);
       if(token!==activeProjectsLoadToken)return OPS.projects;

@@ -237,17 +237,20 @@ class TestActiveStateTooltips:
     'stop' variants so the affordance is honest."""
 
     def test_dictation_active_tooltip_changes_when_recording(self):
-        """_setRecording(on) should flip btnMic.title to voice_dictate_active."""
-        src = _src("boot.js")
-        m = re.search(r"function _setRecording\(on\)\{.*?\n  \}", src, re.DOTALL)
-        assert m, "_setRecording function must exist"
+        """setRecording(on) should flip btnMic tooltip through boot-provided titles."""
+        src = _src("voice-input.js")
+        boot = _src("boot.js")
+        m = re.search(r"function setRecording\(on,settings\)\{.*?\n    \}", src, re.DOTALL)
+        assert m, "setRecording function must exist in voice-input.js"
         body = m.group(0)
-        assert "voice_dictate_active" in body, (
-            "_setRecording must flip the tooltip to voice_dictate_active when "
+        assert "updateButtonTitle(active)" in body, (
+            "setRecording must update the button title when "
             "recording starts so the user knows pressing it now stops dictation."
         )
-        assert "voice_dictate'" in body or "voice_dictate\"" in body, \
-            "_setRecording must restore voice_dictate when recording stops."
+        assert "activeTitle:()=>t('voice_dictate_active')" in boot, \
+            "boot.js must provide voice_dictate_active as the active dictation title."
+        assert "inactiveTitle:()=>t('voice_dictate')" in boot, \
+            "boot.js must provide voice_dictate as the idle dictation title."
 
     def test_voice_mode_active_tooltip(self):
         """_activate() should set modeBtn.title to voice_mode_toggle_active."""

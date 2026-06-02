@@ -88,7 +88,7 @@ def test_phase11_session_activity_routes_support_groups_and_lineage_assignments(
     assert assign.status == 200
 
     grouped = _FakeHandler()
-    assert handle_get(grouped, urlparse("http://example.com/api/sessions/activity")) is True
+    assert handle_get(grouped, urlparse("http://example.com/api/sessions/activity?rich_fallback=1")) is True
     assert grouped.status == 200
     payload = _response_json(grouped)
     assert payload["groupCount"] == 1
@@ -116,7 +116,7 @@ def test_phase11_session_activity_routes_support_groups_and_lineage_assignments(
     assert delete.status == 200
 
     ungrouped = _FakeHandler()
-    assert handle_get(ungrouped, urlparse("http://example.com/api/sessions/activity")) is True
+    assert handle_get(ungrouped, urlparse("http://example.com/api/sessions/activity?rich_fallback=1")) is True
     ungrouped_payload = _response_json(ungrouped)
     assert ungrouped_payload["groupCount"] == 0
     assert ungrouped_payload["sessions"][0]["groupId"] is None
@@ -162,7 +162,7 @@ def test_phase11_session_activity_keeps_open_task_sessions_visible_after_run_qui
     )
 
     grouped = _FakeHandler()
-    assert handle_get(grouped, urlparse("http://example.com/api/sessions/activity")) is True
+    assert handle_get(grouped, urlparse("http://example.com/api/sessions/activity?rich_fallback=1")) is True
     assert grouped.status == 200
     payload = _response_json(grouped)
 
@@ -1687,6 +1687,165 @@ def test_phase11_quick_task_project_picker_defers_home_rerender_during_activity_
             throw new Error('Deferred session activity render flag should clear after the picker change');
           }
 
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+def test_phase11_dashboard_home_loads_project_picker_before_secondary_panels():
+    script = textwrap.dedent(
+        """
+        (async () => {
+          const fs = require('fs');
+          const vm = require('vm');
+          const source = fs.readFileSync('static/ops-legacy-home.js', 'utf8');
+          const rootEl = {
+            innerHTML: '',
+            contains: () => true,
+            querySelectorAll: () => [],
+            querySelector: () => null,
+          };
+          const windowRef = { HermesOpsModules: {}, _opsDashboardOpen: true, setInterval: () => 1 };
+          const context = {
+            console,
+            window: windowRef,
+            document: { activeElement: null },
+            navigator: {},
+            URL,
+            setTimeout,
+            clearTimeout,
+            requestAnimationFrame: (cb) => cb(),
+          };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          let projectCalls = 0;
+          let activityCalls = 0;
+          let loadOpsRunsCalls = 0;
+          let projectLoadOptions = null;
+          let notificationCalls = 0;
+          const diagnosticsOptions = [];
+          let activityResolve = null;
+          const OPS = {
+            loading: false,
+            view: 'home',
+            projects: [],
+            sessions: [],
+            notifications: [],
+            notificationBusy: false,
+            notificationAutoApprovalPolicy: { enabled: true, rules: [] },
+            sessionActivity: [],
+            sessionActivityGroups: [],
+            sessionActivityCollapsed: {},
+            sessionActivityInitialized: {},
+            sessionActivityExpanded: true,
+            sessionActivityLastRefreshedAt: 0,
+            sessionActivityError: '',
+            sessionActivityBusy: false,
+            sessionActivityFocusGroupId: '',
+            quickTaskImages: [],
+            quickTaskProjectId: '',
+            quickTaskText: '',
+            quickTaskBusy: false,
+            quickTaskDictationActive: false,
+            quickTaskDictationBusy: false,
+            quickTaskStatus: '',
+            quickTaskStatusKind: 'info',
+          };
+          const dashboard = context.window.HermesOpsModules.home.bindDashboard({
+            OPS,
+            AgentBridge: {
+              sessions: {
+                activity: async () => {
+                  activityCalls += 1;
+                  return new Promise((resolve) => { activityResolve = resolve; });
+                },
+              },
+            },
+            renderCurrentOpsView: () => {},
+            root: () => rootEl,
+            esc: (value) => String(value ?? ''),
+            svg: { folder: '', close: '', chat: '', play: '', refresh: '', check: '', arrow: '' },
+            showError: (error) => { throw error; },
+            setBusy: () => {},
+            setDashboardTopbar: () => {},
+            renderNotifications: () => '<div>No notifications.</div>',
+            normalizedAutoApprovalPolicy: () => ({ enabled: true }),
+            loadProjects: async (options) => {
+              projectCalls += 1;
+              projectLoadOptions = options || null;
+              OPS.projects = [{ id: 'hermes', name: 'Hermes', coreBranch: 'master' }];
+              return OPS.projects;
+            },
+            createQuickTask: async () => null,
+            executeReadyTasksWithAi: async () => null,
+            openProjectDetail: async () => null,
+            loadNotifications: async () => { notificationCalls += 1; return []; },
+            loadOpsRuns: async () => { loadOpsRunsCalls += 1; return []; },
+            loadNotificationDiagnostics: async (options) => { diagnosticsOptions.push(options || {}); return null; },
+            openOpsSession: async () => null,
+            findProject: (projectId) => OPS.projects.find((project) => project.id === projectId) || null,
+            projectUsesBranchTitle: () => false,
+            projectBranchLabel: () => '',
+            projectCardTitle: () => '',
+            projectRepositoryLabel: () => '',
+            normalizeRunStatus: () => 'running',
+            runStatusLabel: () => 'Running',
+            runStatusKind: () => 'running',
+            formatOpsDateTime: () => 'now',
+            renderProjectGitQuickAction: () => '',
+            renderProjectPlayQuickAction: () => '',
+            renderProjectActivityQuickAction: () => '',
+            sessionAccentStyle: () => '',
+            sessionGroupAccentStyle: () => '',
+            sessionRefValue: (session) => session.session_id || session.id,
+            canonicalTaskSessions: (sessions) => sessions,
+            projectSessionsFor: () => [],
+            isSessionForProject: () => false,
+            taskImageLabel: () => '',
+            writeStoredJson: () => {},
+            sessionActivityStorageKey: 'activity-collapse',
+            navigatorRef: {},
+            windowRef,
+            documentRef: context.document,
+            URLRef: URL,
+            MediaRecorderRef: function(){},
+            FileRef: function(){},
+            showPromptDialog: async () => null,
+            showConfirmDialog: async () => false,
+            requestAnimationFrameRef: (cb) => cb(),
+            taskDictationPrompt: '',
+            taskDictationAudioBitsPerSecond: 0,
+            runActiveStatusValues: ['running'],
+          });
+
+          const settled = await Promise.race([
+            dashboard.loadDashboardHome().then(() => 'settled'),
+            new Promise((resolve) => setTimeout(() => resolve('timeout'), 50)),
+          ]);
+          if (settled !== 'settled') throw new Error('dashboard home waited for session activity');
+          if (projectCalls !== 1) throw new Error('projects were not loaded once');
+          if (!projectLoadOptions || projectLoadOptions.summary !== true) throw new Error('home project picker should use the project summary path');
+          if (activityCalls !== 1 || typeof activityResolve !== 'function') throw new Error('session activity did not start in background');
+          if (loadOpsRunsCalls !== 0) throw new Error('home load should not call full run list');
+          if (notificationCalls !== 1) throw new Error('notifications should still load once');
+          if (diagnosticsOptions.length !== 1) throw new Error('lightweight diagnostics should load once');
+          if (diagnosticsOptions[0].lightweight !== true || diagnosticsOptions[0].includeMonitor !== false){
+            throw new Error('home diagnostics should skip monitor/run-backed diagnostics');
+          }
+          activityResolve({ sessions: [], groups: [] });
+          await new Promise((resolve) => setTimeout(resolve, 0));
           console.log('ok');
         })().catch((error) => {
           console.error(error && error.stack ? error.stack : error);

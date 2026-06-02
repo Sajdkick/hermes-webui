@@ -87,7 +87,7 @@ def test_cancel_nonexistent_stream(cleanup_test_sessions):
     assert data["cancelled"] is False
 
 def test_send_button_in_html(cleanup_test_sessions):
-    src, _ = get_text("/")
+    src, _ = get_text("/index.html")
     assert "btnSend" in src                   # single primary action button present
     assert 'id="btnCancel"' not in src        # deprecated composer cancel button removed
 

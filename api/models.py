@@ -107,15 +107,23 @@ def _write_session_index(updates=None):
     with _INDEX_WRITE_LOCK:
         # Lazy full-rebuild path — used when index doesn't exist yet.
         if updates is None or not SESSION_INDEX_FILE.exists():
+            updated_map = {
+                s.session_id: s.compact()
+                for s in (updates or [])
+                if getattr(s, "session_id", None)
+            }
             _cleanup_stale_tmp_files()  # best-effort sweep on startup / first call
             entries = []
             for p in SESSION_DIR.glob('*.json'):
                 if p.name.startswith('_'):
                     continue
                 try:
-                    s = Session.load(p.stem)
-                    if s:
-                        entries.append(s.compact())
+                    entry = updated_map.get(p.stem)
+                    if entry is None:
+                        s = Session.load_metadata_only(p.stem, lookup_index_message_count=False)
+                        entry = s.compact() if s else None
+                    if entry:
+                        entries.append(entry)
                 except Exception:
                     logger.debug("Failed to load session from %s", p)
 
@@ -196,6 +204,38 @@ def _write_session_index(updates=None):
     if _fallback:
         # Corrupt or missing index — fall back to full rebuild (called outside LOCK to avoid deadlock)
         _write_session_index(updates=None)
+
+
+def _remove_session_from_index(session_id: str) -> bool:
+    """Remove one session row from the compact index without invalidating it."""
+
+    if not session_id or not SESSION_INDEX_FILE.exists():
+        return False
+    _tmp = SESSION_INDEX_FILE.with_suffix(f'.tmp.{os.getpid()}.{threading.current_thread().ident}')
+    with _INDEX_WRITE_LOCK:
+        try:
+            existing = json.loads(SESSION_INDEX_FILE.read_text(encoding='utf-8'))
+        except Exception:
+            return False
+        if not isinstance(existing, list):
+            return False
+        filtered = [entry for entry in existing if entry.get('session_id') != session_id]
+        if len(filtered) == len(existing):
+            return False
+        _payload = json.dumps(filtered, ensure_ascii=False, indent=2)
+        try:
+            with open(_tmp, 'w', encoding='utf-8') as f:
+                f.write(_payload)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(_tmp, SESSION_INDEX_FILE)
+        except Exception:
+            try:
+                _tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            raise
+    return True
 
 
 def _active_stream_ids():
@@ -565,7 +605,7 @@ class Session:
         return cls(**json.loads(p.read_text(encoding='utf-8')))
 
     @classmethod
-    def load_metadata_only(cls, sid):
+    def load_metadata_only(cls, sid, *, lookup_index_message_count: bool = True):
         """Load only the compact metadata fields, skipping the messages array.
 
         Session JSON files have metadata fields (session_id, title, model, etc.)
@@ -589,7 +629,7 @@ class Session:
             parsed['messages'] = []
             parsed['tool_calls'] = []
             session = cls(**parsed)
-            session._metadata_message_count = _lookup_index_message_count(sid)
+            session._metadata_message_count = _lookup_index_message_count(sid) if lookup_index_message_count else None
             # Mark this session as a metadata-only stub. save() refuses to write
             # such a session because doing so would atomically replace the
             # on-disk JSON with messages=[], wiping the conversation. Any
@@ -1540,7 +1580,7 @@ def all_sessions(diag=None):
     for p in SESSION_DIR.glob('*.json'):
         if p.name.startswith('_'): continue
         try:
-            s = Session.load(p.stem)
+            s = Session.load_metadata_only(p.stem, lookup_index_message_count=False)
             if s: out.append(s)
         except Exception:
             logger.debug("Failed to load session from %s", p)

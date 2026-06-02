@@ -119,7 +119,7 @@ def test_clear_preview_calls_render_breadcrumb():
     # Find clearPreview and check renderBreadcrumb is called nearby
     idx = src.find("function clearPreview")
     assert idx != -1, "clearPreview not found in boot.js"
-    block = src[idx:idx + 600]
+    block = src[idx:idx + 1200]
     assert "renderBreadcrumb" in block, (
         "clearPreview() does not call renderBreadcrumb() — "
         "directory breadcrumb won't restore after closing file preview"

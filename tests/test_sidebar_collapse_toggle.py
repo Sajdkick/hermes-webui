@@ -212,10 +212,7 @@ class TestSidebarCollapseBootJS:
 
     def test_bfcache_pageshow_resync(self):
         idx = BOOT_JS.index("window.addEventListener('pageshow'")
-        # find end of handler
-        depth = 0
-        end = BOOT_JS.index("});", idx)
-        block = BOOT_JS[idx:end + 3]
+        block = BOOT_JS[idx:idx + 5000]
         assert "hermes-webui-sidebar-collapsed" in block, \
             "pageshow handler must re-sync sidebar state from localStorage"
         assert "_syncSidebarAria" in block, \

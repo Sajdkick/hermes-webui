@@ -207,7 +207,8 @@ def test_legacy_ops_shell_keeps_restart_compatibility_contract():
     assert "function ensureLocalDialog(){" in host_source
     assert "const LOCAL_DIALOG = {" in host_source
     assert "api('/api/ops/notifications/pending')" in bridge_source
-    assert "api('/api/ops/runs')" in bridge_source
+    assert "api(`/api/ops/runs/summary${q(params)}`)" in bridge_source
+    assert "api('/api/ops/runs',{method:'POST'" in bridge_source
     assert "return api('/api/ops/sessions').catch(()=>api('/api/sessions'));" in bridge_source
     assert "return api('/api/ops/sessions').then(data=>({" in bridge_source
     assert "/sessions/launch" in bridge_source
@@ -326,7 +327,7 @@ def test_legacy_bridge_merges_done_notifications_from_runs():
               }]
             };
           }
-          if (path === '/api/ops/runs'){
+          if (path === '/api/ops/runs/summary'){
             return {
               runs: [{
                 id: 'run-1',
@@ -422,7 +423,7 @@ def test_legacy_bridge_preserves_play_notifications_and_opens_them_locally():
               }]
             };
           }
-          if (path === '/api/ops/runs'){
+          if (path === '/api/ops/runs/summary'){
             return { runs: [] };
           }
           if (path === '/api/ops/notifications/dismissed'){
@@ -560,7 +561,7 @@ def test_legacy_bridge_prefers_locked_build_notification_over_newer_ready_note()
               ]
             };
           }
-          if (path === '/api/ops/runs') return { runs: [] };
+          if (path === '/api/ops/runs/summary') return { runs: [] };
           if (path === '/api/ops/notifications/dismissed') return { dismissed: [] };
           throw new Error('Unexpected API path: ' + path);
         };

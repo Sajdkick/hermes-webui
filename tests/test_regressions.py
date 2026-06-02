@@ -312,11 +312,8 @@ def test_deleted_session_does_not_appear_in_list(cleanup_test_sessions):
     assert sid not in ids_after,         f"Deleted session {sid} still appears in list -- index not invalidated on delete"
 
 
-def test_server_delete_invalidates_index(cleanup_test_sessions):
-    """R8b: session/delete handler must unlink _index.json.
-    Static check that the fix is in place.
-    Sprint 11: handler moved from server.py to api/routes.py -- check both.
-    """
+def test_server_delete_updates_index_without_full_invalidation(cleanup_test_sessions):
+    """R8b: session/delete must remove the stale row without deleting _index.json."""
     src = (REPO_ROOT / "server.py").read_text()
     routes_src = (REPO_ROOT / "api" / "routes.py").read_text() if (REPO_ROOT / "api" / "routes.py").exists() else ""
     # Find the delete handler in either file
@@ -328,11 +325,13 @@ def test_server_delete_invalidates_index(cleanup_test_sessions):
         )
         if delete_idx >= 0:
             # Use 1200 chars to accommodate any validation/guard code added
-            # before the SESSION_INDEX_FILE.unlink() call (e.g. session_id
+            # before the index update call (e.g. session_id
             # character checks, path traversal guards).
             delete_block = text[delete_idx:delete_idx+1200]
-            assert "SESSION_INDEX_FILE" in delete_block, \
-                f"{label} session/delete must invalidate SESSION_INDEX_FILE"
+            assert "_remove_session_from_index" in delete_block, \
+                f"{label} session/delete must patch SESSION_INDEX_FILE instead of invalidating it"
+            assert "SESSION_INDEX_FILE.unlink" not in delete_block, \
+                f"{label} session/delete must not force a full session-index rebuild"
             return
     assert False, "session/delete handler not found in server.py or api/routes.py"
 

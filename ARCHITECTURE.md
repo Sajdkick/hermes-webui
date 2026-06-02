@@ -178,6 +178,17 @@ Helper functions used by all handlers:
     t(handler, payload, status=200, ct) Sends plain text or HTML response
     read_body(handler)                  Reads and JSON-parses the POST body
 
+Core runtime boundary:
+
+    /api/core/... routes are owned by api/routes_core.py and the api/core_*.py
+    domain facades. This is the shell-neutral boundary for project registry,
+    safe project files, tasks, Play lifecycle, deployments/providers/artifacts,
+    database inspection, Git/GitHub controls, runtime gather/inspect tools,
+    host/proxy descriptors, session activity, and readable output. Ops routes
+    may remain as compatibility wrappers, but new shared runtime consumers should
+    prefer /api/core and follow docs/core-api-contract.md. Keep shell-specific
+    navigation, copy, and dashboard rendering out of core modules.
+
 CRITICAL ORDERING RULE in do_POST:
 The /api/upload check MUST appear BEFORE calling read_body(). read_body() calls
 handler.rfile.read() which consumes the HTTP body stream. The upload handler also

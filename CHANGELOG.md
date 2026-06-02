@@ -4,11 +4,15 @@
 
 ### Added
 
+- Hermes WebUI now exposes a documented in-process Core API under `/api/core`, including capabilities/health discovery and shell-neutral facades for projects, deployments, database, Git/GitHub, runtime gather/inspect tools, host descriptors, tasks, and session readable-output/activity data.
+- Ops dashboard Deployments now includes a first-class **Redeploy** action for existing Cloud Terminal deployment records; Core redeploy/update routes preserve the deployment's current database mode and data, show immediate in-panel progress while the build is running, preserve previous hashed browser assets during snapshot promotion, and `local-legacy` deployments are rebuilt/promoted directly by Core without requiring Cloud Terminal session authentication.
 - Hermes WebUI now includes a native gather-report helper (`scripts/hermes-gather.py` plus `/api/gather/<id>/events`) for temporary instrumentation workflows where agents ask users to reproduce a browser/runtime issue and then inspect captured structured events directly.
 - The workspace file panel now accepts local file/folder drops, uploading files into the dropped-on directory (or current workspace directory) while preserving nested subfolders and showing per-file upload progress.
 
 ### Changed
 
+- Ops dashboard deployment data now loads provider metadata and project deployment state through Core API routes, while legacy Ops deployment routes remain compatibility wrappers.
+- Hermes Ops Play calls now route through a documented `api.core_play` boundary before reaching the existing Play pipeline implementation, preserving the current HTTP route shapes while creating a stable seam for future core-runtime extraction.
 - Ops Quick Task and Epic task executions now start linked task prompts as standing `/goal` turns by default, including execute-ready batch sessions, so long task queues can continue through goal-mode continuation instead of stopping at the first tool-call ceiling.
 - Startup maintenance now prunes old generated run journals and upstream-sync maintenance worktrees after their recovery/review retention windows, reducing WebUI state growth without deleting active run journals.
 - Workspace panel file editing now treats the textarea buffer as the save source of truth, keeps newer in-flight edits visible and dirty after a save snapshot completes, and blocks stale preview/close paths from clearing unsaved edits.
@@ -18,6 +22,11 @@
 
 ### Fixed
 
+- Ops dashboard Deployments now recognizes existing Cloud Terminal deployment records from `.deployments/deployments.json`, including the deployment slug and database mode, so projects deployed through Cloud Terminal show as deployed in Hermes without rewriting or recreating their databases.
+- Ops dashboard redeploy no longer requires Cloud Terminal session authentication for existing `local-legacy` deployments: Hermes Core runs the project deploy build when available, atomically promotes the local deployment snapshot, keeps previous hashed browser assets available for already-open/cached pages, and leaves the existing deployment database/provider metadata intact; build failures leave the published snapshot and metadata unchanged with a clear error.
+- Native Hermes deployment proxying now treats deployed-app `/api/trpc/*` auth requests as public deployment traffic when they carry `/deploy/<slug>` referer/cookie context, routes those POSTs before WebUI CSRF/body parsing, and forwards the raw tRPC body to the deployment runtime so debug empty login and signup no longer fall through to WebUI `not found`.
+- Ops project listings now hide pytest temporary-workspace registrations from user-facing project choices, so Quick Task project dropdowns no longer fill with entries like `main (test_same_session_profile_swit0)` while preserving normal `/tmp` projects.
+- Ops dashboard Deployments now opens a dedicated deployments route instead of redirecting to a project detail page, rendering Cloud Terminal-style per-project deployment panels with refresh, scaffold, record, and execute controls.
 - Switching back into the main Hermes app from legacy `/ops` shell routes now resolves against the actual app root even when the shell URL ends with `/ops/`, `/ops-phase/`, or session-prefixed trailing-slash variants, so “switch to Hermes” and related home-menu links no longer navigate to invalid nested `index.html` or `recovery` paths.
 - `ctl.sh start`/`restart` now launch the foreground bootstrap under `nohup` with detached stdin, so WebUI daemon restarts survive the launching shell exiting instead of dropping immediately after a successful-looking start.
 - Ops Quick Task and project-detail task dictation now use the same shared Web Speech API-first voice pipeline as the Chat composer, falling back to `/api/transcribe` only through that shared controller instead of maintaining a separate recorder-only Ops path.
@@ -37,7 +46,8 @@
 - Ops Active Sessions badges now show live streams as working immediately instead of leaving running turns stuck in the connecting state.
 - Ops project-detail task forms now preserve draft focus and selection through the periodic refresh loop so the New task input no longer deselects while typing.
 - Existing chats now keep using and displaying their session-scoped profile for queued turns, goal continuations, status cards, and optimistic sidebar rows even after another profile becomes active in the same browser tab.
-- Ops project task launches now treat the project-owned profile as authoritative: stale/global UI profile payloads are ignored, blank project profiles resolve to the root default profile, and empty Ops/project sessions cannot be retagged by `/api/chat/start` before the first turn.
+- Ops project task launches and `/api/session/new` project sessions now treat the project-owned profile as authoritative: stale/global UI profile payloads are ignored, blank project profiles resolve to the root default profile, and empty Ops/project sessions cannot be retagged by `/api/chat/start` before the first turn.
+- Direct Hermes UI chats now pin the agent/tool runtime to the session profile's `HERMES_HOME` with a context-local override, so terminal subprocesses keep using the chat's own profile even when another tab/session has switched the process-global active profile.
 
 ## [v0.51.89] — 2026-05-18 — Release BM (stage-382 — 6-PR full sweep batch — runtime adapter approval/clarify seam + SOUL.md memory panel + #1855 resolve_model_provider fast-path + PWA sidebar spinner fix + /model active-provider preference + contributor contract docs index)
 

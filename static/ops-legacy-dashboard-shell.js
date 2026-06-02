@@ -14,6 +14,7 @@
     const loadDashboardHomeRef=ctx&&ctx.loadDashboardHomeRef;
     const renderProjectsRef=ctx&&ctx.renderProjectsRef;
     const renderProjectDetailRef=ctx&&ctx.renderProjectDetailRef;
+    const renderDeploymentsRef=ctx&&ctx.renderDeploymentsRef;
     const startNotificationPollingRef=ctx&&ctx.startNotificationPollingRef;
     const stopNotificationPollingRef=ctx&&ctx.stopNotificationPollingRef;
     const stopPlayStatusPollingRef=ctx&&ctx.stopPlayStatusPollingRef;
@@ -41,7 +42,7 @@
         if(!projectId)return {view:'projects',projectId:''};
         return {view,projectId};
       }
-      if(view==='projects')return {view,projectId:''};
+      if(view==='projects'||view==='deployments')return {view,projectId:''};
       return {view:'home',projectId:''};
     }
 
@@ -55,9 +56,10 @@
     function syncHistoryState(view,projectId,options){
       if(!standaloneHistoryEnabled())return null;
       const opts=options&&typeof options==='object'?options:{};
-      const normalizedView=String(view||'').trim()==='project-detail'
+      const rawView=String(view||'').trim();
+      const normalizedView=rawView==='project-detail'
         ? 'project-detail'
-        : (String(view||'').trim()==='projects'?'projects':'home');
+        : (rawView==='projects'||rawView==='deployments'?rawView:'home');
       const normalizedProjectId=normalizedView==='project-detail'?String(projectId||'').trim():'';
       const nextState={
         [OPS_HISTORY_MARKER]:true,
@@ -200,6 +202,9 @@
       }else if(OPS.view==='projects'){
         const renderProjects=typeof renderProjectsRef==='function'?renderProjectsRef():null;
         if(typeof renderProjects==='function')renderProjects();
+      }else if(OPS.view==='deployments'){
+        const renderDeployments=typeof renderDeploymentsRef==='function'?renderDeploymentsRef():null;
+        if(typeof renderDeployments==='function')renderDeployments();
       }else if(OPS.view==='project-detail'){
         const renderProjectDetail=typeof renderProjectDetailRef==='function'?renderProjectDetailRef():null;
         if(typeof renderProjectDetail==='function')renderProjectDetail();

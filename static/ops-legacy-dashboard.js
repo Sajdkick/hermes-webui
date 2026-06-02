@@ -309,6 +309,7 @@
       loadDashboardHomeRef:()=>loadDashboardHome,
       renderProjectsRef:()=>renderProjects,
       renderProjectDetailRef:()=>renderProjectDetail,
+      renderDeploymentsRef:()=>renderDeployments,
       startNotificationPollingRef:()=>startNotificationPolling,
       stopNotificationPollingRef:()=>stopNotificationPolling,
       stopPlayStatusPollingRef:()=>stopPlayStatusPolling,
@@ -367,6 +368,9 @@
     if(normalized.view==='projects'){
       return DASHBOARD_PROJECTS.openProjects({historyMode:'skip'});
     }
+    if(normalized.view==='deployments'){
+      return DASHBOARD_DEPLOYMENTS.openDeployments({historyMode:'skip'});
+    }
     return openOpsDashboardView({historyMode:'skip'});
   }
 
@@ -422,8 +426,9 @@
       setDashboardTopbar:typeof setDashboardTopbar==='function'?setDashboardTopbar:()=>{},
       renderNotifications:()=>renderNotifications(),
       normalizedAutoApprovalPolicy:()=>normalizedAutoApprovalPolicy(),
-      loadProjects:()=>loadProjects(),
+      loadProjects:(options)=>loadProjects(options),
       openProjectDetail:(projectId)=>openProjectDetail(projectId),
+      openDeployments:(options)=>openDeployments(options),
       loadNotifications:()=>loadNotifications(),
       loadOpsRuns:(filters)=>loadOpsRuns(filters),
       loadNotificationDiagnostics:(options)=>loadNotificationDiagnostics(options),
@@ -472,12 +477,21 @@
       OPS,
       api:typeof api==='function'?api:null,
       projectUrl,
+      coreUrl:(path)=>`/api/core${String(path||'').startsWith('/')?String(path||''):`/${String(path||'')}`}`,
+      coreProjectUrl:(projectId,suffix)=>`/api/core/projects/${encodeURIComponent(projectId)}${String(suffix||'').startsWith('/')?String(suffix||''):`/${String(suffix||'')}`}`,
+      root:typeof root==='function'?root:null,
       renderCurrentOpsView,
       showToast:typeof showToast==='function'?showToast:()=>{},
       showPromptDialog:typeof showPromptDialog==='function'?showPromptDialog:(async()=>null),
       showConfirmDialog:typeof showConfirmDialog==='function'?showConfirmDialog:(async()=>false),
       esc:typeof esc==='function'?esc:(value=>String(value??'')),
       svg,
+      nameOf:typeof nameOf==='function'?nameOf:null,
+      projectPath:typeof projectPath==='function'?projectPath:null,
+      setDashboardTopbar:typeof setDashboardTopbar==='function'?setDashboardTopbar:null,
+      renderLoading:typeof renderLoading==='function'?renderLoading:null,
+      loadProjects:()=>loadProjects(),
+      windowRef:typeof window!=='undefined'?window:null,
     })
     : {};
   const DASHBOARD_GIT=OPS_MODULES.git&&typeof OPS_MODULES.git.bindDashboard==='function'
@@ -788,9 +802,14 @@
   const handleHomeClick=DASHBOARD_HOME.handleHomeClick||function(){return false;};
   const handleHomeKeydown=DASHBOARD_HOME.handleHomeKeydown||function(){return false;};
   const handleQuickTaskField=DASHBOARD_HOME.handleQuickTaskField||function(){return false;};
+  const openDeployments=DASHBOARD_DEPLOYMENTS.openDeployments||(async function(){return null;});
+  const refreshDeployments=DASHBOARD_DEPLOYMENTS.refreshDeployments||(async function(){return null;});
+  const renderDeployments=DASHBOARD_DEPLOYMENTS.renderDeployments||function(){return '';};
+  const loadDeployments=DASHBOARD_DEPLOYMENTS.loadDeployments||(async function(){return [];});
   const loadProjectDeployment=DASHBOARD_DEPLOYMENTS.loadProjectDeployment||(async function(){return null;});
   const recordProjectDeployment=DASHBOARD_DEPLOYMENTS.recordProjectDeployment||(async function(){return null;});
   const executeProjectDeployment=DASHBOARD_DEPLOYMENTS.executeProjectDeployment||(async function(){return null;});
+  const redeployProjectDeployment=DASHBOARD_DEPLOYMENTS.redeployProjectDeployment||(async function(){return null;});
   const scaffoldProjectDeployment=DASHBOARD_DEPLOYMENTS.scaffoldProjectDeployment||(async function(){return null;});
   const renderProjectDeployment=DASHBOARD_DEPLOYMENTS.renderProjectDeployment||function(){return '';};
   const gitStatusFor=DASHBOARD_GIT.gitStatusFor||function(){return null;};
@@ -946,10 +965,12 @@
       executeProjectGitOperation:typeof executeProjectGitOperation==='function'?executeProjectGitOperation:null,
       loadProjectGatherReports:typeof loadProjectGatherReports==='function'?loadProjectGatherReports:null,
       loadProjectReviewRequests:typeof loadProjectReviewRequests==='function'?loadProjectReviewRequests:null,
+      refreshDeployments:typeof refreshDeployments==='function'?refreshDeployments:null,
       loadProjectDeployment:typeof loadProjectDeployment==='function'?loadProjectDeployment:null,
       scaffoldProjectDeployment:typeof scaffoldProjectDeployment==='function'?scaffoldProjectDeployment:null,
       recordProjectDeployment:typeof recordProjectDeployment==='function'?recordProjectDeployment:null,
       executeProjectDeployment:typeof executeProjectDeployment==='function'?executeProjectDeployment:null,
+      redeployProjectDeployment:typeof redeployProjectDeployment==='function'?redeployProjectDeployment:null,
       loadProjectDatabase:typeof loadProjectDatabase==='function'?loadProjectDatabase:null,
       testProjectDatabase:typeof testProjectDatabase==='function'?testProjectDatabase:null,
       inspectProjectDatabase:typeof inspectProjectDatabase==='function'?inspectProjectDatabase:null,

@@ -56,6 +56,7 @@ TEST_STATE_DIR = pathlib.Path(os.getenv(
     str(HERMES_HOME / _auto_state_dir_name(REPO_ROOT))
 ))
 TEST_WORKSPACE = TEST_STATE_DIR / 'test-workspace'
+TEST_OPS_PROJECTS_DIR = TEST_STATE_DIR / 'ops-projects'
 
 # Publish at module level so api.config, _pytest_port.py, and any test module
 # importing stateful API code during collection see the isolated test paths.
@@ -67,6 +68,7 @@ os.environ['HERMES_WEBUI_TEST_PORT'] = str(TEST_PORT)
 os.environ['HERMES_WEBUI_TEST_STATE_DIR'] = str(TEST_STATE_DIR)
 os.environ['HERMES_WEBUI_STATE_DIR'] = str(TEST_STATE_DIR)
 os.environ['HERMES_WEBUI_DEFAULT_WORKSPACE'] = str(TEST_WORKSPACE)
+os.environ['HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR'] = str(TEST_OPS_PROJECTS_DIR)
 os.environ['HERMES_HOME'] = str(TEST_STATE_DIR)
 os.environ['HERMES_BASE_HOME'] = str(TEST_STATE_DIR)
 # Hermes Agent sessions may inherit HERMES_CONFIG_PATH pointing at the live
@@ -117,6 +119,27 @@ VENV_PYTHON  = _discover_python(HERMES_AGENT)
 
 # Work dir: agent dir if found, else repo root
 WORKDIR = str(HERMES_AGENT) if HERMES_AGENT else str(REPO_ROOT)
+
+# Some hermes-agent startup/profile-sync paths inspect repository-owned shared
+# skills while the isolated test server starts. They must not leave the working
+# tree's fixture copy changed before source-level tests assert its contents.
+# Snapshot these narrow fixtures at collection time and restore them after the
+# test server is ready; if the checked-in file itself is stale, tests still fail.
+_REPO_AGENT_SKILL_FIXTURE_FILES = (
+    REPO_ROOT / '.agents' / 'skills' / 'cloud-terminal-readable-output' / 'SKILL.md',
+    REPO_ROOT / '.agents' / 'skills' / 'cloud-terminal-readable-output' / 'agents' / 'openai.yaml',
+)
+_REPO_AGENT_SKILL_FIXTURE_SNAPSHOT = {
+    path: path.read_bytes()
+    for path in _REPO_AGENT_SKILL_FIXTURE_FILES
+    if path.exists()
+}
+
+
+def _restore_repo_agent_skill_fixtures():
+    for path, data in _REPO_AGENT_SKILL_FIXTURE_SNAPSHOT.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
 
 # ── Agent availability detection ─────────────────────────────────────────────
 # Tests that require hermes-agent modules (cron, skills, approval, chat/stream)
@@ -540,6 +563,7 @@ def test_server():
         "HERMES_WEBUI_HOST":              "127.0.0.1",
         "HERMES_WEBUI_STATE_DIR":         str(TEST_STATE_DIR),
         "HERMES_WEBUI_DEFAULT_WORKSPACE": str(TEST_WORKSPACE),
+        "HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR": str(TEST_OPS_PROJECTS_DIR),
         "HERMES_WEBUI_DEFAULT_MODEL":     "openai/gpt-5.4-mini",
         "HERMES_HOME":                    str(TEST_STATE_DIR),
         "HERMES_CONFIG_PATH":             str(TEST_STATE_DIR / 'config.yaml'),
@@ -590,6 +614,19 @@ def test_server():
         pass
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _restore_repo_agent_skill_fixtures_after_test_server_start(test_server):
+    """Keep repository-owned shared skill fixtures stable during pytest.
+
+    The session test server may initialize hermes-agent/profile skill caches as
+    it starts. Restore the repo-local readable-output fixture after startup so
+    source-level tests validate the current checkout, not transient sync output.
+    """
+    _restore_repo_agent_skill_fixtures()
+    yield
+    _restore_repo_agent_skill_fixtures()
+
+
 # ── Test base URL ─────────────────────────────────────────────────────────────
 
 @pytest.fixture(scope="session")
@@ -605,12 +642,15 @@ def base_url():
 
 @pytest.fixture(autouse=True)
 def _invalidate_models_cache_after_test():
-    """Force the TTL cache to be cleared before and after every test.
+    """Force shared caches/fixtures clean before and after every test.
 
     This prevents state bleed where a test that calls get_available_models()
     populates the cache with a particular config, and the next test sees stale
-    results even though it has mutated _cfg_cache in-memory.
+    results even though it has mutated _cfg_cache in-memory. It also keeps the
+    repo-local shared-skill fixture stable when profile/cron tests patch Hermes
+    skill-home module globals.
     """
+    _restore_repo_agent_skill_fixtures()
     try:
         from api.config import invalidate_models_cache
         invalidate_models_cache()
@@ -622,6 +662,7 @@ def _invalidate_models_cache_after_test():
         invalidate_models_cache()
     except Exception:
         pass
+    _restore_repo_agent_skill_fixtures()
 
 
 # ── Per-test session cleanup ──────────────────────────────────────────────────

@@ -1525,6 +1525,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
     source.addEventListener('token',e=>{
       if(_terminalStateReached||_streamFinalized) return;
       const d=JSON.parse(e.data);
+      const _tokenDomSessionMatches=!!S.session&&S.session.session_id===activeSid;
       let token=String(d.text||'');
       if(_snapshotReplayText&&_snapshotReplayOffset<_snapshotReplayText.length){
         const expected=_snapshotReplayText.slice(_snapshotReplayOffset,_snapshotReplayOffset+token.length);
@@ -1540,7 +1541,8 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
         _snapshotReplayOffset=0;
       }
       if(!token) return;
-      assistantText+=token;
+      d.text=token;
+      assistantText+=d.text;
       syncInflightAssistantMessage();
       if(!S.session||S.session.session_id!==activeSid) return;
       const parsed=_parseStreamState();

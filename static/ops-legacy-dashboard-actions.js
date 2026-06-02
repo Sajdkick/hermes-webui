@@ -64,10 +64,12 @@
     const executeProjectGitOperation=ctx&&ctx.executeProjectGitOperation;
     const loadProjectGatherReports=ctx&&ctx.loadProjectGatherReports;
     const loadProjectReviewRequests=ctx&&ctx.loadProjectReviewRequests;
+    const refreshDeployments=ctx&&ctx.refreshDeployments;
     const loadProjectDeployment=ctx&&ctx.loadProjectDeployment;
     const scaffoldProjectDeployment=ctx&&ctx.scaffoldProjectDeployment;
     const recordProjectDeployment=ctx&&ctx.recordProjectDeployment;
     const executeProjectDeployment=ctx&&ctx.executeProjectDeployment;
+    const redeployProjectDeployment=ctx&&ctx.redeployProjectDeployment;
     const loadProjectDatabase=ctx&&ctx.loadProjectDatabase;
     const testProjectDatabase=ctx&&ctx.testProjectDatabase;
     const inspectProjectDatabase=ctx&&ctx.inspectProjectDatabase;
@@ -208,10 +210,12 @@
         if(action==='git-sync-execute')return await executeProjectGitOperation(projectId,'sync');
         if(action==='refresh-gather-reports')return await loadProjectGatherReports(projectId);
         if(action==='refresh-review-requests')return await loadProjectReviewRequests(projectId);
+        if(action==='refresh-deployments'&&typeof refreshDeployments==='function')return await refreshDeployments();
         if(action==='refresh-deployment')return await loadProjectDeployment(projectId);
         if(action==='scaffold-deployment')return await scaffoldProjectDeployment(projectId);
         if(action==='record-deployment')return await recordProjectDeployment(projectId,btn.dataset.deploymentAction||'deploy');
         if(action==='execute-deployment')return await executeProjectDeployment(projectId,btn.dataset.deploymentAction||'deploy');
+        if(action==='redeploy-deployment'&&typeof redeployProjectDeployment==='function')return await redeployProjectDeployment(projectId);
         if(action==='refresh-project-database')return await loadProjectDatabase(projectId);
         if(action==='test-project-database')return await testProjectDatabase(projectId);
         if(action==='inspect-project-database')return await inspectProjectDatabase(projectId);

@@ -13,9 +13,11 @@ Covers:
   4. switch_profile(process_wide=False) does NOT mutate process globals
   5. Concurrent requests on different threads see independent profiles
 """
+import json
 import os
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -213,3 +215,82 @@ def test_concurrent_threads_see_independent_profiles():
     assert not errors, f"Workers raised: {errors}"
     assert results.get('alice') == 'alice', f"alice thread saw {results.get('alice')!r}"
     assert results.get('bob') == 'bob', f"bob thread saw {results.get('bob')!r}"
+
+
+class _FakeHandler:
+    def __init__(self, body=None):
+        raw = json.dumps(body or {}).encode('utf-8')
+        self.status = None
+        self.sent_headers = []
+        self.body = bytearray()
+        self.wfile = self
+        import io
+        self.rfile = io.BytesIO(raw)
+        self.headers = {'Content-Length': str(len(raw))}
+
+    def send_response(self, status):
+        self.status = status
+
+    def send_header(self, name, value):
+        self.sent_headers.append((name, value))
+
+    def end_headers(self):
+        pass
+
+    def write(self, data):
+        self.body.extend(data)
+
+
+def _response_json(handler: _FakeHandler) -> dict:
+    return json.loads(bytes(handler.body).decode('utf-8'))
+
+
+def test_session_new_with_project_id_uses_project_profile_over_payload(monkeypatch, tmp_path):
+    """Project-owned sessions must not inherit a stale tab/global payload profile."""
+    from api import routes
+
+    created = {}
+
+    class CreatedSession:
+        session_id = 'session-project'
+        messages = []
+
+        def __init__(self, **kwargs):
+            self.profile = kwargs.get('profile')
+            self.project_id = kwargs.get('project_id')
+            self.workspace = kwargs.get('workspace')
+            self.model = kwargs.get('model')
+            self.model_provider = kwargs.get('model_provider')
+
+        def compact(self):
+            return {
+                'session_id': self.session_id,
+                'profile': self.profile,
+                'project_id': self.project_id,
+                'workspace': self.workspace,
+            }
+
+    def fake_new_session(**kwargs):
+        created.update(kwargs)
+        return CreatedSession(**kwargs)
+
+    monkeypatch.setattr(
+        routes,
+        'load_projects',
+        lambda: [{'project_id': 'project-1', 'name': 'Laxlyftet', 'profile': 'laxlyftet'}],
+    )
+    monkeypatch.setattr(routes, 'new_session', fake_new_session)
+    monkeypatch.setattr(routes, 'resolve_trusted_workspace', lambda value: tmp_path)
+    monkeypatch.setattr(routes, '_session_model_state_from_request', lambda model, provider: (None, None))
+
+    handler = _FakeHandler({'project_id': 'project-1', 'profile': 'summons', 'workspace': str(tmp_path)})
+    routes.handle_post(
+        handler,
+        SimpleNamespace(path='/api/session/new'),
+    )
+
+    assert handler.status == 200
+    payload = _response_json(handler)
+    assert created['profile'] == 'laxlyftet'
+    assert payload['session']['profile'] == 'laxlyftet'
+    assert payload['session']['project_id'] == 'project-1'

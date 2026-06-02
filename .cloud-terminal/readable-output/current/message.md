@@ -1,20 +1,31 @@
-# Ops duplicate task sessions fixed
+# Bad Gateway / nginx chat-start crash investigated
 
-## What changed
+## Result
 
-- Made Ops task session launch reuse an existing current, non-archived linked Ops task session instead of creating another session for the same task.
-- Added active-session de-duplication for Ops task sessions so historic duplicate links for the same project/task collapse to the best current visible session.
-- Preserved task/session cleanup behavior so closing/completing a task clears the task’s session linkage fields and archived sessions are not reused.
-- Added regression coverage for repeated launch idempotency and historic duplicate active-session rendering.
-- Updated `project_tasks/master.json` for the executed task to `qaStatus: "ready-for-test"`.
+The task is marked `ready-for-test` in `project_tasks/master.json`.
+
+## Root cause
+
+The Bad Gateway/nginx symptom matches the WebUI `/api/chat/start` request wedging in the `resolve_model_provider` stage. That path could synchronously rebuild the model catalog (`get_available_models()`), which may perform slow network probes for provider model lists or credential refreshes. Behind a default ~60s reverse proxy, the browser sees `502 Bad Gateway` even though the backend may eventually continue the run, creating a duplicate-send risk.
+
+## Fix present in the current tree
+
+`api/routes.py` now short-circuits `_resolve_compatible_session_model_state()` when chat start already carries an explicit `(model, model_provider)` pair and the model is not `@provider:model`-qualified. That avoids the cold catalog rebuild on normal explicit-provider chat starts while preserving the slow path for cases that still need catalog/default-model repair.
+
+I also confirmed recent Laxlyftet sessions store `model_provider: "openai-codex"`, so they use the fixed fast path.
 
 ## Verification
 
-- `python3 -m pytest tests/test_upstream_restart_phase4_sessions.py -k 'launch_task_session_creates_persisted_linked_session or dedupes_historic_duplicate_task_sessions or close_task_session_archives_linked_session_and_stops_run or complete_task_route_marks_task_done_and_run_succeeded'` — passed (`4 passed`).
-- `python3 -m pytest tests/test_upstream_restart_phase4_sessions.py` — passed (`11 passed`).
-- `git diff --check -- api/ops_sessions.py tests/test_upstream_restart_phase4_sessions.py CHANGELOG.md project_tasks/master.json` — passed.
+- Focused regression tests: `python3 -m pytest tests/test_issue1855_resolve_model_provider_fast_path.py tests/test_issue1855_request_diagnostics.py tests/test_profile_env_isolation.py tests/test_issue803.py -q`
+  - Result: `39 passed in 3.98s`
+- Project task JSON validation: `python3 -m json.tool project_tasks/master.json >/dev/null`
+  - Result: passed
+- Live backend smoke on `127.0.0.1:5003`:
+  - Created throwaway Laxlyftet session with `model_provider=openai-codex` in `4.8 ms`.
+  - `POST /api/chat/start` returned `200` in `41.6 ms` with `effective_model_provider: "openai-codex"`.
+  - This validates the HTTP start request no longer approaches a proxy timeout.
+  - The throwaway stream was cancelled afterward; `/api/chat/stream/status` reported `active: false` and terminal state `interrupted-by-user`.
 
-## Notes
+## Note
 
-- `docs/VISION.md` was referenced by repo instructions but does not exist in this checkout; I used the available project docs and existing Ops session tests instead.
-- The worktree already contains unrelated modified files; I only intentionally touched the Ops session implementation, its targeted test file, the changelog entry, and the active task JSON status.
+The repository worktree was already broadly dirty with unrelated changes. For this task, the status update was limited to task `7f9e3592-5fb4-4067-b192-00357f349247`; I did not attempt to revert or normalize unrelated files.

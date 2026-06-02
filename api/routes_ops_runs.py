@@ -11,6 +11,7 @@ from api import ops_runs
 
 
 _RUNS_RE = re.compile(r"^/api/ops/runs/?$")
+_RUNS_SUMMARY_RE = re.compile(r"^/api/ops/runs/summary/?$")
 _RUN_RE = re.compile(r"^/api/ops/runs/([^/]+)/?$")
 _RUN_COMPLETE_RE = re.compile(r"^/api/ops/runs/([^/]+)/complete/?$")
 _RUN_REQUESTS_RE = re.compile(r"^/api/ops/runs/([^/]+)/requests/?$")
@@ -46,6 +47,11 @@ def handle_get(handler, parsed) -> bool:
         if _RUNS_RE.match(parsed.path):
             filters = {key: values[0] for key, values in parse_qs(parsed.query).items() if values}
             j(handler, ops_runs.list_ops_runs(filters))
+            return True
+
+        if _RUNS_SUMMARY_RE.match(parsed.path):
+            filters = {key: values[0] for key, values in parse_qs(parsed.query).items() if values}
+            j(handler, ops_runs.list_ops_run_summaries(filters))
             return True
 
         match = _RUN_REQUESTS_RE.match(parsed.path)

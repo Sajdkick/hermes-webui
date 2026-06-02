@@ -728,6 +728,11 @@
 .quick-response-project-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-start;padding-top:10px;border-top:1px dashed rgba(58,79,112,.65);}
 .quick-response-project-actions .menu-action-btn.small{padding:5px 9px;}
 .quick-response-project-sessions,.ops-project-sessions{display:flex;flex-direction:column;gap:8px;padding:10px;}
+.ops-deployments-list{display:flex;flex-direction:column;gap:12px;}
+.ops-deployment-project-card .quick-response-project-header{align-items:flex-start;}
+.ops-deployment-project-card .quick-response-project-actions{justify-content:flex-end;}
+.ops-deployment-project-body{padding:10px;}
+.ops-deployment-project-body .ops-deployment-panel{margin:0;}
 details.ops-project-sessions{display:block;}
 .ops-project-sessions-summary{cursor:pointer;color:#cbd5e1;font-size:.78rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:4px 2px;}
 .ops-project-sessions-body{display:flex;flex-direction:column;gap:8px;padding-top:8px;}
@@ -2941,4 +2946,46 @@ html[data-embed-mode="play-chat"] #emptyState{
 
 html[data-embed-mode="play-chat"] .suggestion-grid{
   display:none;
+}
+
+.ops-deployment-progress{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin:0 0 12px;
+  padding:12px;
+  border:1px solid var(--accent-bg-strong);
+  border-radius:12px;
+  background:var(--accent-bg);
+  color:var(--text);
+}
+.ops-deployment-progress-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  font-size:12px;
+}
+.ops-deployment-progress-head strong{color:var(--accent-text);font-size:13px;}
+.ops-deployment-progress-head span{color:var(--muted);font-size:11px;white-space:nowrap;}
+.ops-deployment-progress-track{
+  position:relative;
+  overflow:hidden;
+  height:7px;
+  border-radius:999px;
+  background:rgba(0,0,0,.12);
+}
+.ops-deployment-progress-track span{
+  position:absolute;
+  inset:0 auto 0 0;
+  width:38%;
+  border-radius:inherit;
+  background:linear-gradient(90deg,var(--accent),var(--blue));
+  animation:opsDeploymentProgress 1.15s ease-in-out infinite;
+}
+.ops-deployment-progress-detail{font-size:12px;color:var(--muted);line-height:1.5;}
+@keyframes opsDeploymentProgress{
+  0%{transform:translateX(-110%);}
+  55%{transform:translateX(95%);}
+  100%{transform:translateX(265%);}
 }

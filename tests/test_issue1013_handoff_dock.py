@@ -102,7 +102,7 @@ def test_handoff_delete_clears_local_storage_markers():
     assert "function _clearHandoffStorageForSession(sid) {" in SESSIONS_JS
     assert "_setHandoffStorageValue(sid, _HANDOFF_SUFFIX_DISMISSED_AT, null);" in SESSIONS_JS
     assert "_setHandoffStorageValue(sid, _HANDOFF_SUFFIX_SUMMARY_HANDLED_AT, null);" in SESSIONS_JS
-    assert "_clearHandoffStorageForSession(sid);" in SESSIONS_JS
+    assert "_clearHandoffStorageForSession(sessionId);" in SESSIONS_JS
     assert "ids.forEach(_clearHandoffStorageForSession);" in SESSIONS_JS
 
 

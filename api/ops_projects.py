@@ -25,6 +25,7 @@ TASK_QA_STATUS_VALUES = {"ready-for-test", "needs-more-work", "not-synced"}
 TASKS_DIR_NAME = "project_tasks"
 LEGACY_TASKS_FILE_NAME = "project_tasks.json"
 TASK_IMAGE_MAX_BYTES = 20 * 1024 * 1024
+PYTEST_RUN_DIR_RE = re.compile(r"^pytest-(?:\d+|current)$")
 TASK_IMAGE_MIME_EXTENSIONS = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
@@ -206,6 +207,33 @@ def _paths_equal(left: str | Path, right: str | Path) -> bool:
         return Path(left).expanduser().resolve() == Path(right).expanduser().resolve()
     except Exception:
         return str(left) == str(right)
+
+
+def _is_pytest_temp_path(raw_path: str | Path) -> bool:
+    value = str(raw_path or "").strip()
+    if not value:
+        return False
+    try:
+        parts = Path(value).expanduser().parts
+    except Exception:
+        parts = tuple(part for part in value.replace("\\", "/").split("/") if part)
+    lowered = [part.lower() for part in parts]
+    for index, part in enumerate(lowered):
+        if part.startswith("pytest-of-"):
+            return any(PYTEST_RUN_DIR_RE.match(candidate) for candidate in lowered[index + 1 :])
+    return False
+
+
+def _is_pytest_temp_project(project: dict) -> bool:
+    """Return true for projects lazily registered from pytest tmp_path roots."""
+    raw_path = str(project.get("path") or project.get("resolvedPath") or "").strip()
+    return _is_pytest_temp_path(raw_path)
+
+
+def _user_visible_projects(projects: list[dict]) -> list[dict]:
+    if _is_pytest_temp_path(_projects_dir()):
+        return list(projects)
+    return [project for project in projects if not _is_pytest_temp_project(project)]
 
 
 def _project_path(project: dict, *, strict: bool = True) -> Path:
@@ -499,13 +527,48 @@ def _serialize_project(project: dict) -> dict:
     return serialized
 
 
+def _serialize_project_summary(project: dict) -> dict:
+    summary = {
+        key: project.get(key)
+        for key in (
+            "id",
+            "name",
+            "fullName",
+            "slug",
+            "path",
+            "coreBranch",
+            "active",
+            "profile",
+            "defaultModel",
+            "defaultModelProvider",
+            "createdAt",
+            "worktree",
+        )
+        if key in project
+    }
+    summary["resolvedPath"] = str(_project_path(project, strict=False))
+    summary["opsCapabilities"] = dict(LEGACY_OPS_CAPABILITIES)
+    return summary
+
+
 def list_ops_projects() -> dict:
-    projects = [_serialize_project(project) for project in _read_projects()]
+    projects = [_serialize_project(project) for project in _user_visible_projects(_read_projects())]
     projects.sort(key=lambda project: (project.get("active") is False, str(project.get("name") or "").lower()))
     return {
         "projects": projects,
         "projectsDir": str(_projects_dir()),
         "metadataPath": str(ops_projects_metadata_path()),
+    }
+
+
+def list_ops_project_summaries() -> dict:
+    projects = [_serialize_project_summary(project) for project in _user_visible_projects(_read_projects())]
+    projects.sort(key=lambda project: (project.get("active") is False, str(project.get("name") or "").lower()))
+    return {
+        "projects": projects,
+        "projectsDir": str(_projects_dir()),
+        "metadataPath": str(ops_projects_metadata_path()),
+        "summary": True,
     }
 
 
@@ -633,7 +696,7 @@ def delete_ops_project(project_id: str) -> dict:
     if len(remaining) == len(projects):
         raise OpsProjectError("Project not found.", 404)
     _write_projects(remaining)
-    return {"ok": True, "projects": [_serialize_project(entry) for entry in remaining]}
+    return {"ok": True, "projects": [_serialize_project(entry) for entry in _user_visible_projects(remaining)]}
 
 
 def read_ops_project_tasks(project_id: str) -> dict:

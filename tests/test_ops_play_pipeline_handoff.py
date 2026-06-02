@@ -269,6 +269,81 @@ def test_stream_completion_forces_play_after_early_notification_poll(monkeypatch
     assert stored["metadata"]["playPipelineStatus"] == "building"
 
 
+def test_reading_successful_run_does_not_start_play_or_mutate_run_file(monkeypatch, tmp_path):
+    runs_file = _patch_run_context(monkeypatch, tmp_path)
+    stored_runs = [
+        {
+            "id": "run-1",
+            "projectId": "project-1",
+            "taskId": "task-1",
+            "sessionId": "session-1",
+            "title": "Run Play",
+            "summary": "",
+            "status": "succeeded",
+            "createdAt": "2026-05-06T00:00:00.000Z",
+            "updatedAt": "2026-05-06T01:00:00.000Z",
+            "completedAt": "2026-05-06T01:00:00.000Z",
+            "metadata": {},
+        }
+    ]
+    runs_file.write_text(json.dumps(stored_runs), encoding="utf-8")
+    monkeypatch.setattr(play_pipeline, "get_project_play_config_file_info", lambda project_id: {"valid": True})
+    monkeypatch.setattr(
+        play_pipeline,
+        "start_project_play_pipeline",
+        lambda project_id, body: (_ for _ in ()).throw(AssertionError("read route started Play")),
+    )
+
+    detail = ops_runs.get_ops_run("run-1")
+    listing = ops_runs.list_ops_runs({})
+
+    assert detail["status"] == "succeeded"
+    assert listing["runs"][0]["id"] == "run-1"
+    assert json.loads(runs_file.read_text(encoding="utf-8")) == stored_runs
+
+
+def test_rich_run_list_session_filter_matches_resolved_lineage_alias(monkeypatch, tmp_path):
+    runs_file = _patch_run_context(monkeypatch, tmp_path)
+    runs_file.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "run-1",
+                    "projectId": "project-1",
+                    "taskId": "task-1",
+                    "sessionId": "session-root",
+                    "title": "Run Play",
+                    "summary": "",
+                    "status": "running",
+                    "createdAt": "2026-05-06T00:00:00.000Z",
+                    "updatedAt": "2026-05-06T01:00:00.000Z",
+                    "metadata": {},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        ops_runs,
+        "_session_summary",
+        lambda _session_id: {
+            "session_id": "session-tip",
+            "_lineage_root_id": "session-root",
+            "_lineage_tip_id": "session-tip",
+            "message_count": 0,
+            "active_stream_id": "stream-1",
+        },
+    )
+
+    listing = ops_runs.list_ops_runs({"sessionId": "session-tip"})
+
+    assert listing["count"] == 1
+    assert listing["runs"][0]["id"] == "run-1"
+    assert listing["runs"][0]["linkedSessionId"] == "session-root"
+    assert listing["runs"][0]["sessionId"] == "session-tip"
+
+
+
 def test_successful_run_triggers_configured_play_pipeline(monkeypatch, tmp_path):
     runs_file = _patch_run_context(monkeypatch, tmp_path)
     runs_file.write_text(
@@ -633,7 +708,7 @@ def test_play_refresh_preserves_locked_notification_during_transient_empty_poll(
     assert "lockedPrevious=previousProjectPlayNotes.find(isLockedPlayNotification)" in source
 
 
-def test_pending_notifications_start_play_for_completed_linked_session(monkeypatch, tmp_path):
+def test_pending_notifications_do_not_start_play_or_complete_linked_session(monkeypatch, tmp_path):
     runs_file = _patch_run_context(monkeypatch, tmp_path)
     timestamp = "2026-05-06T00:00:00.000Z"
     runs_file.write_text(
@@ -714,19 +789,11 @@ def test_pending_notifications_start_play_for_completed_linked_session(monkeypat
         with play_pipeline._LOCK:
             play_pipeline._PIPELINES.pop("project-1", None)
 
-    assert started == [("project-1", {"runId": "run-1", "taskId": "task-1", "sessionId": "session-1"})]
-    play_note = next(item for item in payload["notifications"] if item["kind"] == "play")
-    assert play_note["playStatus"] == "building"
-    assert play_note["playLocked"] is True
-    assert play_note["terminalTarget"] == {
-        "projectId": "project-1",
-        "taskId": "task-1",
-        "sessionId": "session-1",
-        "runId": "run-1",
-    }
+    assert started == []
+    assert payload == {"notifications": [], "count": 0}
     stored = json.loads(runs_file.read_text(encoding="utf-8"))[0]
-    assert stored["metadata"]["playPipelineTriggeredAt"]
-    assert stored["metadata"]["playPipelineStatus"] == "building"
+    assert stored["status"] == "running"
+    assert stored["metadata"] == {}
 
 
 def test_play_failed_notification_attaches_scrollable_logs(monkeypatch):

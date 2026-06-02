@@ -122,6 +122,117 @@ def test_phase3_invalid_sidecar_fails_closed(monkeypatch, tmp_path, git_availabl
     assert payload["epics"][0]["tasks"][0]["linkedSessions"] == []
 
 
+def test_phase3_project_linkage_records_use_sidecar_index(monkeypatch, tmp_path):
+    from api import session_sidecars
+
+    sidecar_dir = tmp_path / "session-links"
+    sidecar_dir.mkdir()
+    monkeypatch.setattr(session_sidecars, "_sidecar_dir", lambda: sidecar_dir)
+    session_sidecars._invalidate_sidecar_index()
+    for index in range(6):
+        project_id = "project-1" if index % 2 == 0 else "project-2"
+        (sidecar_dir / f"session{index}.json").write_text(
+            json.dumps(
+                {
+                    "sessionId": f"session{index}",
+                    "projectId": project_id,
+                    "taskId": f"task-{index}",
+                    "linkedAt": f"2026-05-06T00:00:0{index}.000Z",
+                    "updatedAt": f"2026-05-06T00:00:0{index}.000Z",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    original_read_json = session_sidecars._read_json
+    read_calls = []
+
+    def counted_read_json(path):
+        read_calls.append(path.name)
+        return original_read_json(path)
+
+    monkeypatch.setattr(session_sidecars, "_read_json", counted_read_json)
+
+    first = session_sidecars.list_project_linkage_records("project-1")
+    second = session_sidecars.list_project_linkage_records("project-1")
+
+    assert [record["sessionId"] for record in first] == ["session4", "session2", "session0"]
+    assert second == first
+    assert len(read_calls) == 6
+
+    (sidecar_dir / "session6.json").write_text(
+        json.dumps(
+            {
+                "sessionId": "session6",
+                "projectId": "project-1",
+                "taskId": "task-6",
+                "linkedAt": "2026-05-06T00:00:06.000Z",
+                "updatedAt": "2026-05-06T00:00:06.000Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    updated = session_sidecars.list_project_linkage_records("project-1")
+
+    assert updated[0]["sessionId"] == "session6"
+    assert len(updated) == 4
+    assert len(read_calls) == 13
+
+
+def test_phase3_project_linkages_resolve_sessions_in_bulk(monkeypatch, tmp_path):
+    from api import session_sidecars
+
+    sidecar_dir = tmp_path / "session-links"
+    sidecar_dir.mkdir()
+    monkeypatch.setattr(session_sidecars, "_sidecar_dir", lambda: sidecar_dir)
+    session_sidecars._invalidate_sidecar_index()
+    for index in range(5):
+        (sidecar_dir / f"bulksess{index}.json").write_text(
+            json.dumps(
+                {
+                    "sessionId": f"bulksess{index}",
+                    "projectId": "project-1",
+                    "taskId": f"task-{index}",
+                    "linkedAt": f"2026-05-06T00:00:0{index}.000Z",
+                    "updatedAt": f"2026-05-06T00:00:0{index}.000Z",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    all_sessions_calls = {"count": 0}
+
+    def fake_all_sessions():
+        all_sessions_calls["count"] += 1
+        return [
+            {
+                "session_id": f"bulksess{index}",
+                "title": f"Bulk Session {index}",
+                "message_count": 1,
+                "created_at": float(index),
+                "updated_at": float(index),
+                "last_message_at": float(index),
+                "archived": False,
+            }
+            for index in range(5)
+        ]
+
+    monkeypatch.setattr(session_sidecars, "all_sessions", fake_all_sessions)
+    monkeypatch.setattr(
+        session_sidecars,
+        "_session_summary",
+        lambda _sid: (_ for _ in ()).throw(AssertionError("per-linkage session load should not run")),
+    )
+
+    linkages = session_sidecars.list_project_linkages("project-1")
+
+    assert all_sessions_calls["count"] == 1
+    assert len(linkages) == 5
+    assert {linkage["session"]["title"] for linkage in linkages} == {
+        f"Bulk Session {index}" for index in range(5)
+    }
+
+
 def test_phase3_sidecar_linkage_resolves_latest_lineage_tip(monkeypatch, tmp_path, git_available):
     monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
 

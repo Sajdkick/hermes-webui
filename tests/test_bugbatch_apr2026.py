@@ -14,6 +14,7 @@ import re
 REPO_ROOT = pathlib.Path(__file__).parent.parent
 STYLE_CSS = (REPO_ROOT / "static" / "style.css").read_text(encoding="utf-8")
 BOOT_JS   = (REPO_ROOT / "static" / "boot.js").read_text(encoding="utf-8")
+VOICE_INPUT_JS = (REPO_ROOT / "static" / "voice-input.js").read_text(encoding="utf-8")
 COMPOSE   = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
 
@@ -160,30 +161,30 @@ def test_567_compose_mentions_macos_uid():
 # ── #590: transcription spinner already present ───────────────────────────────
 
 def test_590_transcribing_status_shown_before_fetch():
-    """boot.js: setComposerStatus('Transcribing…') must fire before the fetch call."""
-    transcribe_fn_start = BOOT_JS.find("async function _transcribeBlob(")
-    assert transcribe_fn_start != -1, "_transcribeBlob not found in boot.js"
-    fn_body = BOOT_JS[transcribe_fn_start:transcribe_fn_start + 600]
-    status_pos = fn_body.find("setComposerStatus('Transcribing")
-    fetch_pos  = fn_body.find("await fetch(")
+    """voice-input.js: transcribing status must fire before transcription I/O."""
+    transcribe_fn_start = VOICE_INPUT_JS.find("async function transcribeBlob(")
+    assert transcribe_fn_start != -1, "transcribeBlob not found in voice-input.js"
+    fn_body = VOICE_INPUT_JS[transcribe_fn_start:transcribe_fn_start + 1600]
+    status_pos = fn_body.find("setStatus(message(opts,'transcribing'")
+    fetch_pos  = fn_body.find("fetchRef(")
     assert status_pos != -1, (
-        "setComposerStatus('Transcribing…') must be called before the fetch in _transcribeBlob"
+        "setStatus(message(opts,'transcribing'…)) must be called before transcription I/O"
     )
-    assert fetch_pos != -1, "await fetch not found in _transcribeBlob"
+    assert fetch_pos != -1, "fetchRef not found in transcribeBlob"
     assert status_pos < fetch_pos, (
-        "setComposerStatus('Transcribing…') must appear before 'await fetch' "
+        "transcribing status must appear before fetchRef "
         "so the UI shows a spinner immediately on stop (#590)"
     )
 
 
 def test_590_recording_stops_before_transcribe():
-    """boot.js: _setRecording(false) must fire in onstop before _transcribeBlob."""
-    onstop_start = BOOT_JS.find("mediaRecorder.onstop")
+    """voice-input.js: setRecording(false) must fire in onstop before transcribeBlob."""
+    onstop_start = VOICE_INPUT_JS.find("mediaRecorder.onstop")
     assert onstop_start != -1, "mediaRecorder.onstop not found"
-    onstop_body = BOOT_JS[onstop_start:onstop_start + 400]
-    rec_pos = onstop_body.find("_setRecording(false)")
-    blob_pos = onstop_body.find("_transcribeBlob(")
+    onstop_body = VOICE_INPUT_JS[onstop_start:onstop_start + 600]
+    rec_pos = onstop_body.find("setRecording(false")
+    blob_pos = onstop_body.find("transcribeBlob(")
     assert rec_pos != -1 and blob_pos != -1
     assert rec_pos < blob_pos, (
-        "_setRecording(false) must come before _transcribeBlob so mic icon clears immediately"
+        "setRecording(false) must come before transcribeBlob so mic icon clears immediately"
     )

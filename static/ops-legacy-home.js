@@ -15,6 +15,7 @@
     const normalizedAutoApprovalPolicy=ctx&&ctx.normalizedAutoApprovalPolicy;
     const loadProjects=ctx&&ctx.loadProjects;
     const openProjectDetail=ctx&&ctx.openProjectDetail;
+    const openDeployments=ctx&&ctx.openDeployments;
     const createQuickTask=ctx&&ctx.createQuickTask;
     const executeReadyTasksWithAi=ctx&&ctx.executeReadyTasksWithAi;
     const loadNotifications=ctx&&ctx.loadNotifications;
@@ -764,6 +765,7 @@
     }
 
     async function openDeploymentDestination(){
+      if(typeof openDeployments==='function')return await openDeployments();
       const project=menuTargetProject();
       if(project&&project.id&&typeof openProjectDetail==='function'){
         return openProjectDetail(project.id);
@@ -1278,16 +1280,22 @@
       const renderIfCurrent=()=>{
         if(token===OPS.dashboardHomeLoadToken&&windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
       };
+      const hydrateSessionActivity=()=>{
+        loadSessionActivity({render:false})
+          .then(()=>renderIfCurrent())
+          .catch(error=>{
+            if(token!==OPS.dashboardHomeLoadToken)return;
+            OPS.sessionActivityError=error&&error.message?error.message:'Unable to load session activity.';
+            renderIfCurrent();
+          });
+      };
       // Opening the dashboard should not be gated by every diagnostics/feed request.
-      // Render cached/empty home immediately, then hydrate critical controls and
-      // finally fill secondary panels in the background.
+      // Render cached/empty home immediately, hydrate the Quick Task project picker
+      // first, then refresh secondary panels independently in the background.
       setBusy(false);
       renderIfCurrent();
       try{
-        await Promise.all([
-          loadProjects(),
-          loadSessionActivity({render:false}),
-        ]);
+        await loadProjects({summary:true});
         if(token!==OPS.dashboardHomeLoadToken)return;
         normalizeQuickTaskProjectSelection();
         renderIfCurrent();
@@ -1299,10 +1307,10 @@
         renderIfCurrent();
         return;
       }
+      hydrateSessionActivity();
       Promise.allSettled([
         loadNotifications(),
-        loadOpsRuns(),
-        loadNotificationDiagnostics({render:false}).catch(()=>null),
+        loadNotificationDiagnostics({render:false,lightweight:true,includeMonitor:false}).catch(()=>null),
       ]).then(()=>{
         if(token!==OPS.dashboardHomeLoadToken)return;
         setBusy(false);

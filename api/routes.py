@@ -2205,6 +2205,7 @@ from api.models import (
     all_sessions,
     title_from,
     _write_session_index,
+    _remove_session_from_index,
     SESSION_INDEX_FILE,
     _active_state_db_path,
     load_projects,
@@ -3469,6 +3470,21 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path in ("/manifest.json", "/manifest.webmanifest"):
         return _serve_manifest(handler)
 
+    if parsed.path == "/play-proxy-run-context.js":
+        static_root = Path(__file__).parent.parent / "static"
+        script_path = (static_root / "play-proxy-run-context.js").resolve()
+        if script_path.exists() and script_path.is_file():
+            data = script_path.read_bytes()
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/javascript; charset=utf-8")
+            handler.send_header("Cache-Control", "no-store")
+            handler.send_header("Content-Length", str(len(data)))
+            handler.end_headers()
+            handler.wfile.write(data)
+            return True
+        j(handler, {"error": "not found"}, status=404)
+        return True
+
     if parsed.path == "/sw.js":
         static_root = Path(__file__).parent.parent / "static"
         sw_path = (static_root / "sw.js").resolve()
@@ -3536,6 +3552,34 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/system/health":
         j(handler, build_system_health_payload())
         return True
+
+    if parsed.path == "/deploy" or parsed.path.startswith("/deploy/"):
+        from api import core_deployments
+
+        tail = parsed.path[len("/deploy"):].lstrip("/")
+        slug, _, remainder = tail.partition("/")
+        target_path = f"/{remainder}" if remainder else "/"
+        return core_deployments.handle_deployment_proxy_request(handler, slug, target_path, parsed, method="GET")
+
+    if parsed.path.startswith("/play-proxy/"):
+        from api import core_deployments
+
+        if core_deployments.handle_legacy_play_proxy_deployment_request(handler, parsed, method="GET"):
+            return True
+
+    try:
+        from api import core_deployments
+
+        if core_deployments.handle_deployment_compatibility_proxy_request(handler, parsed, method="GET"):
+            return True
+    except Exception:
+        logger.debug("deployment compatibility GET proxy did not handle %s", parsed.path, exc_info=True)
+
+    if parsed.path.startswith("/api/core"):
+        from api.routes_core import handle_get as handle_core_get
+
+        if handle_core_get(handler, parsed):
+            return True
 
     if (
         parsed.path in ("/ops", "/ops/", "/ops-phase", "/ops-phase/")
@@ -4459,6 +4503,35 @@ def handle_post(handler, parsed) -> bool:
         finally:
             if diag:
                 diag.finish()
+
+    if parsed.path == "/deploy" or parsed.path.startswith("/deploy/"):
+        if diag:
+            diag.stage("deployment_proxy")
+        from api import core_deployments
+
+        tail = parsed.path[len("/deploy"):].lstrip("/")
+        slug, _, remainder = tail.partition("/")
+        target_path = f"/{remainder}" if remainder else "/"
+        return core_deployments.handle_deployment_proxy_request(handler, slug, target_path, parsed, method="POST")
+
+    if parsed.path.startswith("/play-proxy/"):
+        if diag:
+            diag.stage("legacy_play_proxy_deployment")
+        from api import core_deployments
+
+        if core_deployments.handle_legacy_play_proxy_deployment_request(handler, parsed, method="POST"):
+            return True
+
+    try:
+        from api import core_deployments
+
+        if core_deployments.handle_deployment_compatibility_proxy_request(handler, parsed, method="POST"):
+            if diag:
+                diag.stage("deployment_compat_proxy")
+            return True
+    except Exception:
+        logger.debug("deployment compatibility POST proxy did not handle %s", parsed.path, exc_info=True)
+
     # CSRF: reject cross-origin or tokenless authenticated browser requests.
     # /api/auth/login has no authenticated session token yet, and /api/csp-report
     # is intentionally unauthenticated for browser-generated violation reports.
@@ -4512,6 +4585,12 @@ def handle_post(handler, parsed) -> bool:
         from api.routes_session_activity import handle_post as handle_session_activity_post
 
         if handle_session_activity_post(handler, parsed, body):
+            return True
+
+    if parsed.path.startswith("/api/core"):
+        from api.routes_core import handle_post as handle_core_post
+
+        if handle_core_post(handler, parsed, body):
             return True
 
     if parsed.path.startswith("/api/ops/") or parsed.path.startswith("/play-project/"):
@@ -4587,12 +4666,27 @@ def handle_post(handler, parsed) -> bool:
                 commit_session_memory(prev_session_id, agent=prev_agent)
             except Exception:
                 logger.debug("Lifecycle commit for prev_session %s failed", prev_session_id, exc_info=True)
+        requested_profile = body.get("profile") or None
+        project_id = body.get("project_id") or None
+        profile = requested_profile
+        if project_id:
+            target_project = next((p for p in load_projects() if p.get("project_id") == project_id), None)
+            if target_project:
+                project_profile = str(target_project.get("profile") or "").strip() or "default"
+                if requested_profile and not _profiles_match(project_profile, requested_profile):
+                    logger.info(
+                        "Ignoring session-new request profile %r for project %s; using project profile %r",
+                        requested_profile,
+                        project_id,
+                        project_profile,
+                    )
+                profile = project_profile
         s = new_session(
             workspace=workspace,
             model=model,
             model_provider=model_provider,
-            profile=body.get("profile") or None,
-            project_id=body.get("project_id") or None,
+            profile=profile,
+            project_id=project_id,
             worktree_info=worktree_info,
         )
         return j(handler, {"session": s.compact() | {"messages": s.messages}})
@@ -4959,9 +5053,9 @@ def handle_post(handler, parsed) -> bool:
         with LOCK:
             SESSIONS.pop(sid, None)
         try:
-            SESSION_INDEX_FILE.unlink(missing_ok=True)
+            _remove_session_from_index(sid)
         except Exception:
-            logger.debug("Failed to unlink session index")
+            logger.debug("Failed to remove deleted session from session index")
         # Evict cached agent so turn count doesn't leak into a recycled session
         from api.config import _evict_session_agent
         _evict_session_agent(sid)
@@ -7965,7 +8059,10 @@ def _handle_goal_command(handler, body):
             or getattr(s, "context_messages", None)
             or getattr(s, "pending_user_message", None)
         )
-        if not has_persisted_turns:
+        if not has_persisted_turns and not _session_profile_retag_locked(s):
+            # Match /api/chat/start: plain empty placeholders may adopt the
+            # current active profile before their first turn, but project/Ops/
+            # worktree sessions are already profile-owned before messages exist.
             s.profile = requested_profile
 
     current_stream_id = getattr(s, "active_stream_id", None)

@@ -4637,7 +4637,7 @@ function syncTopbar(){
     if(typeof syncAppTitlebar==='function') syncAppTitlebar();
     // Update profile chip even when no session is active (e.g. right after profile switch)
     const _profileLabel=$('profileChipLabel');
-    if(_profileLabel) _profileLabel.textContent=displayProfileForCurrentSession();
+    if(_profileLabel) _profileLabel.textContent=(typeof displayProfileForCurrentSession==='function'?displayProfileForCurrentSession():((S&&S.activeProfile)||'default'));
     return;
   }
   const sessionTitle=S.session.title||t('untitled');
@@ -4736,7 +4736,7 @@ function syncTopbar(){
   // modelSelect already set above
   // Update profile chip label
   const profileLabel=$('profileChipLabel');
-  if(profileLabel) profileLabel.textContent=displayProfileForCurrentSession();
+  if(profileLabel) profileLabel.textContent=(typeof displayProfileForCurrentSession==='function'?displayProfileForCurrentSession():((S&&S.activeProfile)||'default'));
 }
 
 function msgContent(m){

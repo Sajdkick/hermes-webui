@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from api import ops_guides, ops_projects, ops_runtime_inspect, play_pipeline
+from api import core_play, ops_guides, ops_projects, ops_runtime_inspect
 
 
 def runtime_capabilities() -> dict:
@@ -36,7 +36,7 @@ def get_runtime_summary(project_id: str) -> dict:
     project = ops_projects.get_ops_project(project_id)
     gather = ops_guides.list_gather_reports(project["id"], {"limit": 3})
     reviews = ops_guides.list_review_requests(project["id"], {"limit": 3})
-    play_status = play_pipeline.build_project_play_status(project["id"])
+    play_status = core_play.get_project_play_status(project["id"])
     snapshot = ops_runtime_inspect.get_latest_snapshot(project["id"])["snapshot"]
     screenshot = ops_runtime_inspect.get_latest_screenshot(project["id"])["screenshot"]
     action = ops_runtime_inspect.get_latest_action(project["id"])["action"]

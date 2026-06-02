@@ -18,14 +18,14 @@ def get_text(path):
 
 def test_send_button_present():
     """btnSend must still exist in the DOM."""
-    html, status = get_text("/")
+    html, status = get_text("/index.html")
     assert status == 200
     assert 'id="btnSend"' in html
 
 
 def test_send_button_disabled_by_default():
     """btnSend must start disabled — enabled only when there is content."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     btn_match = re.search(r'id="btnSend"[^>]*>', html)
     assert btn_match, "btnSend element not found"
     assert 'disabled' in btn_match.group(0)
@@ -33,7 +33,7 @@ def test_send_button_disabled_by_default():
 
 def test_send_button_no_text_label():
     """Send button must be icon-only — no visible 'Send' text label."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     # Find the full button element (from opening tag to closing tag)
     btn_open_end = html.find('>', html.find('id="btnSend"')) + 1
     btn_end = html.find('</button>', btn_open_end) + len('</button>')
@@ -46,7 +46,7 @@ def test_send_button_no_text_label():
 
 def test_send_button_has_svg_icon():
     """Send button must have an SVG icon."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     btn_start = html.find('id="btnSend"')
     btn_end = html.find('</button>', btn_start) + len('</button>')
     btn_html = html[btn_start:btn_end]
@@ -59,7 +59,7 @@ def test_send_button_has_title_attribute():
     Accepts either the legacy `title=` attribute or the custom-tooltip
     `data-tooltip=` attribute introduced in #1775 (faster ~150ms display
     vs the native ~1.5s delay)."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     btn_match = re.search(r'id="btnSend"[^>]*>', html)
     assert btn_match
     tag = btn_match.group(0)
@@ -69,7 +69,7 @@ def test_send_button_has_title_attribute():
 
 def test_send_button_svg_arrow_up():
     """Send button SVG should use an upward arrow (line + polyline or path)."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     btn_start = html.find('id="btnSend"')
     btn_end = html.find('</button>', btn_start) + len('</button>')
     btn_html = html[btn_start:btn_end]
@@ -322,7 +322,7 @@ def test_auto_resize_calls_update_send_btn():
 
 def test_send_button_still_has_send_btn_class():
     """btnSend must still carry class='send-btn' for CSS targeting."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     # Tolerate additional utility classes (e.g. has-tooltip from #1775).
     import re
     assert re.search(r'class="[^"]*\bsend-btn\b[^"]*"', html), \
@@ -340,7 +340,7 @@ def test_ui_js_set_busy_calls_update_send_btn():
 
 def test_index_html_attach_button_unchanged():
     """btnAttach must still be present (no regression)."""
-    html, _ = get_text("/")
+    html, _ = get_text("/index.html")
     assert 'id="btnAttach"' in html
 
 

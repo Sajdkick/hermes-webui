@@ -20,7 +20,7 @@ from unittest.mock import patch
 import pytest
 
 import api.models as models
-from api.models import Session, _write_session_index
+from api.models import Session, _remove_session_from_index, _write_session_index
 
 
 @pytest.fixture(autouse=True)
@@ -306,6 +306,45 @@ def test_load_metadata_only_does_not_parse_large_message_body():
     assert meta.messages == []
     assert meta.tool_calls == []
     assert meta.compact()["message_count"] == 1
+
+
+def test_full_index_rebuild_uses_metadata_only_loader_for_large_sessions():
+    """A missing index must not make the next sidebar load parse every message."""
+    s = Session(
+        session_id="sess_rebuild_large",
+        title="Large Rebuild Session",
+        messages=[{"role": "assistant", "content": "x" * 200_000}],
+        tool_calls=[{"id": "tool_1", "name": "read_file", "result": "y" * 10_000}],
+        input_tokens=123,
+        output_tokens=45,
+    )
+    s.save()
+    models.SESSION_INDEX_FILE.unlink(missing_ok=True)
+
+    with patch.object(Session, "load", side_effect=AssertionError("full load should not run")):
+        _write_session_index(updates=None)
+
+    index = _read_index(models.SESSION_INDEX_FILE)
+    row = next(entry for entry in index if entry["session_id"] == "sess_rebuild_large")
+    assert row["title"] == "Large Rebuild Session"
+    assert row["input_tokens"] == 123
+    assert row["output_tokens"] == 45
+
+
+def test_remove_session_from_index_patches_one_row_without_deleting_index():
+    s_a = _make_session("sess_a", "Alpha", updated_at=100.0)
+    s_b = _make_session("sess_b", "Beta", updated_at=200.0)
+    s_a.save()
+    s_b.save()
+
+    assert models.SESSION_INDEX_FILE.exists()
+
+    assert _remove_session_from_index("sess_a") is True
+    assert models.SESSION_INDEX_FILE.exists()
+    index = _read_index(models.SESSION_INDEX_FILE)
+    ids = {entry["session_id"] for entry in index}
+    assert "sess_a" not in ids
+    assert "sess_b" in ids
 
 
 def test_metadata_only_get_session_does_not_poison_full_session_cache():

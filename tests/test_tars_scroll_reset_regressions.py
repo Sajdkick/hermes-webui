@@ -30,7 +30,7 @@ def test_clicking_current_session_is_noop_before_load_session_side_effects():
     current_idx = load_session.index("const currentSid = S.session ? S.session.session_id : null")
     force_idx = load_session.index("const forceReload=")
     noop_idx = load_session.index("if(currentSid===sid && !forceReload) return")
-    loading_idx = load_session.index("_loadingSessionId = sid")
+    loading_idx = load_session.index("const loadToken = _beginSessionLoad(sid)")
     stop_idx = load_session.index("stopApprovalPolling")
 
     assert current_idx < force_idx < noop_idx < loading_idx < stop_idx, (

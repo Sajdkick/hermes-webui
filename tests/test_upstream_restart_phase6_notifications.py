@@ -242,9 +242,88 @@ def test_phase6_ops_legacy_notification_dismiss_is_optimistic():
     assert completed.stdout.strip() == "ok"
 
 
+def test_phase6_notification_polling_skips_overlapping_refreshes():
+    script = textwrap.dedent(
+        """
+        (async () => {
+        const fs = require('fs');
+        const vm = require('vm');
+        const source = fs.readFileSync('static/ops-legacy-notifications.js', 'utf8');
+        let intervalCallback = null;
+        const context = {
+          window: {},
+          console,
+          setInterval(callback){ intervalCallback = callback; return 1; },
+          clearInterval(){},
+        };
+        vm.createContext(context);
+        vm.runInContext(source, context);
+
+        let listCalls = 0;
+        let pendingResolve = null;
+        const OPS = {
+          view: 'home',
+          notifications: [],
+          notificationPollBusy: false,
+        };
+        const windowRef = { _opsDashboardOpen: true, navigator: {} };
+        const bound = context.window.HermesOpsModules.notifications.bindDashboard({
+          OPS,
+          AgentBridge: {
+            notifications: {
+              list(){
+                listCalls += 1;
+                return new Promise((resolve) => { pendingResolve = resolve; });
+              },
+            },
+            runs: {},
+            sessions: {},
+          },
+          renderCurrentOpsView(){},
+          showToast(){},
+          esc(value){ return String(value || ''); },
+          svg(){ return ''; },
+          windowRef,
+          documentRef: { activeElement: null },
+          loadRunDetail(){},
+          loadOpsRuns(){ return Promise.resolve({}); },
+        });
+
+        bound.startNotificationPolling();
+        if (typeof intervalCallback !== 'function') throw new Error('poll callback not registered');
+        const firstTick = intervalCallback();
+        const secondTick = intervalCallback();
+        await Promise.resolve();
+        if (listCalls !== 1) throw new Error(`overlapping poll was not skipped: ${listCalls}`);
+        if (OPS.notificationPollBusy !== true) throw new Error('poll busy flag was not set');
+        pendingResolve({ notifications: [] });
+        await firstTick;
+        await secondTick;
+        if (OPS.notificationPollBusy !== false) throw new Error('poll busy flag was not cleared');
+        const thirdTick = intervalCallback();
+        await Promise.resolve();
+        if (listCalls !== 2) throw new Error('poll did not resume after first request finished');
+        pendingResolve({ notifications: [] });
+        await thirdTick;
+        console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
 
 def test_phase6_pending_notifications_skips_linkage_resolution_until_pending(monkeypatch):
-    from api import ops_notifications, ops_projects, session_sidecars, play_pipeline
+    from api import ops_notifications, ops_projects, ops_runs, session_sidecars, play_pipeline
 
     monkeypatch.setattr(
         ops_projects,
@@ -271,6 +350,11 @@ def test_phase6_pending_notifications_skips_linkage_resolution_until_pending(mon
     )
     monkeypatch.setattr(ops_notifications, "_pending_approval", lambda session_id: {"pending": None, "pending_count": 0})
     monkeypatch.setattr(ops_notifications, "_pending_clarify", lambda session_id: {"pending": None, "pending_count": 0})
+    monkeypatch.setattr(
+        ops_runs,
+        "list_ops_runs",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("notification polling called rich run enrichment")),
+    )
     monkeypatch.setattr(play_pipeline, "build_project_play_status", lambda project_id: {})
 
     payload = ops_notifications.list_pending_notifications()
