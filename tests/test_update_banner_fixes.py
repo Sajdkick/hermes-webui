@@ -224,6 +224,8 @@ class TestUpdateChecker:
                 return 'v0.51.35\nv0.51.34\nv0.51.33', True
             if args[:3] == ['describe', '--tags', '--abbrev=0']:
                 return 'v0.51.34', True
+            if args == ['merge-base', '--is-ancestor', 'HEAD', 'v0.51.35']:
+                return '', True
             if args[:2] == ['remote', 'get-url']:
                 return 'https://github.com/nesquena/hermes-webui.git', True
             return '', False
@@ -236,6 +238,46 @@ class TestUpdateChecker:
         assert result['latest_version'] == 'v0.51.35'
         assert result['behind'] == 1
         assert result['branch'] == 'v0.51.35'
+
+    def test_detect_agent_version_reads_copied_source_tree(self, tmp_path, monkeypatch):
+        import api.updates as upd
+
+        agent_dir = tmp_path / 'hermes-agent'
+        package_dir = agent_dir / 'hermes_cli'
+        package_dir.mkdir(parents=True)
+        (package_dir / '__init__.py').write_text('__version__ = "0.14.0"\n', encoding='utf-8')
+
+        monkeypatch.setattr(upd, '_AGENT_DIR', str(agent_dir))
+        monkeypatch.setattr(upd, '_describe_git_version', lambda path: None)
+        monkeypatch.setattr(upd, '_detect_agent_version_from_gateway_health', lambda: None)
+
+        assert upd._detect_agent_version() == '0.14.0'
+
+    def test_detect_agent_version_falls_back_to_gateway_health(self, monkeypatch):
+        import api.updates as upd
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"status":"ok","platform":"hermes-agent","version":"0.14.1"}'
+
+        seen = []
+
+        def fake_urlopen(url, timeout=0):
+            seen.append((url, timeout))
+            return FakeResponse()
+
+        monkeypatch.setattr(upd, '_AGENT_DIR', None)
+        monkeypatch.setenv('GATEWAY_HEALTH_URL', 'http://hermes-agent:8642/health')
+        monkeypatch.setattr(upd.urllib.request, 'urlopen', fake_urlopen)
+
+        assert upd._detect_agent_version() == '0.14.1'
+        assert seen == [('http://hermes-agent:8642/health', 0.75)]
 
 
 class TestConflictError:
@@ -386,6 +428,90 @@ class TestApplyUpdateRestartSafety:
         assert result.get('restart_blocked') is True
         assert 'active chat stream' in result['message']
 
+    def test_apply_update_refuses_when_active_run_without_stream(self, tmp_path, monkeypatch):
+        import api.updates as upd
+        from api.config import ACTIVE_RUNS, ACTIVE_RUNS_LOCK, STREAMS, STREAMS_LOCK
+
+        (tmp_path / '.git').mkdir()
+        monkeypatch.setattr(upd, 'REPO_ROOT', tmp_path)
+        monkeypatch.setattr(upd, '_AGENT_DIR', tmp_path)
+        called = []
+        monkeypatch.setattr(upd, '_run_git', lambda *a, **k: (called.append(a) or ('', True)))
+        monkeypatch.setattr(upd, '_schedule_restart', lambda delay=2.0: (_ for _ in ()).throw(AssertionError('must not restart')))
+
+        with STREAMS_LOCK:
+            old_streams = dict(STREAMS)
+            STREAMS.clear()
+        with ACTIVE_RUNS_LOCK:
+            old_runs = dict(ACTIVE_RUNS)
+            ACTIVE_RUNS.clear()
+            ACTIVE_RUNS['run_active'] = {'session_id': 's1', 'stream_id': 'missing-stream'}
+        try:
+            result = upd.apply_update('webui')
+        finally:
+            with ACTIVE_RUNS_LOCK:
+                ACTIVE_RUNS.clear()
+                ACTIVE_RUNS.update(old_runs)
+            with STREAMS_LOCK:
+                STREAMS.clear()
+                STREAMS.update(old_streams)
+
+        assert result['ok'] is False
+        assert result.get('active_streams') == 0
+        assert result.get('active_runs') == 1
+        assert result.get('restart_blocked') is True
+        assert 'active agent run' in result['message']
+        assert called == []
+
+    def test_force_update_refuses_when_active_run_without_stream(self, tmp_path, monkeypatch):
+        import api.updates as upd
+        from api.config import ACTIVE_RUNS, ACTIVE_RUNS_LOCK, STREAMS, STREAMS_LOCK
+
+        (tmp_path / '.git').mkdir()
+        monkeypatch.setattr(upd, 'REPO_ROOT', tmp_path)
+        monkeypatch.setattr(upd, '_AGENT_DIR', tmp_path)
+        monkeypatch.setattr(upd, '_run_git', lambda *a, **k: (_ for _ in ()).throw(AssertionError('must not run git')))
+        monkeypatch.setattr(upd, '_schedule_restart', lambda delay=2.0: (_ for _ in ()).throw(AssertionError('must not restart')))
+
+        with STREAMS_LOCK:
+            old_streams = dict(STREAMS)
+            STREAMS.clear()
+        with ACTIVE_RUNS_LOCK:
+            old_runs = dict(ACTIVE_RUNS)
+            ACTIVE_RUNS.clear()
+            ACTIVE_RUNS['run_active'] = {'session_id': 's1', 'stream_id': 'missing-stream'}
+        try:
+            result = upd.apply_force_update('agent')
+        finally:
+            with ACTIVE_RUNS_LOCK:
+                ACTIVE_RUNS.clear()
+                ACTIVE_RUNS.update(old_runs)
+            with STREAMS_LOCK:
+                STREAMS.clear()
+                STREAMS.update(old_streams)
+
+        assert result['ok'] is False
+        assert result.get('active_streams') == 0
+        assert result.get('active_runs') == 1
+        assert result.get('restart_blocked') is True
+        assert 'active agent run' in result['message']
+
+    def test_wait_until_restart_safe_waits_for_active_run_to_clear(self, monkeypatch):
+        import api.updates as upd
+
+        snapshots = [
+            {'restart_blocked': True, 'active_streams': 0, 'active_runs': 1},
+            {'restart_blocked': False, 'active_streams': 0, 'active_runs': 0},
+        ]
+        sleeps = []
+        monkeypatch.setattr(upd, '_restart_blocker_snapshot', lambda: snapshots.pop(0))
+        monkeypatch.setattr(upd.time, 'sleep', lambda seconds: sleeps.append(seconds))
+
+        result = upd._wait_until_restart_safe(poll_seconds=0.25)
+
+        assert result['restart_blocked'] is False
+        assert sleeps == [0.25]
+
 
 class TestSuccessfulUpdateReturnsRestartScheduled:
     """#814 — successful apply_update must return restart_scheduled: True."""
@@ -397,6 +523,8 @@ class TestSuccessfulUpdateReturnsRestartScheduled:
 
         def fake_run(args, cwd, timeout=10):
             if args[0] == 'fetch':
+                return '', True
+            if args[0] == 'tag':
                 return '', True
             if args[:2] == ['status', '--porcelain']:
                 return '', True   # clean tree
@@ -417,6 +545,72 @@ class TestSuccessfulUpdateReturnsRestartScheduled:
         assert result.get('restart_scheduled') is True, (
             "successful update must set restart_scheduled: True"
         )
+
+    def test_apply_update_pulls_latest_release_tag_when_updates_are_release_based(
+        self, tmp_path, monkeypatch
+    ):
+        import api.updates as upd
+
+        (tmp_path / '.git').mkdir()
+        ran = []
+
+        def fake_run(args, cwd, timeout=10):
+            ran.append(args)
+            if args[0] == 'fetch':
+                return '', True
+            if args[0] == 'tag':
+                return 'v0.51.106\nv0.51.105\nv0.51.104', True
+            if args == ['describe', '--tags', '--abbrev=0']:
+                return 'v0.51.105', True
+            if args == ['merge-base', '--is-ancestor', 'v0.51.106', 'HEAD']:
+                return '', False
+            if args[:2] == ['status', '--porcelain']:
+                return '', True
+            if args[0] == 'pull':
+                return 'Updating release tag', True
+            return '', True
+
+        monkeypatch.setattr(upd, '_run_git', fake_run)
+        monkeypatch.setattr(upd, 'REPO_ROOT', tmp_path)
+        monkeypatch.setattr(upd, '_AGENT_DIR', tmp_path)
+        monkeypatch.setattr(upd, '_schedule_restart', lambda delay=2.0: None)
+
+        result = upd.apply_update('webui')
+        assert result['ok'] is True
+        assert ['fetch', 'origin', '--quiet', '--tags', '--force'] in ran
+        assert ['pull', '--ff-only', 'origin', 'v0.51.106'] in ran
+        assert ['rev-parse', '--abbrev-ref', '@{upstream}'] not in ran
+
+    def test_apply_update_falls_back_to_tracking_branch_without_release_tags(
+        self, tmp_path, monkeypatch
+    ):
+        import api.updates as upd
+
+        (tmp_path / '.git').mkdir()
+        ran = []
+
+        def fake_run(args, cwd, timeout=10):
+            ran.append(args)
+            if args[0] == 'fetch':
+                return '', True
+            if args[0] == 'tag':
+                return '', True
+            if args[:2] == ['rev-parse', '--abbrev-ref']:
+                return 'fork/feature-branch', True
+            if args[:2] == ['status', '--porcelain']:
+                return '', True
+            if args[0] == 'pull':
+                return 'Already up to date.', True
+            return '', True
+
+        monkeypatch.setattr(upd, '_run_git', fake_run)
+        monkeypatch.setattr(upd, 'REPO_ROOT', tmp_path)
+        monkeypatch.setattr(upd, '_AGENT_DIR', tmp_path)
+        monkeypatch.setattr(upd, '_schedule_restart', lambda delay=2.0: None)
+
+        result = upd.apply_update('agent')
+        assert result['ok'] is True
+        assert ['pull', '--ff-only', 'fork', 'feature-branch'] in ran
 
 
 class TestApplyForceUpdate:

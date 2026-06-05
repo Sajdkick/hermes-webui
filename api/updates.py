@@ -10,15 +10,21 @@ Skips repos that are not git checkouts (e.g. Docker baked images where
 """
 import hashlib
 import json
+import logging
+import os
 import re
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import urlparse
 
 from api.config import REPO_ROOT, STREAMS, STREAMS_LOCK
+
+logger = logging.getLogger(__name__)
 
 # Lazy -- may be None if agent not found
 try:
@@ -26,39 +32,128 @@ try:
 except ImportError:
     _AGENT_DIR = None
 
-_update_cache = {'webui': None, 'agent': None, 'checked_at': 0}
+_update_cache = {'webui': None, 'agent': None, 'checked_at': 0, 'include_agent': True}
 _SUMMARY_CACHE_MAX = 16
 _summary_cache: OrderedDict = OrderedDict()
 _cache_lock = threading.Lock()
 _check_in_progress = False
 _apply_lock = threading.Lock()   # prevents concurrent stash/pull/pop on same repo
 CACHE_TTL = 1800  # 30 minutes
+_GIT_DIAGNOSTIC_MAX_CHARS = 300
+_CREDENTIAL_IN_URL_RE = re.compile(r"([a-zA-Z][a-zA-Z0-9+.-]*://)([^/@\s'\"]+)@")
+_GITHUB_TOKEN_RE = re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b")
+_QUERY_SECRET_RE = re.compile(r"([?&](?:access_token|token|password|auth|key)=)[^&\s'\"]+", re.IGNORECASE)
+
+
+def _sanitize_git_diagnostic(output: str, *, limit: int = _GIT_DIAGNOSTIC_MAX_CHARS) -> str:
+    """Return a user-facing git diagnostic with credentials removed.
+
+    Git can echo remote URLs in failure output.  Keep the actionable error text,
+    but strip URL userinfo, common GitHub token shapes, and secret-looking query
+    parameter values before any message reaches the update-check API/UI.
+    """
+    if not output:
+        return ""
+    sanitized = _CREDENTIAL_IN_URL_RE.sub(r"\1<redacted>@", str(output))
+    sanitized = _GITHUB_TOKEN_RE.sub("<redacted>", sanitized)
+    sanitized = _QUERY_SECRET_RE.sub(r"\1<redacted>", sanitized)
+    sanitized = sanitized.strip()
+    if len(sanitized) > limit:
+        sanitized = sanitized[:limit].rstrip() + "…"
+    return sanitized
+
+
+def _restart_blocker_snapshot() -> dict:
+    """Return active chat work that should block a self-restart."""
+    with STREAMS_LOCK:
+        stream_ids = [str(k) for k in STREAMS.keys()]
+    run_ids: list[str] = []
+    try:
+        from api import config as _config
+        active_runs = getattr(_config, 'ACTIVE_RUNS', {})
+        active_runs_lock = getattr(_config, 'ACTIVE_RUNS_LOCK', None)
+        if active_runs_lock is not None:
+            with active_runs_lock:
+                run_ids = [str(k) for k in active_runs.keys()]
+        else:
+            run_ids = [str(k) for k in active_runs.keys()]
+    except Exception:
+        run_ids = []
+    return {
+        'active_streams': len(stream_ids),
+        'active_runs': len(run_ids),
+        'blocking_stream_ids': stream_ids[:10],
+        'blocking_run_ids': run_ids[:10],
+        'restart_blocked': bool(stream_ids or run_ids),
+    }
 
 
 def _active_stream_count() -> int:
     """Return the current in-memory chat stream count.
 
-    Self-update schedules an in-process re-exec after git pull/reset.  That is
-    restart-equivalent for live streams, even when systemd does not see a unit
-    restart.  Refuse update/force-update while a stream exists so a browser
-    update click cannot recreate the pending-message loss class fixed in #1543.
+    Kept for compatibility with older tests/helpers; restart safety should use
+    ``_restart_blocker_snapshot()`` so detached worker runs also block updates.
     """
-    with STREAMS_LOCK:
-        return len(STREAMS)
+    return int(_restart_blocker_snapshot().get('active_streams') or 0)
 
 
-def _restart_blocked_response(target: str, active_streams: int) -> dict:
-    plural = "s" if active_streams != 1 else ""
+def _restart_blocked_response(target: str, blocker_snapshot: dict | int) -> dict:
+    if isinstance(blocker_snapshot, int):
+        blocker_snapshot = {
+            'active_streams': blocker_snapshot,
+            'active_runs': 0,
+            'blocking_stream_ids': [],
+            'blocking_run_ids': [],
+            'restart_blocked': bool(blocker_snapshot),
+        }
+    active_streams = int(blocker_snapshot.get('active_streams') or 0)
+    active_runs = int(blocker_snapshot.get('active_runs') or 0)
+    parts = []
+    if active_streams:
+        parts.append(f"{active_streams} active chat stream{'s' if active_streams != 1 else ''}")
+    if active_runs:
+        parts.append(f"{active_runs} active agent run{'s' if active_runs != 1 else ''}")
+    detail = ' and '.join(parts) or 'active chat work'
     return {
         'ok': False,
         'message': (
-            f'Cannot update {target} while {active_streams} active chat stream{plural} '
-            'is running. Wait for the response to finish, then retry the update.'
+            f'Cannot update {target} while {detail} is running. '
+            'Wait for the response to finish, then retry the update.'
         ),
         'target': target,
         'restart_blocked': True,
         'active_streams': active_streams,
+        'active_runs': active_runs,
+        'blocking_stream_ids': blocker_snapshot.get('blocking_stream_ids') or [],
+        'blocking_run_ids': blocker_snapshot.get('blocking_run_ids') or [],
     }
+
+
+def _wait_until_restart_safe(poll_seconds: float = 2.0, max_wait_seconds: float = 300.0) -> dict:
+    """Wait for active work to finish before self-reexec.
+
+    Bounded by ``max_wait_seconds`` so a long-running (or stuck/orphaned) agent
+    run can't soft-jam the self-update indefinitely. If the deadline is reached
+    while work is still in flight, the snapshot is returned with
+    ``wait_timed_out=True`` so the caller can proceed with the re-exec anyway
+    (preserving the pre-#3105 "execv preempts in-flight work" fallback) rather
+    than holding ``_apply_lock`` for the run's full lifetime.
+    """
+    snapshot = _restart_blocker_snapshot()
+    deadline = time.monotonic() + max(0.0, max_wait_seconds)
+    while snapshot.get('restart_blocked'):
+        if time.monotonic() >= deadline:
+            logger.warning(
+                "restart-safety wait exceeded %.0fs with work still in flight (%s); "
+                "proceeding with re-exec anyway",
+                max_wait_seconds, snapshot,
+            )
+            snapshot = dict(snapshot)
+            snapshot['wait_timed_out'] = True
+            return snapshot
+        time.sleep(max(0.1, poll_seconds))
+        snapshot = _restart_blocker_snapshot()
+    return snapshot
 
 
 def _run_git(args, cwd, timeout=10):
@@ -71,9 +166,13 @@ def _run_git(args, cwd, timeout=10):
         r = subprocess.run(
             ['git'] + args, cwd=str(cwd), capture_output=True,
             text=True, timeout=timeout,
+            encoding='utf-8', errors='replace',
         )
-        stdout = r.stdout.strip()
-        stderr = r.stderr.strip()
+        # On non-UTF-8 locales (e.g. Chinese Windows GBK), a binary git
+        # output that fails to decode used to leave r.stdout = None and crash
+        # the whole import with AttributeError. Guard against None defensively.
+        stdout = (r.stdout or '').strip()
+        stderr = (r.stderr or '').strip()
         if r.returncode == 0:
             return stdout, True
         return stderr or stdout or f"git exited with status {r.returncode}", False
@@ -91,9 +190,21 @@ def _dirty_suffix(path: Path, timeout=1) -> str:
     out, ok = _run_git(['diff-index', '--quiet', 'HEAD', '--'], path, timeout=timeout)
     if ok:
         return ""
-    # diff-index exits 1 with no output for a dirty tree. Timeouts and real git
-    # failures include a diagnostic; skip the suffix so the base version remains.
-    return "-dirty" if not out else ""
+    # diff-index --quiet exits 1 with no stdout/stderr to *signal* a dirty tree
+    # (not an error). _run_git() substitutes a synthetic "git exited with
+    # status N" diagnostic when both streams are empty, which makes the naive
+    # `if not out` guard always false on dirty trees — silently dropping the
+    # suffix and defeating dev-build cache busting (static/foo.js?v=… stays
+    # identical to the last-committed version). Treat the synthetic shape as
+    # the dirty signal; real errors (timeouts, missing git) carry a different
+    # diagnostic and correctly suppress the suffix.
+    if not out or out.startswith('git exited with status '):
+        diff, diff_ok = _run_git(['diff', '--binary', 'HEAD', '--'], path, timeout=timeout)
+        if diff_ok and diff:
+            digest = hashlib.sha1(diff.encode('utf-8', errors='replace')).hexdigest()[:8]
+            return f"-dirty-{digest}"
+        return "-dirty"
+    return ""
 
 
 def _describe_git_version(path: Path, *, timeout=5, dirty_timeout=1) -> str | None:
@@ -142,30 +253,104 @@ def _detect_webui_version() -> str:
     return 'unknown'
 
 
+def _read_agent_source_version(agent_dir: Path) -> str | None:
+    """Read Hermes Agent's package version from a copied source tree."""
+    init_file = agent_dir / 'hermes_cli' / '__init__.py'
+    try:
+        text = init_file.read_text(encoding='utf-8')
+    except (OSError, UnicodeDecodeError):
+        return None
+    m = re.search(r"""__version__\s*=\s*['"]([^'"]+)['"]""", text)
+    if m and m.group(1).strip():
+        return m.group(1).strip()
+    return None
+
+
+def _gateway_health_base_url() -> str:
+    """Return the configured/default Hermes Agent gateway base URL."""
+    raw = (
+        os.environ.get('GATEWAY_HEALTH_URL')
+        or os.environ.get('HERMES_GATEWAY_HEALTH_URL')
+        or 'http://hermes-agent:8642'
+    ).strip()
+    if raw.endswith('/health/detailed'):
+        raw = raw[: -len('/health/detailed')]
+    elif raw.endswith('/health'):
+        raw = raw[: -len('/health')]
+    return raw.rstrip('/')
+
+
+def _version_from_gateway_health_payload(payload: object) -> str | None:
+    """Extract a version string from a Hermes Agent gateway health payload."""
+    if not isinstance(payload, dict):
+        return None
+    for key in ('version', 'agent_version', 'hermes_version'):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    nested = payload.get('agent')
+    if isinstance(nested, dict):
+        value = nested.get('version')
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _detect_agent_version_from_gateway_health(timeout: float = 0.75) -> str | None:
+    """Best-effort cross-container gateway API fallback for Agent version."""
+    base = _gateway_health_base_url()
+    if not base:
+        return None
+    parsed = urlparse(base)
+    if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+        return None
+    for path in ('/health', '/health/detailed'):
+        try:
+            with urllib.request.urlopen(f'{base}{path}', timeout=timeout) as resp:
+                payload = json.loads(resp.read().decode('utf-8'))
+        except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        version = _version_from_gateway_health_payload(payload)
+        if version:
+            return version
+    return None
+
+
 def _detect_agent_version() -> str:
     """Detect the running Hermes Agent version for UI display."""
-    if _AGENT_DIR is None:
-        return 'not detected'
+    agent_dir = Path(_AGENT_DIR) if _AGENT_DIR is not None else None
 
-    version_file = Path(_AGENT_DIR) / "VERSION"
-    try:
-        if version_file.exists():
-            text = version_file.read_text(encoding='utf-8').strip()
-            if text:
-                return text
-    except Exception:
-        pass
+    if agent_dir is not None:
+        version_file = agent_dir / "VERSION"
+        try:
+            if version_file.exists():
+                text = version_file.read_text(encoding='utf-8').strip()
+                if text:
+                    return text
+        except Exception:
+            pass
 
-    # Fallback: infer from git describe when the checkout exists but no VERSION
-    # file is available (common in source checkouts and developer environments).
-    if not Path(_AGENT_DIR).exists():
-        return 'not detected'
-    # Symmetric with _detect_webui_version() above — `--dirty` flags a
-    # locally-modified checkout so operators can see when their agent has
-    # uncommitted changes vs a clean tag. Per Opus advisor on stage-293.
-    out = _describe_git_version(Path(_AGENT_DIR))
-    if out:
-        return out
+        # Fallback: infer from git describe when the checkout exists but no VERSION
+        # file is available (common in source checkouts and developer environments).
+        if agent_dir.exists():
+            # Symmetric with _detect_webui_version() above — `--dirty` flags a
+            # locally-modified checkout so operators can see when their agent has
+            # uncommitted changes vs a clean tag. Per Opus advisor on stage-293.
+            out = _describe_git_version(agent_dir)
+            if out:
+                return out
+
+            # Docker two-container deployments often mount a copied agent source
+            # tree without .git metadata or a VERSION file.  The package version
+            # still lives in hermes_cli/__init__.py, so prefer that before giving
+            # up or relying on a live gateway probe.
+            source_version = _read_agent_source_version(agent_dir)
+            if source_version:
+                return source_version
+
+    gateway_version = _detect_agent_version_from_gateway_health()
+    if gateway_version:
+        return gateway_version
 
     return 'not detected'
 
@@ -252,6 +437,89 @@ def _release_gap(tags, current, latest):
     return 1
 
 
+def _head_is_past_latest_tag(path, current_tag):
+    """Return True when HEAD has moved past the latest reachable release tag.
+
+    `git describe --tags --always` returns the bare tag name (e.g. ``v2026.5.16``)
+    when HEAD is exactly on the tag, and a ``v2026.5.16-608-g1d22b9c2`` suffix
+    when HEAD has moved 608 commits past it. Used by both the update check and
+    the update apply path so they agree on which ref to advance to — see #2653
+    (check side) and #2846 (apply side).
+    """
+    if not current_tag:
+        return False
+    full_desc, ok = _run_git(['describe', '--tags', '--always'], path)
+    return bool(ok and full_desc and full_desc != current_tag)
+
+
+def _head_contains_ref(path, ref):
+    """Return True when ``ref`` is an ancestor of HEAD.
+
+    Release-channel checks are tag-name based, but users tracking ``main`` can
+    be on a commit that already contains the newest published tag. In that case
+    a positive tag gap is not an available update; applying the tag would move
+    backwards or fail fast-forward. Use the commit graph to detect that state.
+    """
+    if not ref:
+        return False
+    _, ok = _run_git(['merge-base', '--is-ancestor', ref, 'HEAD'], path)
+    return bool(ok)
+
+
+def _can_fast_forward_to(path, ref):
+    """Return True when ``ref`` is a descendant of HEAD (``git pull --ff-only`` can reach it)."""
+    if not ref:
+        return False
+    _, ok = _run_git(['merge-base', '--is-ancestor', 'HEAD', ref], path)
+    return bool(ok)
+
+
+def _select_apply_compare_ref(path):
+    """Return the same remote ref family that the update check reports.
+
+    The update banner prefers published release tags when they exist. Applying
+    an update must therefore advance to the latest release tag too; otherwise a
+    checkout on a local/fork tracking branch can report release updates, pull a
+    different branch that is already current, restart, and still remain behind.
+
+    When HEAD is past the latest tag (the agent repo's day-to-day state between
+    tagged releases), the check side falls through to the branch comparison via
+    `_check_repo_release` returning None. The apply side must mirror that
+    decision — otherwise we run `git pull --ff-only <latest-tag>` against a
+    checkout that's already past the tag, no-op, restart, and the banner
+    re-appears with the same N commits available. See #2846.
+    """
+    tags = _release_tags(path)
+    if tags:
+        latest_tag = tags[0]
+        current_tag = _current_release_tag(path)
+        behind = _release_gap(tags, current_tag, latest_tag)
+        # Mirror the check side exactly: fall through to the branch comparison
+        # whenever the checkout has already moved past the release tag that the
+        # banner would otherwise advertise. The common case is behind == 0 and
+        # HEAD is past its nearest tag, but main-tracking checkouts can also
+        # have behind > 0 after fetching a newer tag that HEAD already contains
+        # (#3140). In both cases applying the tag would no-op, move backwards,
+        # or fail fast-forward; branch comparison is the truthful update path.
+        if (
+            behind == 0 and _head_is_past_latest_tag(path, current_tag)
+        ) or (
+            behind > 0 and _head_contains_ref(path, latest_tag)
+        ) or (
+            behind > 0 and not _can_fast_forward_to(path, latest_tag)
+        ):
+            pass
+        else:
+            return latest_tag
+
+    upstream, ok = _run_git(['rev-parse', '--abbrev-ref', '@{upstream}'], path)
+    if ok and upstream:
+        return upstream
+
+    branch = _detect_default_branch(path)
+    return f'origin/{branch}'
+
+
 def _check_repo_release(path, name):
     """Check if a git repo is behind its latest published release tag."""
     tags = _release_tags(path)
@@ -261,6 +529,29 @@ def _check_repo_release(path, name):
     latest_tag = tags[0]
     current_tag = _current_release_tag(path)
     behind = _release_gap(tags, current_tag, latest_tag)
+
+    # If behind == 0 but HEAD has moved past the tag (e.g. the agent repo
+    # keeps committing to master between tagged releases), the release check
+    # would report "Up to date" even though hundreds of commits are missing.
+    # Fall through to _check_repo_branch so the real commit count is reported
+    # instead. The same predicate is used by _select_apply_compare_ref so the
+    # check and apply sides cannot drift again. See #2653 (check), #2846 (apply).
+    if behind == 0 and _head_is_past_latest_tag(path, current_tag):
+        return None
+
+    # Users tracking main can already contain the newest fetched release tag
+    # while their nearest reachable tag is older. A positive tag gap then means
+    # only "there is a newer tag name", not "HEAD is behind that tag" (#3140).
+    # Fall through to the branch check so the banner compares against the
+    # configured upstream instead of advertising a tag that cannot fast-forward.
+    if behind > 0 and _head_contains_ref(path, latest_tag):
+        return None
+
+    # Patch releases can land on a side branch while day-to-day installs track
+    # main past an older tag. A positive tag-name gap then advertises an update
+    # that `git pull --ff-only <latest-tag>` cannot reach.
+    if behind > 0 and not _can_fast_forward_to(path, latest_tag):
+        return None
 
     remote_url, _ = _run_git(['remote', 'get-url', 'origin'], path)
     remote_url = _normalize_remote_url(remote_url)
@@ -358,9 +649,30 @@ def _check_repo(path, name):
 
     # Fetch tags first so update prompts track published releases, not every
     # development commit that lands on master/main after the latest release.
-    _, fetch_ok = _run_git(['fetch', 'origin', '--quiet', '--tags'], path, timeout=15)
+    #
+    # --force is required because the WebUI is a release-tracking consumer:
+    # it never pushes tags, so it should always defer to whatever the remote
+    # says a release tag points to. Without --force, a remote re-tag (e.g.
+    # after a squash-merge that re-points a release tag at a new SHA) jams
+    # the update path indefinitely with "would clobber existing tag" errors.
+    # See #2756.
+    fetch_out, fetch_ok = _run_git(['fetch', 'origin', '--tags', '--force'], path, timeout=15)
     if not fetch_ok:
-        return {'name': name, 'behind': 0, 'error': 'fetch failed'}
+        release_info = _check_repo_release(path, name)
+        message = 'fetch failed'
+        if fetch_out:
+            message = f'{message}: {_sanitize_git_diagnostic(fetch_out)}'
+        if release_info is not None:
+            release_info = dict(release_info)
+            release_info['error'] = message
+            release_info['stale_check'] = True
+            return release_info
+        return {
+            'name': name,
+            'behind': None,
+            'error': message,
+            'stale_check': True,
+        }
 
     release_info = _check_repo_release(path, name)
     if release_info is not None:
@@ -369,11 +681,21 @@ def _check_repo(path, name):
     return _check_repo_branch(path, name, fetch=False)
 
 
-def check_for_updates(force=False):
+def _ignored_agent_update_info() -> dict:
+    """Return a stable update-check payload for intentionally ignored Agent updates."""
+    return {'name': 'agent', 'behind': 0, 'ignored': True}
+
+
+def check_for_updates(force=False, *, include_agent=True):
     """Return cached update status for webui and agent repos."""
     global _check_in_progress
+    include_agent = bool(include_agent)
     with _cache_lock:
-        if not force and time.time() - _update_cache['checked_at'] < CACHE_TTL:
+        if (
+            not force
+            and _update_cache.get('include_agent') == include_agent
+            and time.time() - _update_cache['checked_at'] < CACHE_TTL
+        ):
             return dict(_update_cache)
         if _check_in_progress:
             return dict(_update_cache)  # another thread is already checking
@@ -382,12 +704,13 @@ def check_for_updates(force=False):
     try:
         # Run checks outside the lock (network I/O)
         webui_info = _check_repo(REPO_ROOT, 'webui')
-        agent_info = _check_repo(_AGENT_DIR, 'agent')
+        agent_info = _check_repo(_AGENT_DIR, 'agent') if include_agent else _ignored_agent_update_info()
 
         with _cache_lock:
             _update_cache['webui'] = webui_info
             _update_cache['agent'] = agent_info
             _update_cache['checked_at'] = time.time()
+            _update_cache['include_agent'] = include_agent
             return dict(_update_cache)
     finally:
         _check_in_progress = False
@@ -724,11 +1047,39 @@ def _schedule_restart(delay: float = 2.0) -> None:
         # Threads die when execv replaces the process image, so the lock is
         # released atomically by the kernel.
         with _apply_lock:
+            _wait_until_restart_safe()
             try:
-                os.execv(sys.executable, [sys.executable] + sys.argv)
+                # Re-exec into the just-pulled image.
+                #
+                # sys.argv[0]'s meaning depends on how the server was launched:
+                #
+                #   * Source checkout (`python server.py` via bootstrap.py /
+                #     ctl.sh / start.sh): sys.argv[0] is the SCRIPT path
+                #     (e.g. "/root/hermes-webui/server.py"), sys.executable is
+                #     the interpreter. CPython treats argv[1] as the script to
+                #     run, so we must pass [sys.executable] + sys.argv.
+                #
+                #   * Frozen/packaged build (PyInstaller, embedded zipapp,
+                #     etc.): sys.argv[0] == sys.executable == <binary>. Passing
+                #     [sys.executable] + sys.argv would re-insert the binary as
+                #     argv[1] — the kernel launches it, the interpreter treats
+                #     the binary itself as the "script" to run, and execv
+                #     effectively becomes a recursive no-op that never reaches
+                #     bind(), leaving the WebUI stuck "offline" after every
+                #     self-update. Pass argv as-is instead.
+                #
+                # Distinguish the two cases with sys.frozen (set by
+                # PyInstaller / zipapp / similar). For source checkouts the
+                # `[sys.executable] + sys.argv` form is the canonical CPython
+                # re-exec idiom (same shape Flask/Django reloaders use) and
+                # is the correct path.
+                if getattr(sys, "frozen", False):
+                    os.execv(sys.executable, sys.argv)
+                else:
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
             except Exception:
-                # Last-resort: if execv fails (e.g. frozen binary), just exit
-                # so the process supervisor (start.sh / Docker) restarts us.
+                # Last-resort: if execv fails for any reason, just exit so the
+                # process supervisor (start.sh / Docker) restarts us.
                 os._exit(0)
 
     threading.Thread(target=_do, daemon=True).start()
@@ -746,9 +1097,9 @@ def apply_force_update(target: str) -> dict:
     response with ``conflict: True`` or ``diverged: True`` and the user
     has confirmed they want to discard local changes.
     """
-    active_streams = _active_stream_count()
-    if active_streams:
-        return _restart_blocked_response(target, active_streams)
+    blocker_snapshot = _restart_blocker_snapshot()
+    if blocker_snapshot.get('restart_blocked'):
+        return _restart_blocked_response(target, blocker_snapshot)
 
     if not _apply_lock.acquire(blocking=False):
         return {'ok': False, 'message': 'Update already in progress'}
@@ -763,19 +1114,17 @@ def apply_force_update(target: str) -> dict:
         if path is None or not (path / '.git').exists():
             return {'ok': False, 'message': 'Not a git repository'}
 
-        _, fetch_ok = _run_git(['fetch', 'origin', '--quiet'], path, timeout=15)
+        # --force so a remote re-tag (e.g. squash-merge that re-points an
+        # existing release tag) doesn't jam the apply path with "would clobber
+        # existing tag". See #2756.
+        _, fetch_ok = _run_git(['fetch', 'origin', '--quiet', '--tags', '--force'], path, timeout=15)
         if not fetch_ok:
             return {
                 'ok': False,
                 'message': 'Could not reach the remote repository. Check your connection.',
             }
 
-        upstream, ok = _run_git(['rev-parse', '--abbrev-ref', '@{upstream}'], path)
-        if ok and upstream:
-            compare_ref = upstream
-        else:
-            branch = _detect_default_branch(path)
-            compare_ref = f'origin/{branch}'
+        compare_ref = _select_apply_compare_ref(path)
 
         # Discard local modifications then reset to remote HEAD
         _run_git(['checkout', '.'], path)
@@ -800,9 +1149,9 @@ def apply_force_update(target: str) -> dict:
 
 def apply_update(target):
     """Stash, pull --ff-only, pop for the given target repo."""
-    active_streams = _active_stream_count()
-    if active_streams:
-        return _restart_blocked_response(target, active_streams)
+    blocker_snapshot = _restart_blocker_snapshot()
+    if blocker_snapshot.get('restart_blocked'):
+        return _restart_blocked_response(target, blocker_snapshot)
 
     if not _apply_lock.acquire(blocking=False):
         return {'ok': False, 'message': 'Update already in progress'}
@@ -824,17 +1173,9 @@ def _apply_update_inner(target):
     if path is None or not (path / '.git').exists():
         return {'ok': False, 'message': 'Not a git repository'}
 
-    # Use the current branch's upstream for pull, matching the behaviour
-    # of _check_repo. Falls back to default branch if no upstream is set.
-    upstream, ok = _run_git(['rev-parse', '--abbrev-ref', '@{upstream}'], path)
-    if ok and upstream:
-        compare_ref = upstream
-    else:
-        branch = _detect_default_branch(path)
-        compare_ref = f'origin/{branch}'
-
     # Fetch before attempting pull, so the remote ref is current.
-    _, fetch_ok = _run_git(['fetch', 'origin', '--quiet'], path, timeout=15)
+    # --force so a remote re-tag doesn't block the update path (see #2756).
+    _, fetch_ok = _run_git(['fetch', 'origin', '--quiet', '--tags', '--force'], path, timeout=15)
     if not fetch_ok:
         return {
             'ok': False,
@@ -843,6 +1184,8 @@ def _apply_update_inner(target):
                 'Check your internet connection and try again.'
             ),
         }
+
+    compare_ref = _select_apply_compare_ref(path)
 
     # Check for dirty working tree (ignore untracked files — git stash
     # doesn't include them, so stashing on '??' alone leaves nothing to pop)
@@ -879,7 +1222,7 @@ def _apply_update_inner(target):
     if remote:
         pull_args.extend([remote, branch])
     else:
-        pull_args.append(compare_ref)
+        pull_args.extend(['origin', compare_ref])
     pull_out, pull_ok = _run_git(pull_args, path, timeout=30)
     if not pull_ok:
         if stashed:
@@ -914,9 +1257,25 @@ def _apply_update_inner(target):
     if stashed:
         _, pop_ok = _run_git(['stash', 'pop'], path)
         if not pop_ok:
+            _, reset_ok = _run_git(['reset', '--merge'], path)
+            if not reset_ok:
+                return {
+                    'ok': False,
+                    'message': (
+                        'Updated successfully, but failed to clean up a '
+                        'stash-pop conflict. Manual intervention needed: '
+                        'run git reset --merge in ' + str(path)
+                    ),
+                    'stash_conflict': True,
+                }
             return {
                 'ok': False,
-                'message': 'Updated but stash pop failed -- manual merge needed',
+                'message': (
+                    f'{target} updated to the latest version, but your local '
+                    'modifications conflict with upstream changes. Your changes '
+                    'are preserved in stash@{0}. To re-apply them: '
+                    'git -C ' + str(path) + ' stash pop, then resolve conflicts.'
+                ),
                 'stash_conflict': True,
             }
 

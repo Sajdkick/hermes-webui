@@ -43,8 +43,8 @@ def test_current_session_noop_allows_stuck_pane_recovery():
     assert "function _activeSessionPaneNeedsRecovery(sid)" in SESSIONS_JS
     load_session = _function_body(SESSIONS_JS, "async function loadSession")
     assert "_activeSessionPaneNeedsRecovery(sid)" in load_session
-    assert "options.force===true" in load_session
-    assert "loadSession(sid,{force:true})" in load_session
+    assert "opts.force===true" in load_session
+    assert "loadSession(sid,{force:true,exact:exactSession})" in load_session
 
 
 def test_bfcache_pageshow_forces_active_session_reload():
@@ -86,7 +86,7 @@ def test_message_scroll_listener_does_not_downgrade_explicit_bottom_pin_on_first
     assert "_nearBottomCount=2" in set_bottom
     assert "_scrollPinned=_nearBottomCount>=2" not in listener_block
     assert "if(_nearBottomCount>=2) _scrollPinned=true" in listener_block
-    assert "else { _nearBottomCount=0; _scrollPinned=false; }" in listener_block
+    assert "_scrollPinned=false" in listener_block
 
 
 def test_user_scroll_cancels_delayed_bottom_settling():

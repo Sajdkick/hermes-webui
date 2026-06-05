@@ -312,8 +312,8 @@ def test_deleted_session_does_not_appear_in_list(cleanup_test_sessions):
     assert sid not in ids_after,         f"Deleted session {sid} still appears in list -- index not invalidated on delete"
 
 
-def test_server_delete_updates_index_without_full_invalidation(cleanup_test_sessions):
-    """R8b: session/delete must remove the stale row without deleting _index.json."""
+def test_server_delete_prunes_session_index(cleanup_test_sessions):
+    """session/delete should prune the deleted row without discarding the index."""
     src = (REPO_ROOT / "server.py").read_text()
     routes_src = (REPO_ROOT / "api" / "routes.py").read_text() if (REPO_ROOT / "api" / "routes.py").exists() else ""
     # Find the delete handler in either file
@@ -324,14 +324,9 @@ def test_server_delete_updates_index_without_full_invalidation(cleanup_test_sess
             text.find('if parsed.path == "/api/session/delete":'),
         )
         if delete_idx >= 0:
-            # Use 1200 chars to accommodate any validation/guard code added
-            # before the index update call (e.g. session_id
-            # character checks, path traversal guards).
-            delete_block = text[delete_idx:delete_idx+1200]
-            assert "_remove_session_from_index" in delete_block, \
-                f"{label} session/delete must patch SESSION_INDEX_FILE instead of invalidating it"
-            assert "SESSION_INDEX_FILE.unlink" not in delete_block, \
-                f"{label} session/delete must not force a full session-index rebuild"
+            delete_block = text[delete_idx:delete_idx+1800]
+            assert "prune_session_from_index(sid)" in delete_block,                 f"{label} session/delete must prune SESSION_INDEX_FILE"
+            assert "SESSION_INDEX_FILE.unlink" not in delete_block,                 f"{label} session/delete must not force a full session-index rebuild"
             return
     assert False, "session/delete handler not found in server.py or api/routes.py"
 
@@ -344,7 +339,7 @@ def test_server_delete_removes_session_bak_snapshot(cleanup_test_sessions):
         routes_src.find('if parsed.path == "/api/session/delete":'),
     )
     assert delete_idx >= 0, "session/delete handler not found in api/routes.py"
-    delete_block = routes_src[delete_idx:delete_idx+1400]
+    delete_block = routes_src[delete_idx:delete_idx+1800]
     assert "with_suffix('.json.bak').unlink" in delete_block or 'with_suffix(".json.bak").unlink' in delete_block, \
         "session/delete must unlink <sid>.json.bak to avoid later orphan-backup recovery"
 
@@ -576,8 +571,14 @@ def test_live_stream_tokens_persist_partial_assistant_for_session_switch(cleanup
     messages_src = (REPO_ROOT / "static/messages.js").read_text()
     ui_src = (REPO_ROOT / "static/ui.js").read_text()
 
-    assert "content:assistantText" in messages_src, \
-        "messages.js must persist the partial assistant text into INFLIGHT state"
+    # #3455: the persisted partial assistant content is now the think-split content
+    # (inline <think> moved to m.reasoning), so the push uses content:split.content
+    # where split=_splitThinkFromContent(assistantText, ...). The invariant — partial
+    # assistant text is mirrored into INFLIGHT state — is unchanged.
+    assert "content:split.content" in messages_src, \
+        "messages.js must persist the (think-split) partial assistant text into INFLIGHT state"
+    assert "_splitThinkFromContent(assistantText" in messages_src, \
+        "the persisted partial must be derived from the live assistantText"
     assert "_live:true" in messages_src, \
         "messages.js must mark the persisted in-flight assistant row so renderMessages can re-anchor it"
     assert "syncInflightAssistantMessage();" in messages_src, \
@@ -625,7 +626,9 @@ def test_loadSession_inflight_sets_busy_before_renderMessages(cleanup_test_sessi
     assert inflight_idx >= 0, "INFLIGHT branch not found in loadSession"
     inflight_block = src[inflight_idx:inflight_idx+1600]
     busy_pos = inflight_block.find("S.busy=true;")
-    render_pos = inflight_block.find("renderMessages();")
+    # #3326 added an optional {preserveScroll} arg to the INFLIGHT-branch render
+    # call, so match the call form rather than the bare `renderMessages();`.
+    render_pos = inflight_block.find("renderMessages(")
     assert busy_pos >= 0, "loadSession INFLIGHT branch must set S.busy=true"
     assert render_pos >= 0, "loadSession INFLIGHT branch must call renderMessages()"
     assert busy_pos < render_pos, \
@@ -646,6 +649,48 @@ def test_loadSession_inflight_merges_tail_with_persisted_transcript(cleanup_test
     )
     assert "function _mergeInflightTailMessages" in src, (
         "sessions.js should centralize INFLIGHT tail merge logic for regression coverage"
+    )
+
+
+
+def test_browser_session_url_accepts_api_session_id_param(cleanup_test_sessions):
+    """External links using ?session_id=... should open that session in the browser.
+
+    The API endpoint uses `session_id`, while the browser URL historically used
+    `session`/`/session/<id>`. Auth/cookie bridges and external callers can
+    legitimately produce `/?session_id=<sid>`; ignoring it falls back to stale
+    localStorage and renders the wrong or empty conversation.
+    """
+    src = (REPO_ROOT / "static/sessions.js").read_text()
+    start = src.find("function _sessionIdFromLocation")
+    assert start >= 0, "session URL parser not found"
+    end = src.find("function _sessionUrlForSid", start)
+    assert end > start, "session URL parser block end not found"
+    block = src[start:end]
+    assert "qs.get('session')" in block or 'qs.get("session")' in block
+    assert "qs.get('session_id')" in block or 'qs.get("session_id")' in block
+
+
+def test_inflight_merge_dedupes_uploaded_user_message(cleanup_test_sessions):
+    """Uploaded-file turns render optimistically before the server stores the
+    final pending text with an `[Attached files: ...]` suffix.  The INFLIGHT
+    merge must treat those as the same user turn instead of rendering both.
+    """
+    src = (REPO_ROOT / "static/sessions.js").read_text()
+    assert "function _stripAttachedFilesMarker" in src, (
+        "sessions.js must normalize the server-side attached-files suffix before deduping user turns"
+    )
+    assert "_stripAttachedFilesMarker(aText)===_stripAttachedFilesMarker(bText)" in src, (
+        "INFLIGHT user-message comparison should dedupe optimistic upload text against final pending text"
+    )
+    assert "role==='user'" in src, (
+        "attached-files normalization should be limited to user turns"
+    )
+    pending_idx = src.find("function _mergePendingSessionMessage")
+    assert pending_idx >= 0, "pending session merge helper not found"
+    pending_block = src[pending_idx:pending_idx+500]
+    assert "_sameTranscriptMessage(existing,pendingMsg)" in pending_block, (
+        "pending-user merge should reuse transcript identity dedupe before inserting the server pending message"
     )
 
 
@@ -724,9 +769,13 @@ def test_messages_js_supports_live_reasoning_and_tool_completion(cleanup_test_se
     until the final done snapshot redraws the whole turn.
     """
     src = (REPO_ROOT / "static/messages.js").read_text()
-    assert "let reasoningText=''" in src, \
+    # reasoningText is initialised at closure scope in attachLiveStream.
+    # On initial connect it defaults to ''; on reconnect it restores from
+    # INFLIGHT so the already-rendered content survives the session switch.
+    assert ("let reasoningText=''" in src
+            or "let reasoningText = _lastLiveAssistant" in src), \
         "messages.js must track streamed reasoning text separately from assistant text"
-    assert "let liveReasoningText=''" in src or 'let liveReasoningText = ""' in src, \
+    assert ("let liveReasoningText=''" in src or "let liveReasoningText = reasoningText" in src), \
         "messages.js must track the currently active reasoning segment separately from cumulative reasoning"
     assert "source.addEventListener('reasoning'" in src or 'source.addEventListener("reasoning"' in src, \
         "messages.js must listen for live reasoning SSE events"

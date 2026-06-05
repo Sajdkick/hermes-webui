@@ -245,15 +245,15 @@ def test_gateway_sessions_appear_when_enabled():
 
 
 def test_webui_state_db_session_without_sidecar_appears_when_agent_sessions_enabled():
-    """Regression: WebUI-origin rows in state.db can recover missing JSON sidecars."""
+    """Regression: state.db rows without JSON sidecars can be recovered via agent bridge."""
     conn = _ensure_state_db()
-    sid = 'webui_state_only_001'
+    sid = 'cli_state_only_001'
     try:
         _insert_agent_session_row(
             conn,
             session_id=sid,
-            source='webui',
-            title='Recovered WebUI Session',
+            source='cli',
+            title='Recovered CLI Session',
             model='openai/gpt-5',
             messages=2,
         )
@@ -265,10 +265,10 @@ def test_webui_state_db_session_without_sidecar_appears_when_agent_sessions_enab
         sessions = data.get('sessions', [])
         recovered = [s for s in sessions if s.get('session_id') == sid]
         assert len(recovered) == 1, (
-            "WebUI-origin sessions that exist in state.db but have no JSON sidecar "
+            "State.db sessions without a JSON sidecar "
             "should be surfaced through the agent-session bridge for recovery."
         )
-        assert recovered[0].get('source_tag') == 'webui'
+        assert recovered[0].get('source_tag') == 'cli'
         assert recovered[0].get('is_cli_session') is True
     finally:
         try:
@@ -780,7 +780,7 @@ def test_gateway_session_has_correct_metadata():
         assert gw.get('raw_source') == 'telegram'
         assert gw.get('session_source') == 'messaging'
         assert gw.get('source_label') == 'Telegram'
-        assert gw.get('is_cli_session') is True, "is_cli_session should be True for agent sessions"
+        assert gw.get('is_cli_session') is False, "is_cli_session should be False for messaging (telegram) sessions"
         assert gw.get('title') == 'Meta Test'
     finally:
         try:
@@ -825,6 +825,97 @@ def test_sessions_js_treats_email_as_messaging_source():
 
     assert "'email'" in src[src.find("_MESSAGING_RAW_SOURCES"):src.find("function _isMessagingSession")]
     assert "email: 'Email'" in src[src.find("_MESSAGING_SOURCE_LABELS"):src.find("function _isMessagingSession")]
+
+
+def test_empty_active_gateway_session_does_not_hide_messaging_history(monkeypatch):
+    """A zero-message active Gateway row must not hide older Discord history."""
+    import api.routes as routes
+
+    monkeypatch.setattr(
+        routes,
+        "_load_gateway_session_identity_map",
+        lambda: {
+            "discord_empty_active": {
+                "raw_source": "discord",
+                "platform": "discord",
+                "user_id": "user-1",
+            }
+        },
+    )
+
+    rows = [
+        {
+            "session_id": "discord_previous_history",
+            "title": "Previous Discord chat",
+            "source_tag": "discord",
+            "raw_source": "discord",
+            "session_source": "messaging",
+            "source_label": "Discord",
+            "user_id": "user-1",
+            "message_count": 7,
+            "updated_at": 100.0,
+            "end_reason": "session_reset",
+        }
+    ]
+
+    kept = routes._keep_latest_messaging_session_per_source(rows)
+
+    assert [row["session_id"] for row in kept] == ["discord_previous_history"]
+
+
+def test_previous_messaging_setting_keeps_reset_history(monkeypatch):
+    """The previous-messaging toggle exposes older reset segments."""
+    import api.routes as routes
+
+    monkeypatch.setattr(
+        routes,
+        "_load_gateway_session_identity_map",
+        lambda: {
+            "discord_active": {
+                "raw_source": "discord",
+                "platform": "discord",
+                "user_id": "user-1",
+            }
+        },
+    )
+
+    rows = [
+        {
+            "session_id": "discord_active",
+            "title": "Current Discord chat",
+            "source_tag": "discord",
+            "raw_source": "discord",
+            "session_source": "messaging",
+            "source_label": "Discord",
+            "user_id": "user-1",
+            "message_count": 3,
+            "updated_at": 200.0,
+        },
+        {
+            "session_id": "discord_previous_history",
+            "title": "Previous Discord chat",
+            "source_tag": "discord",
+            "raw_source": "discord",
+            "session_source": "messaging",
+            "source_label": "Discord",
+            "user_id": "user-1",
+            "message_count": 7,
+            "updated_at": 100.0,
+            "end_reason": "session_reset",
+        },
+    ]
+
+    hidden = routes._keep_latest_messaging_session_per_source(rows)
+    visible = routes._keep_latest_messaging_session_per_source(
+        rows,
+        show_previous_messaging_sessions=True,
+    )
+
+    assert [row["session_id"] for row in hidden] == ["discord_active"]
+    assert [row["session_id"] for row in visible] == [
+        "discord_active",
+        "discord_previous_history",
+    ]
 
 
 def test_cross_source_parent_child_is_not_collapsed_into_root_metadata(cleanup_test_sessions):
@@ -1438,7 +1529,11 @@ def test_cron_sessions_hidden_from_sidebar_by_default():
         sessions = data.get('sessions', [])
         ids = {s['session_id'] for s in sessions}
         assert 'gw_noncron_001' in ids, "Non-cron agent session should still appear"
-        assert 'cron_job123_20260427' not in ids, "Cron session should be hidden by default"
+        cron_row = next((s for s in sessions if s['session_id'] == 'cron_job123_20260427'), None)
+        assert cron_row is None or cron_row.get('default_hidden') is True, (
+            "Cron session should either be omitted from /api/sessions or marked "
+            "default_hidden so the default sidebar filter keeps it hidden"
+        )
     finally:
         try:
             _remove_test_sessions(conn, 'cron_job123_20260427', 'gw_noncron_001')
@@ -1605,6 +1700,77 @@ def test_session_prefers_state_db_messages_over_stale_local_snapshot(cleanup_tes
         assert len(msgs) == expected_total, f"Expected {expected_total} messages, got {len(msgs)}"
         assert msgs[-1].get('content') == expected_tail
         assert session.get('message_count') == expected_total
+    finally:
+        try:
+            _remove_test_sessions(conn, sid)
+            conn.close()
+        except Exception:
+            pass
+        try:
+            post('/api/settings', {'show_cli_sessions': False})
+        except Exception:
+            pass
+
+
+def test_messaging_session_message_count_matches_deduped_display_messages(cleanup_test_sessions):
+    """Thread sessions must not advertise raw DB rows that display merge dedupes away."""
+    from api.models import Session
+
+    conn = _ensure_state_db()
+    sid = 'gw_display_count_regression_001'
+    cleanup_test_sessions.append(sid)
+    base_ts = time.time() - 60
+    rows = [
+        ("user", "Thread question", base_ts + 1),
+        ("assistant", "", base_ts + 2),
+        ("assistant", "", base_ts + 2),
+        ("tool", '{"ok": true}', base_ts + 3),
+        ("assistant", "Thread answer", base_ts + 4),
+    ]
+    raw_db_count = len(rows)
+    try:
+        _insert_gateway_session(
+            conn,
+            session_id=sid,
+            source='discord',
+            title='Discord Thread Count Regression',
+            message_count=raw_db_count,
+            started_at=base_ts,
+        )
+        conn.execute("DELETE FROM messages WHERE session_id = ?", (sid,))
+        for role, content, ts in rows:
+            _insert_message(conn, sid, role, content, ts)
+        conn.execute(
+            "UPDATE sessions SET message_count = ? WHERE id = ?",
+            (raw_db_count, sid),
+        )
+        conn.commit()
+
+        # A stale WebUI sidecar can exist for the same messaging thread. The API
+        # display merge dedupes repeated blank assistant separators, so the
+        # advertised count must match the returned display coordinate space, not
+        # the raw state.db row count.
+        s = Session(
+            session_id=sid,
+            title='Legacy Discord Snapshot',
+            workspace='/tmp/hermes-webui-test',
+            model='openai/gpt-5',
+            messages=[{"role": "user", "content": "Thread question", "timestamp": base_ts + 1}],
+            session_source='messaging',
+            raw_source='discord',
+            source_tag='discord',
+            source_label='Discord',
+        )
+        s.save(touch_updated_at=False)
+
+        post('/api/settings', {'show_cli_sessions': True})
+        data, status = get(f'/api/session?session_id={sid}&messages=1&resolve_model=0&msg_limit=100')
+        assert status == 200, data
+        session = data.get('session', {})
+        msgs = session.get('messages', [])
+        assert msgs[-1].get('content') == 'Thread answer'
+        assert len(msgs) < raw_db_count, "fixture must exercise display dedupe"
+        assert session.get('message_count') == len(msgs)
     finally:
         try:
             _remove_test_sessions(conn, sid)

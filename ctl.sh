@@ -7,6 +7,7 @@ PID_FILE="${HERMES_WEBUI_PID_FILE:-${HERMES_HOME}/webui.pid}"
 LOG_FILE="${HERMES_WEBUI_LOG_FILE:-${HERMES_HOME}/webui.log}"
 STATE_FILE="${HERMES_WEBUI_CTL_STATE_FILE:-${HERMES_HOME}/webui.ctl.env}"
 DEFAULT_STATE_DIR="${HERMES_WEBUI_STATE_DIR:-${HERMES_HOME}/webui}"
+DEFAULT_LAUNCHD_LABEL="${HERMES_WEBUI_LAUNCHD_LABEL:-com.parantoux.hermes-webui}"
 
 usage() {
   cat <<'EOF'
@@ -27,6 +28,7 @@ ensure_home() {
 }
 
 _load_repo_dotenv_preserving_env() {
+  [[ "${HERMES_WEBUI_NO_DOTENV:-0}" == "1" ]] && return 0
   local env_file="${REPO_ROOT}/.env"
   [[ -f "${env_file}" ]] || return 0
 
@@ -210,6 +212,53 @@ _clear_stale_pid() {
   fi
 }
 
+_pid_listens_on_port() {
+  # Best-effort check that PID $1 has a listening socket on TCP port $2.
+  # macOS (where launchd exists) ships lsof; if we can't determine ownership we
+  # return 2 ("unknown") so the caller can fall back conservatively rather than
+  # guess. Never blocks on a hard failure.
+  local pid="$1" port="$2"
+  [[ "${pid}" =~ ^[0-9]+$ && "${port}" =~ ^[0-9]+$ ]] || return 2
+  if command -v lsof >/dev/null 2>&1; then
+    if lsof -nP -p "${pid}" -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1; then
+      return 0   # PID is listening on that port → real conflict
+    fi
+    return 1     # PID is alive but NOT listening on that port → no conflict
+  fi
+  return 2       # can't determine
+}
+
+_launchd_webui_pid() {
+  [[ "${HERMES_WEBUI_CTL_ALLOW_LAUNCHD_CONFLICT:-0}" == "1" ]] && return 1
+  command -v launchctl >/dev/null 2>&1 || return 1
+  local label="${HERMES_WEBUI_LAUNCHD_LABEL:-${DEFAULT_LAUNCHD_LABEL}}"
+  [[ -n "${label}" ]] || return 1
+  local uid launchd_out pid
+  uid="$(id -u)"
+  launchd_out="$(launchctl print "gui/${uid}/${label}" 2>/dev/null)" || return 1
+  pid="$(printf '%s\n' "${launchd_out}" | awk '/^[[:space:]]*pid = / {print $3; exit}')"
+  [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
+  (( pid > 0 )) || return 1
+  _is_alive "${pid}" || return 1
+  # Only treat the launchd job as a conflict for the port we are about to bind.
+  # A second instance on a DIFFERENT port (e.g. HERMES_WEBUI_PORT=8788 for a
+  # test build) does not collide with the launchd-managed default and must be
+  # allowed to start (#3291 over-block fix). When port ownership can't be
+  # determined (no lsof), fall back to the conservative previous behavior of
+  # only guarding the default port so non-default ports are never wrongly blocked.
+  local want_port="${CTL_PORT:-${HERMES_WEBUI_PORT:-8787}}"
+  _pid_listens_on_port "${pid}" "${want_port}"
+  case "$?" in
+    0) printf '%s\n' "${pid}"; return 0 ;;   # launchd job listens on our port → block
+    1) return 1 ;;                            # launchd job on a different port → allow
+    *)                                        # unknown: only guard the default port
+      if [[ "${want_port}" == "8787" ]]; then
+        printf '%s\n' "${pid}"; return 0
+      fi
+      return 1 ;;
+  esac
+}
+
 start_cmd() {
   ensure_home
   _load_repo_dotenv_preserving_env
@@ -225,58 +274,24 @@ start_cmd() {
     echo "[ctl] Hermes WebUI is already running (PID ${existing_pid})"
     return 0
   fi
+  local launchd_pid
+  if launchd_pid="$(_launchd_webui_pid 2>/dev/null)"; then
+    echo "[ctl] Refusing to start a second Hermes WebUI while launchd job ${HERMES_WEBUI_LAUNCHD_LABEL:-${DEFAULT_LAUNCHD_LABEL}} is running (PID ${launchd_pid})." >&2
+    echo "[ctl] Use launchctl kickstart -k gui/$(id -u)/${HERMES_WEBUI_LAUNCHD_LABEL:-${DEFAULT_LAUNCHD_LABEL}} or disable the launchd job before using ctl.sh start." >&2
+    return 2
+  fi
   _clear_stale_pid >/dev/null 2>&1 || true
 
-  local python_exe launcher_python pid
+  local python_exe pid
   python_exe="$(_find_python)"
-  launcher_python="$(_find_launcher_python)"
   : >> "${LOG_FILE}"
-  pid="$(
-    cd "${REPO_ROOT}" &&
-    "${launcher_python}" - "${python_exe}" "${REPO_ROOT}" "${LOG_FILE}" "${CTL_HOST}" "${CTL_PORT}" ${CTL_BOOTSTRAP_ARGS[@]+"${CTL_BOOTSTRAP_ARGS[@]}"} <<'PY'
-import os
-import shutil
-import signal
-import subprocess
-import sys
-
-python_exe = sys.argv[1]
-repo_root = sys.argv[2]
-log_file = sys.argv[3]
-host = sys.argv[4]
-port = sys.argv[5]
-extra_args = sys.argv[6:]
-
-cmd = [
-    python_exe,
-    os.path.join(repo_root, "bootstrap.py"),
-    "--no-browser",
-    "--foreground",
-    "--host",
-    host,
-    port,
-    *extra_args,
-]
-nohup_exe = shutil.which("nohup")
-spawn_cmd = [nohup_exe, *cmd] if nohup_exe else cmd
-with open(log_file, "ab", buffering=0) as log_handle:
-    proc = subprocess.Popen(
-        spawn_cmd,
-        cwd=repo_root,
-        stdin=subprocess.DEVNULL,
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-        close_fds=True,
-        preexec_fn=(lambda: signal.signal(signal.SIGHUP, signal.SIG_IGN)),
-    )
-print(proc.pid)
-PY
-  )"
-  [[ "${pid}" =~ ^[0-9]+$ ]] || {
-    echo "[ctl] Failed to launch Hermes WebUI daemon" >&2
-    return 1
-  }
+  (
+    cd "${REPO_ROOT}"
+    trap '' HUP
+    export HERMES_WEBUI_PRESERVE_ENV=1
+    exec nohup "${python_exe}" "${REPO_ROOT}/bootstrap.py" --no-browser --foreground --host "${CTL_HOST}" "${CTL_PORT}" ${CTL_BOOTSTRAP_ARGS[@]+"${CTL_BOOTSTRAP_ARGS[@]}"}
+  ) >> "${LOG_FILE}" 2>&1 &
+  pid=$!
 
   printf '%s\n' "${pid}" > "${PID_FILE}"
   _write_state "${pid}" "${CTL_HOST}" "${CTL_PORT}" "${python_exe}"

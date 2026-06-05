@@ -127,6 +127,25 @@ class TestSessionOwnedRuntimeInvariants:
             "otherwise it can reconnect stale side-channel streams after normal completion."
         )
 
+    def test_clarify_sse_fallback_preserves_owner_session_id(self):
+        messages = read("static/messages.js")
+        start_clarify = _function_body(messages, "startClarifyPolling")
+        fallback = _function_body(messages, "_startClarifyFallbackPoll")
+
+        assert "_clarifyPollingSessionId = sid || null" in fallback, (
+            "Any clarify fallback poller should retain its owner session id."
+        )
+        onerror_idx = start_clarify.index("_clarifyEventSource.onerror")
+        onerror_body = start_clarify[onerror_idx:start_clarify.index("};", onerror_idx)]
+        fallback_idx = onerror_body.index("_startClarifyFallbackPoll(sid)")
+        cleanup_after_stale_return = onerror_body.rfind("stopClarifyPolling();", 0, fallback_idx)
+        fallback_branch = onerror_body[cleanup_after_stale_return:fallback_idx]
+        assert "stopClarifyPolling();\n    _startClarifyFallbackPoll(sid)" not in onerror_body, (
+            "SSE fallback must not clear _clarifyPollingSessionId immediately before starting fallback."
+        )
+        assert "_clarifyEventSource.close()" in fallback_branch
+        assert "_clarifyPollingSessionId = sid || null" in fallback
+
     def test_live_stream_transport_and_inflight_state_remain_session_keyed(self):
         messages = read("static/messages.js")
         close_live = _function_body(messages, "closeLiveStream")
