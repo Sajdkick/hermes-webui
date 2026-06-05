@@ -884,7 +884,7 @@ Cloud Terminal project task routes:
 
 ---
 
-## Phase 12 — Session activity/readable-output/screenshot asset contract
+## Phase 12 — Session activity and screenshot asset contract
 
 ### Goal
 
@@ -895,7 +895,7 @@ Define shared schemas for activity and assets without turning core into a Codex/
 1. Document shared activity and asset schemas in `docs/core-api-contract.md`.
 2. Add helper module functions only if there are multiple existing consumers.
 3. Keep Codex native commands, session stdin, takeover, and provider-specific stream controls out of core.
-4. Ensure readable-output/screenshot assets enforce file containment and content-type safety.
+4. Ensure screenshot assets enforce file containment and content-type safety.
 5. Add tests around asset retrieval path containment and metadata shape.
 
 ### Done condition

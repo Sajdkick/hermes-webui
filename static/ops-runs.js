@@ -54,10 +54,8 @@
       const meta=statusMeta(run && run.status);
       const project=run && run.project ? run.project : null;
       const task=run && run.task ? run.task : null;
-      const readableOutput=run && run.readableOutput ? run.readableOutput : null;
       const pendingCount=Number(run && run.pendingRequestCount || 0);
       const sessionUrl=String(run && run.sessionUrl || '').trim();
-      const readableUrl=String(readableOutput && readableOutput.available && readableOutput.url || '').trim();
       return [
         '<article class="ops-run-card">',
         '<div class="ops-run-copy">',
@@ -74,7 +72,6 @@
         '</div>',
         '<div class="ops-task-actions">',
         sessionUrl ? '<a class="ops-shell-link" href="'+escapeHtml(appUrl(sessionUrl))+'">Open session</a>' : '',
-        readableUrl ? '<a class="ops-shell-link" href="'+escapeHtml(appUrl(readableUrl))+'">Readable output</a>' : '',
         '</div>',
         '</article>'
       ].join('');
@@ -84,7 +81,7 @@
       '<div class="ops-notification-toolbar">',
       '<div>',
       '<h2>Run activity</h2>',
-      '<p class="ops-notification-copy">Recent task-linked Hermes sessions, readable output, and pending requests.</p>',
+      '<p class="ops-notification-copy">Recent task-linked Hermes sessions and pending requests.</p>',
       '</div>',
       '<button class="ops-shell-link" type="button" data-ops-action="refresh-runs"'+(loading?' disabled':'')+'>'+(loading?'Refreshing…':'Refresh runs')+'</button>',
       '</div>',

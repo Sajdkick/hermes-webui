@@ -586,7 +586,7 @@ def test_chat_start_does_not_retag_non_empty_session(monkeypatch, tmp_path):
 
 
 def test_chat_start_does_not_retag_empty_project_owned_session(monkeypatch, tmp_path):
-    """Ops/project sessions are profile-owned before their first message exists."""
+    """Ops/project sessions keep authoritative profile and model/provider before their first turn."""
     import api.routes as routes
 
     class FakeSession:
@@ -597,8 +597,8 @@ def test_chat_start_does_not_retag_empty_project_owned_session(monkeypatch, tmp_
             self.source_tag = "ops_task"
             self.worktree_path = None
             self.workspace = str(tmp_path)
-            self.model = "google/gemini-3-flash-preview"
-            self.model_provider = "openrouter"
+            self.model = "project-default-model"
+            self.model_provider = "project-provider"
             self.messages = []
             self.context_messages = []
             self.tool_calls = []
@@ -622,9 +622,11 @@ def test_chat_start_does_not_retag_empty_project_owned_session(monkeypatch, tmp_
     monkeypatch.setattr(routes, "set_last_workspace", lambda workspace: None)
     monkeypatch.setattr(routes, "create_stream_channel", lambda: object())
 
+    started_threads = []
+
     class FakeThread:
         def __init__(self, *args, **kwargs):
-            pass
+            started_threads.append((args, kwargs))
 
         def start(self):
             pass
@@ -638,14 +640,88 @@ def test_chat_start_does_not_retag_empty_project_owned_session(monkeypatch, tmp_
             "session_id": fake.session_id,
             "message": "hello",
             "workspace": str(tmp_path),
-            "model": fake.model,
-            "model_provider": fake.model_provider,
+            "model": "stale-browser-model",
+            "model_provider": "openai-codex",
             "profile": "laxlyftet",
         },
     )
 
     assert fake.profile == "hermes-webui"
+    assert fake.model == "project-default-model"
+    assert fake.model_provider == "project-provider"
     assert fake.saved is True
+    assert started_threads
+    thread_kwargs = started_threads[-1][1]
+    assert thread_kwargs["args"][2] == "project-default-model"
+    assert thread_kwargs["kwargs"]["model_provider"] == "project-provider"
+
+
+def test_session_new_uses_ops_project_profile_and_defaults(monkeypatch, tmp_path):
+    """Ops project chat creation must not inherit stale browser profile/model state."""
+    from types import SimpleNamespace
+
+    import api.ops_projects as ops_projects
+    import api.ops_sessions as ops_sessions
+    import api.routes as routes
+
+    project = {
+        "id": "ops-project-1",
+        "name": "Hermes WebUI",
+        "path": str(tmp_path),
+        "resolvedPath": str(tmp_path),
+        "profile": "project-profile",
+    }
+    body = {
+        "workspace": str(tmp_path),
+        "ops_project_id": "ops-project-1",
+        "profile": "wrong-browser-profile",
+        "model": "stale-browser-model",
+        "model_provider": "openai-codex",
+    }
+    created = {}
+
+    class CreatedSession:
+        messages = []
+
+        def __init__(self, *, workspace=None, model=None, model_provider=None, profile=None, project_id=None, worktree_info=None):
+            self.workspace = workspace
+            self.model = model
+            self.model_provider = model_provider
+            self.profile = profile
+            self.project_id = project_id
+            self.worktree_info = worktree_info
+
+        def compact(self):
+            return {
+                "session_id": "session-new-ops",
+                "profile": self.profile,
+                "project_id": self.project_id,
+                "model": self.model,
+                "model_provider": self.model_provider,
+            }
+
+    def fake_new_session(**kwargs):
+        created.update(kwargs)
+        return CreatedSession(**kwargs)
+
+    monkeypatch.setattr(routes, "_check_csrf", lambda handler: True)
+    monkeypatch.setattr(routes, "read_body", lambda handler: body)
+    monkeypatch.setattr(routes, "resolve_trusted_workspace", lambda path: tmp_path)
+    monkeypatch.setattr(routes, "_session_model_state_from_request", lambda model, provider: (model, provider))
+    monkeypatch.setattr(routes, "load_projects", lambda: [])
+    monkeypatch.setattr(routes, "new_session", fake_new_session)
+    monkeypatch.setattr(routes, "j", lambda handler, payload, status=200, **kwargs: payload)
+    monkeypatch.setattr(ops_projects, "get_ops_project", lambda project_id: project if project_id == "ops-project-1" else None)
+    monkeypatch.setattr(ops_sessions, "project_session_defaults", lambda project: ("project-default-model", "project-provider"))
+
+    result = routes.handle_post(object(), SimpleNamespace(path="/api/session/new", query=""))
+
+    assert created["profile"] == "project-profile"
+    assert created["project_id"] == "ops-project-1"
+    assert created["model"] == "project-default-model"
+    assert created["model_provider"] == "project-provider"
+    assert isinstance(result, dict)
+    assert result["session"]["profile"] == "project-profile"
 
 
 def test_chat_start_rejects_invalid_request_profile(monkeypatch):

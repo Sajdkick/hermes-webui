@@ -12,11 +12,6 @@ def _patch_run_context(monkeypatch, tmp_path):
     monkeypatch.setattr(ops_runs, "_session_summary", lambda _session_id: None)
     monkeypatch.setattr(ops_runs.session_sidecars, "resolve_session_id", lambda session_id: None)
     monkeypatch.setattr(
-        ops_runs.session_readable_output,
-        "get_session_readable_output",
-        lambda _session_id: (_ for _ in ()).throw(ops_runs.session_readable_output.SessionReadableOutputError("missing", 404)),
-    )
-    monkeypatch.setattr(
         ops_runs.ops_projects,
         "get_ops_project",
         lambda project_id: {"id": project_id, "name": "Demo", "path": "/tmp/demo", "coreBranch": "main"},
@@ -742,7 +737,6 @@ def test_pending_notifications_do_not_start_play_or_complete_linked_session(monk
         },
     )
     monkeypatch.setattr(ops_runs, "_run_requests_for_session", lambda _session_id: [])
-    monkeypatch.setattr(ops_runs, "_readable_output_state", lambda _session_id: {"available": False})
     monkeypatch.setattr(
         ops_notifications.ops_projects,
         "get_ops_project",

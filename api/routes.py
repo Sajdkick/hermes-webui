@@ -2216,6 +2216,40 @@ from api.models import (
     ensure_cron_project,
     is_cron_session,
 )
+from api import session_sidecars
+
+
+def _session_lineage_resolution_enabled(query: dict) -> bool:
+    """Return whether a session-open request should follow lineage aliases.
+
+    Normal chat opens, project/task resume links, and /session/<id> URLs should
+    land on the current lineage tip. Sidebar segment inspection passes
+    ``resolve_lineage=0`` so an intentionally selected historical segment stays
+    exact.
+    """
+
+    raw = str((query or {}).get("resolve_lineage", ["1"])[0] or "").strip().lower()
+    return raw not in {"0", "false", "no", "off", "exact"}
+
+
+def _resolve_session_lineage_open_id(session_id: str) -> str:
+    """Resolve a durable session alias to the current lineage tip.
+
+    The resolver only understands WebUI-style session ids and sidecar lineage
+    metadata. Fail open for CLI/imported ids or corrupt linkage data so the
+    legacy exact-session path keeps working.
+    """
+
+    sid = str(session_id or "").strip()
+    if not sid:
+        return sid
+    try:
+        return session_sidecars.resolve_session_id(sid) or sid
+    except Exception:
+        logger.debug("Failed to resolve session lineage alias for %s", sid, exc_info=True)
+        return sid
+
+
 from api.workspace import (
     load_workspaces,
     save_workspaces,
@@ -3706,6 +3740,8 @@ def handle_get(handler, parsed) -> bool:
         sid = query.get("session_id", [""])[0]
         if not sid:
             return j(handler, {"error": "session_id is required"}, status=400)
+        if _session_lineage_resolution_enabled(query):
+            sid = _resolve_session_lineage_open_id(sid)
         # ?messages=0 skips the message payload for fast session switching.
         # The frontend uses this when switching conversations in the sidebar
         # (only needs metadata). The full message array is loaded lazily
@@ -3924,9 +3960,12 @@ def handle_get(handler, parsed) -> bool:
         return j(handler, audit_session_recovery(SESSION_DIR, state_db_path=_active_state_db_path()))
 
     if parsed.path == "/api/session/status":
-        sid = parse_qs(parsed.query).get("session_id", [""])[0]
+        query = parse_qs(parsed.query)
+        sid = query.get("session_id", [""])[0]
         if not sid:
             return bad(handler, "Missing session_id")
+        if _session_lineage_resolution_enabled(query):
+            sid = _resolve_session_lineage_open_id(sid)
         try:
             from api.session_ops import session_status
             _clear_stale_stream_state(get_session(sid, metadata_only=True))
@@ -3941,9 +3980,12 @@ def handle_get(handler, parsed) -> bool:
         return j(handler, {"yolo_enabled": is_session_yolo_enabled(sid)})
 
     if parsed.path == "/api/session/usage":
-        sid = parse_qs(parsed.query).get("session_id", [""])[0]
+        query = parse_qs(parsed.query)
+        sid = query.get("session_id", [""])[0]
         if not sid:
             return bad(handler, "Missing session_id")
+        if _session_lineage_resolution_enabled(query):
+            sid = _resolve_session_lineage_open_id(sid)
         try:
             from api.session_ops import session_usage
             return j(handler, session_usage(sid))
@@ -3951,9 +3993,12 @@ def handle_get(handler, parsed) -> bool:
             return bad(handler, "Session not found", 404)
 
     if parsed.path == "/api/background/status":
-        sid = parse_qs(parsed.query).get("session_id", [""])[0]
+        query = parse_qs(parsed.query)
+        sid = query.get("session_id", [""])[0]
         if not sid:
             return bad(handler, "Missing session_id")
+        if _session_lineage_resolution_enabled(query):
+            sid = _resolve_session_lineage_open_id(sid)
         from api.background import get_results
         return j(handler, {"results": get_results(sid)})
 
@@ -4667,10 +4712,18 @@ def handle_post(handler, parsed) -> bool:
             except Exception:
                 logger.debug("Lifecycle commit for prev_session %s failed", prev_session_id, exc_info=True)
         requested_profile = body.get("profile") or None
-        project_id = body.get("project_id") or None
+        raw_project_id = body.get("project_id") or body.get("ops_project_id") or body.get("projectId") or None
+        project_id = str(raw_project_id).strip() or None
         profile = requested_profile
         if project_id:
-            target_project = next((p for p in load_projects() if p.get("project_id") == project_id), None)
+            target_project = next(
+                (
+                    p
+                    for p in load_projects()
+                    if str(p.get("project_id") or p.get("id") or "").strip() == project_id
+                ),
+                None,
+            )
             if target_project:
                 project_profile = str(target_project.get("profile") or "").strip() or "default"
                 if requested_profile and not _profiles_match(project_profile, requested_profile):
@@ -4681,6 +4734,32 @@ def handle_post(handler, parsed) -> bool:
                         project_profile,
                     )
                 profile = project_profile
+            else:
+                ops_project = None
+                ops_sessions_mod = None
+                try:
+                    from api import ops_projects as _ops_projects
+                    from api import ops_sessions as ops_sessions_mod
+
+                    ops_project = _ops_projects.get_ops_project(project_id)
+                except Exception:
+                    ops_project = None
+                if ops_project and ops_sessions_mod:
+                    project_profile = ops_sessions_mod.project_profile(ops_project) or "default"
+                    if requested_profile and not _profiles_match(project_profile, requested_profile):
+                        logger.info(
+                            "Ignoring session-new request profile %r for Ops project %s; using project profile %r",
+                            requested_profile,
+                            project_id,
+                            project_profile,
+                        )
+                    if body.get("model") or body.get("model_provider"):
+                        logger.info(
+                            "Ignoring session-new request model/provider for Ops project %s; using project/profile launch defaults",
+                            project_id,
+                        )
+                    profile = project_profile
+                    model, model_provider = ops_sessions_mod.project_session_defaults(ops_project)
         s = new_session(
             workspace=workspace,
             model=model,
@@ -8218,12 +8297,19 @@ def _handle_chat_start(handler, body, diag=None):
             workspace = _resolve_chat_workspace_with_recovery(s, body.get("workspace"))
         except ValueError as e:
             return bad(handler, str(e))
-        requested_model = body.get("model") or s.model
-        requested_provider = (
-            body.get("model_provider")
-            if "model_provider" in body
-            else getattr(s, "model_provider", None)
-        )
+        if _session_profile_retag_locked(s):
+            # Project/Ops/worktree sessions are created with authoritative
+            # profile-owned model/provider state.  Do not let a stale browser
+            # selection in /api/chat/start overwrite those launch defaults.
+            requested_model = s.model
+            requested_provider = getattr(s, "model_provider", None)
+        else:
+            requested_model = body.get("model") or s.model
+            requested_provider = (
+                body.get("model_provider")
+                if "model_provider" in body
+                else getattr(s, "model_provider", None)
+            )
         diag.stage("resolve_model_provider") if diag else None
         model, model_provider, normalized_model = _resolve_compatible_session_model_state(
             requested_model,

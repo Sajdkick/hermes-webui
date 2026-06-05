@@ -42,7 +42,6 @@
     const SRef=ctx&&ctx.SRef;
     const addFiles=ctx&&ctx.addFiles;
     const renderTray=ctx&&ctx.renderTray;
-    const clearSessionReadableOutput=ctx&&ctx.clearSessionReadableOutput;
     const clearPersistedSessionId=ctx&&ctx.clearPersistedSessionId;
     const sendTurn=ctx&&ctx.sendTurn;
     const autoResize=ctx&&ctx.autoResize;
@@ -427,9 +426,7 @@
     function currentOpsProfile(project){
       const projectProfile=String(project&&project.profile||'').trim();
       if(projectProfile)return projectProfile;
-      const state=stateRef();
-      const activeProfile=String(state&&state.activeProfile||'').trim();
-      return activeProfile||'default';
+      return 'default';
     }
 
     function setActiveProfileForOpsSession(profile){
@@ -465,13 +462,11 @@
       const project=projectOverride||OPS.currentProject;
       if(!project)return;
       await api(projectUrl(project.id,'/ensure-workspace'),{method:'POST',body:JSON.stringify({})});
-      const modelState=currentOpsModelState();
-      const state=stateRef();
       const payload={
         workspace:projectPath(project),
-        model:modelState.model||undefined,
-        model_provider:modelState.model_provider||null,
         ops_project_id:project.id,
+        project_id:project.id,
+        projectId:project.id,
         profile:currentOpsProfile(project),
       };
       const data=await AgentBridgeRef.sessions.create(payload);
@@ -505,7 +500,6 @@
       state.messages=[];
       state.entries=[];
       if('activeStreamId' in state)state.activeStreamId='';
-      if(typeof clearSessionReadableOutput==='function')clearSessionReadableOutput();
       if(typeof clearPersistedSessionId==='function')clearPersistedSessionId();
       else try{windowRef.localStorage.removeItem('hermes-webui-session');}catch(_){}
       let remaining={sessions:[]};
@@ -678,12 +672,9 @@
       const opts=options&&typeof options==='object'?options:{};
       const {epic,task}=match;
       await api(projectUrl(project.id,'/ensure-workspace'),{method:'POST',body:JSON.stringify({})});
-      const modelState=currentOpsModelState();
       const forceNewSession=opts.forceNewSession===true||opts.forceNew===true||opts.skipExistingLookup===true;
       const payload={
         workspace:projectPath(project),
-        model:modelState.model||undefined,
-        model_provider:modelState.model_provider||null,
         profile:currentOpsProfile(project),
         title:task.text.slice(0,80)||'Project task',
       };
@@ -921,7 +912,6 @@
         }
         const match={epic,task:created.task};
         rememberProjectTask(project.id,epic,created.task);
-        const pendingQuickTaskFiles=pendingQuickTaskImages.map(entry=>entry&&entry.file).filter(Boolean);
         OPS.quickTaskText='';
         clearQuickTaskImages();
         if(!shouldRun){
@@ -934,7 +924,7 @@
         OPS.quickTaskStatusKind='info';
         if(windowRef&&windowRef._opsDashboardOpen&&OPS.view==='home')renderHome();
         try{
-          await executeTaskMatch(project,match,{files:pendingQuickTaskFiles,goalMode,openInspectAfterStart:true,forceNewSession:true});
+          await executeTaskMatch(project,match,{goalMode,openInspectAfterStart:true,forceNewSession:true});
           OPS.quickTaskStatus=goalMode?'Quick task created and goal started.':'Quick task created and execution started.';
           OPS.quickTaskStatusKind='success';
         }catch(execErr){

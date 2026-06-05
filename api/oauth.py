@@ -153,9 +153,10 @@ def _read_auth_json(auth_path: Path | None = None) -> dict[str, Any]:
     return {}
 
 
-def read_auth_json():
+def read_auth_json(hermes_home: str | Path | None = None):
     """Public wrapper for streaming credential self-heal code."""
-    return _read_auth_json()
+    auth_path = Path(hermes_home) / "auth.json" if hermes_home is not None else None
+    return _read_auth_json(auth_path)
 
 
 def _write_auth_json(data: dict[str, Any], auth_path: Path | None = None) -> Path:
@@ -301,7 +302,7 @@ def _is_named_profile_home(hermes_home: Path) -> bool:
     return home.parent.name == "profiles"
 
 
-def _codex_error_allows_root_repair(exc: Exception) -> bool:
+def _codex_error_allows_root_repair(exc: Exception | str) -> bool:
     text = str(exc or "").lower()
     if any(marker in text for marker in ("rate limit", "usage", "quota", "plan limit", "429")):
         return False
@@ -322,7 +323,7 @@ def _codex_error_allows_root_repair(exc: Exception) -> bool:
 
 def _repair_profile_codex_credentials_from_root(
     provider: str,
-    exc: Exception,
+    exc: Exception | str,
     *,
     hermes_home: str | Path | None = None,
 ) -> bool:
@@ -413,6 +414,33 @@ def _prime_runtime_oauth_state(provider: str, *, hermes_home: str | Path | None 
     if normalized != "openai-codex":
         return
     _sync_codex_provider_state_from_pool(Path(hermes_home) if hermes_home else _get_active_hermes_home())
+
+
+def repair_runtime_oauth_state_after_auth_failure(
+    provider: str,
+    exc: Exception | str,
+    *,
+    hermes_home: str | Path | None = None,
+) -> bool:
+    """Repair runtime OAuth state after a provider-call auth failure.
+
+    ``resolve_runtime_provider_with_anthropic_env_lock`` can repair named
+    profile Codex credentials when *resolution* fails.  Some stale Codex tokens
+    resolve successfully and only fail later when the provider API returns a
+    401/token_expired response.  Streaming self-heal calls this helper with the
+    actual provider-call failure so the same root-profile repair can run before
+    the one retry.
+    """
+    normalized = _normalize_onboarding_oauth_provider(provider)
+    if normalized != "openai-codex":
+        return False
+    if not _repair_profile_codex_credentials_from_root(normalized, exc, hermes_home=hermes_home):
+        return False
+    try:
+        _prime_runtime_oauth_state(normalized, hermes_home=hermes_home)
+    except Exception:
+        logger.debug("Failed to prime Codex OAuth state after profile repair", exc_info=True)
+    return True
 
 
 def _persist_codex_credentials(hermes_home: Path, token_data: dict[str, Any]) -> Path:

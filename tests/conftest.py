@@ -120,26 +120,9 @@ VENV_PYTHON  = _discover_python(HERMES_AGENT)
 # Work dir: agent dir if found, else repo root
 WORKDIR = str(HERMES_AGENT) if HERMES_AGENT else str(REPO_ROOT)
 
-# Some hermes-agent startup/profile-sync paths inspect repository-owned shared
-# skills while the isolated test server starts. They must not leave the working
-# tree's fixture copy changed before source-level tests assert its contents.
-# Snapshot these narrow fixtures at collection time and restore them after the
-# test server is ready; if the checked-in file itself is stale, tests still fail.
-_REPO_AGENT_SKILL_FIXTURE_FILES = (
-    REPO_ROOT / '.agents' / 'skills' / 'cloud-terminal-readable-output' / 'SKILL.md',
-    REPO_ROOT / '.agents' / 'skills' / 'cloud-terminal-readable-output' / 'agents' / 'openai.yaml',
-)
-_REPO_AGENT_SKILL_FIXTURE_SNAPSHOT = {
-    path: path.read_bytes()
-    for path in _REPO_AGENT_SKILL_FIXTURE_FILES
-    if path.exists()
-}
-
-
 def _restore_repo_agent_skill_fixtures():
-    for path, data in _REPO_AGENT_SKILL_FIXTURE_SNAPSHOT.items():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+    """Compatibility hook; no repository-owned skill fixtures need restoration."""
+    return None
 
 # ── Agent availability detection ─────────────────────────────────────────────
 # Tests that require hermes-agent modules (cron, skills, approval, chat/stream)
@@ -616,12 +599,7 @@ def test_server():
 
 @pytest.fixture(scope="session", autouse=True)
 def _restore_repo_agent_skill_fixtures_after_test_server_start(test_server):
-    """Keep repository-owned shared skill fixtures stable during pytest.
-
-    The session test server may initialize hermes-agent/profile skill caches as
-    it starts. Restore the repo-local readable-output fixture after startup so
-    source-level tests validate the current checkout, not transient sync output.
-    """
+    """Compatibility hook for older shared-skill fixture restoration paths."""
     _restore_repo_agent_skill_fixtures()
     yield
     _restore_repo_agent_skill_fixtures()
@@ -646,9 +624,7 @@ def _invalidate_models_cache_after_test():
 
     This prevents state bleed where a test that calls get_available_models()
     populates the cache with a particular config, and the next test sees stale
-    results even though it has mutated _cfg_cache in-memory. It also keeps the
-    repo-local shared-skill fixture stable when profile/cron tests patch Hermes
-    skill-home module globals.
+    results even though it has mutated _cfg_cache in-memory.
     """
     _restore_repo_agent_skill_fixtures()
     try:

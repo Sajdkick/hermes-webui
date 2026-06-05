@@ -557,14 +557,6 @@
       openGatewayStream(){
         return new EventSource('api/sessions/gateway/stream');
       },
-      async readableOutput(sessionId, entryId=''){
-        const resolvedId=await resolveBridgeSessionId(sessionId);
-        const normalizedEntryId=String(entryId||'').trim();
-        const path=normalizedEntryId
-          ? `/api/sessions/${encodeURIComponent(resolvedId)}/readable-output/entries/${encodeURIComponent(normalizedEntryId)}`
-          : `/api/sessions/${encodeURIComponent(resolvedId)}/readable-output`;
-        return api(path);
-      },
       async approvalPending(sessionId){
         const resolvedId=await resolveBridgeSessionId(sessionId);
         return api(`/api/approval/pending${q({session_id:resolvedId})}`);
@@ -689,9 +681,6 @@
       },
       respondRequest(runId,requestId,payload){
         return api(`/api/ops/runs/${encodeURIComponent(runId)}/requests/${encodeURIComponent(requestId)}/respond`,{method:'POST',body:JSON.stringify(payload||{})});
-      },
-      readableOutput(runId){
-        return api(`/api/ops/runs/${encodeURIComponent(runId)}/readable-output`);
       },
       artifacts(runId,params={}){
         return api(`/api/ops/runs/${encodeURIComponent(runId)}/artifacts${q(params)}`);

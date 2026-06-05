@@ -169,7 +169,6 @@ def test_ops_open_session_forces_reload_to_avoid_stale_active_session_state():
             SRef: () => ({ session: { session_id: 'target-session' }, messages: [{ role: 'assistant', content: 'stale' }], entries: [] }),
             addFiles: () => {},
             renderTray: () => {},
-            clearSessionReadableOutput: () => {},
             clearPersistedSessionId: () => {},
             sendTurn: async () => {},
             autoResize: () => {},

@@ -1901,7 +1901,6 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
           });
           if(typeof updateQueueBadge==='function')updateQueueBadge(_goalNext.sid);
         }
-        if(typeof loadSessionReadableOutput==='function') loadSessionReadableOutput(completedSid).catch(()=>{});
         if(isActiveSession) _queueDrainSid=activeSid;
         renderSessionList();
         _setActivePaneIdleIfOwner();

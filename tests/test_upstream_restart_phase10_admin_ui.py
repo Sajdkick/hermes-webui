@@ -156,6 +156,136 @@ def test_phase10_ops_ui_renders_admin_panels():
     assert completed.stdout.strip() == "ok"
 
 
+def test_phase10_github_import_prompts_for_branch_and_posts_create_missing_payload():
+    script = textwrap.dedent(
+        """
+        (async () => {
+        const fs = require('fs');
+        const vm = require('vm');
+
+        class Root {
+          constructor(){
+            this.innerHTML = '';
+            this.listeners = {};
+          }
+          addEventListener(name, handler){
+            this.listeners[name] = handler;
+          }
+          querySelector(){
+            return null;
+          }
+          querySelectorAll(){
+            return [];
+          }
+        }
+
+        function HTMLFormElement(){}
+        function HTMLElement(){}
+        function HTMLInputElement(){}
+
+        const importBodies = [];
+        const promptCalls = [];
+        const githubSource = fs.readFileSync('static/ops-github-admin.js', 'utf8');
+        const projectsSource = fs.readFileSync('static/ops-projects.js', 'utf8');
+        const fetch = async (path, options = {}) => {
+          if (path === '/api/ops/notifications/pending'){
+            return { ok: true, json: async () => ({ count: 0, notifications: [] }) };
+          }
+          if (path === '/api/ops/github/status'){
+            return { ok: true, json: async () => ({ authenticated: true, user: { login: 'octo' } }) };
+          }
+          if (path === '/api/ops/github/import'){
+            importBodies.push(JSON.parse(options.body || '{}'));
+            return {
+              ok: true,
+              json: async () => ({ ok: true, imported: true, repo: 'repo', targetPath: '/tmp/repo', project: { id: 'p1', name: 'repo' } })
+            };
+          }
+          if (path === '/api/ops/projects'){
+            return { ok: true, json: async () => ({ projects: [] }) };
+          }
+          throw new Error('Unexpected fetch path: ' + path);
+        };
+
+        const context = {
+          console,
+          window: {
+            prompt(message, defaultValue){
+              promptCalls.push({ message, defaultValue });
+              return 'feature/new-project';
+            },
+          },
+          fetch,
+          HTMLFormElement,
+          HTMLElement,
+          HTMLInputElement,
+          setTimeout,
+          clearTimeout,
+        };
+        vm.createContext(context);
+        vm.runInContext(githubSource, context);
+        vm.runInContext(projectsSource, context);
+
+        const root = new Root();
+        context.window.HermesOpsProjects.mount(root, {
+          phase: 'phase-10',
+          route: '/ops',
+          apiBase: '/api/ops',
+          version: 'test-version',
+        });
+
+        const attrs = {
+          'data-ops-action': 'github-import-repo',
+          'data-owner': 'acme',
+          'data-repo': 'repo',
+          'data-branch': 'main',
+          'data-default-branch': 'main',
+          'data-project-name': 'repo',
+        };
+        const action = { getAttribute(name){ return attrs[name] || ''; } };
+        root.listeners.click({ target: { closest(){ return action; } } });
+        for (let index = 0; index < 5; index += 1){
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+
+        if (promptCalls.length !== 1){
+          throw new Error('Expected one branch prompt, got ' + promptCalls.length);
+        }
+        if (promptCalls[0].defaultValue !== 'main'){
+          throw new Error('Expected prompt default branch main, got ' + promptCalls[0].defaultValue);
+        }
+        if (!promptCalls[0].message.includes('acme/repo')){
+          throw new Error('Prompt message did not include repo name: ' + promptCalls[0].message);
+        }
+        if (importBodies.length !== 1){
+          throw new Error('Expected one import request, got ' + importBodies.length);
+        }
+        const body = importBodies[0];
+        if (body.branch !== 'feature/new-project'){
+          throw new Error('Import body branch mismatch: ' + body.branch);
+        }
+        if (body.defaultBranch !== 'main' || body.baseBranch !== 'main'){
+          throw new Error('Import body base branch mismatch: ' + JSON.stringify(body));
+        }
+        if (body.createMissingBranch !== true || body.createMissingCoreBranch !== true){
+          throw new Error('Import body did not request missing branch creation: ' + JSON.stringify(body));
+        }
+        console.log('ok');
+        })().catch((error) => {
+          console.error(error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
 def test_main_shell_exposes_ops_navigation_entry():
     html = Path("static/index.html").read_text(encoding="utf-8")
     js = Path("static/panels.js").read_text(encoding="utf-8")

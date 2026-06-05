@@ -294,7 +294,7 @@ def test_execute_project_push_ignores_cloud_terminal_artifacts_during_auto_commi
     _git(repo, "push", "-u", "origin", "main")
 
     (repo / "README.md").write_text("initial\nlocal change\n", encoding="utf-8")
-    artifact_path = repo / ".cloud-terminal" / "readable-output" / "session-1"
+    artifact_path = repo / ".cloud-terminal" / "runtime-artifacts" / "session-1"
     artifact_path.mkdir(parents=True, exist_ok=True)
     (artifact_path / "message.md").write_text("runtime note\n", encoding="utf-8")
 
@@ -311,7 +311,7 @@ def test_execute_project_push_ignores_cloud_terminal_artifacts_during_auto_commi
     assert "Committed local changes." in operation["summary"]
     assert _git(repo, "log", "-1", "--format=%s") == "Auto commit without runtime artifacts"
     assert "README.md" in _git(repo, "show", "--name-only", "--format=", "HEAD").splitlines()
-    assert ".cloud-terminal/readable-output/session-1/message.md" not in _git(
+    assert ".cloud-terminal/runtime-artifacts/session-1/message.md" not in _git(
         repo,
         "show",
         "--name-only",
@@ -332,7 +332,7 @@ def test_get_project_git_status_ignores_cloud_terminal_runtime_artifacts(monkeyp
     _git(repo, "add", "README.md")
     _git(repo, "commit", "-m", "initial")
 
-    artifact_path = repo / ".cloud-terminal" / "readable-output" / "session-1"
+    artifact_path = repo / ".cloud-terminal" / "runtime-artifacts" / "session-1"
     artifact_path.mkdir(parents=True, exist_ok=True)
     (artifact_path / "message.md").write_text("runtime note\n", encoding="utf-8")
 

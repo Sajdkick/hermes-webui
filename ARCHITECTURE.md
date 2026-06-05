@@ -143,12 +143,6 @@ Per-request environment variables (set by chat handler, restored after):
                          by this value, enabling per-session approval state.
     HERMES_HOME          Set to the active profile's directory before running agent.
                          Saved and restored around each agent run.
-    HERMES_READABLE_OUTPUT_PATH
-    HERMES_READABLE_OUTPUT_DIR
-    HERMES_READABLE_OUTPUT_ASSET_DIR
-                         Session-scoped Markdown report + asset paths consumed by the
-                         readable-output skill. CLOUD_TERMINAL_READABLE_OUTPUT_* aliases
-                         point to the same paths for compatibility.
 
 WARNING: These env vars are process-global. Two concurrent chat requests will clobber
 each other. This is safe only for single-user, single-concurrent-request use.
@@ -184,7 +178,7 @@ Core runtime boundary:
     domain facades. This is the shell-neutral boundary for project registry,
     safe project files, tasks, Play lifecycle, deployments/providers/artifacts,
     database inspection, Git/GitHub controls, runtime gather/inspect tools,
-    host/proxy descriptors, session activity, and readable output. Ops routes
+    host/proxy descriptors and session activity. Ops routes
     may remain as compatibility wrappers, but new shared runtime consumers should
     prefer /api/core and follow docs/core-api-contract.md. Keep shell-specific
     navigation, copy, and dashboard rendering out of core modules.

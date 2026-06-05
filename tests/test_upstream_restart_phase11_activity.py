@@ -57,9 +57,6 @@ def test_phase11_session_activity_routes_support_groups_and_lineage_assignments(
                     "updated_at": "2026-05-05T12:00:00Z",
                     "ops_run": {
                         "status": "running",
-                        "readableOutput": {
-                            "available": False,
-                        },
                     },
                 }
             ]
@@ -151,14 +148,23 @@ def test_phase11_session_activity_keeps_open_task_sessions_visible_after_run_qui
                     },
                     "ops_run": {
                         "status": "succeeded",
-                        "readableOutput": {
-                            "available": True,
-                            "updatedAt": "2026-05-05T18:01:00Z",
-                        },
                     },
                 }
             ]
         },
+    )
+
+    monkeypatch.setattr(
+        session_activity,
+        "all_sessions",
+        lambda: [
+            {
+                "session_id": "task-session-1",
+                "_lineage_root_id": "task-session-1",
+                "_lineage_tip_id": "task-session-1",
+                "parent_session_id": "",
+            }
+        ],
     )
 
     grouped = _FakeHandler()
@@ -169,7 +175,6 @@ def test_phase11_session_activity_keeps_open_task_sessions_visible_after_run_qui
     assert payload["sessionCount"] == 1
     assert payload["sessions"][0]["id"] == "task-session-1"
     assert payload["sessions"][0]["activityStatus"]["key"] == "done"
-    assert payload["sessions"][0]["readableOutputPending"] is True
 
 
 def test_phase11_home_session_activity_overview_matches_cloud_terminal_shape():
@@ -208,7 +213,6 @@ def test_phase11_home_session_activity_overview_matches_cloud_terminal_shape():
                   label: 'Fix parity',
                   repoLabel: 'Sajdkick/hermes-webui',
                   groupId: 'group-1',
-                  readableOutputPending: true,
                   activityStatus: {
                     key: 'approval',
                     toneClass: 'approval',
@@ -298,7 +302,6 @@ def test_phase11_home_session_activity_overview_matches_cloud_terminal_shape():
           if (!html.includes('menu-session-activity-status active') || !html.includes('Session status: Working')) throw new Error('Missing compact working status badge.');
           if (!html.includes('menu-session-activity-group')) throw new Error('Missing Cloud Terminal session activity groups.');
           if (!html.includes('data-ops-session-group-select="true"')) throw new Error('Missing group assignment select.');
-          if (!html.includes('Unread output')) throw new Error('Missing readable-output badge.');
           if (!html.includes('Ungrouped')) throw new Error('Missing ungrouped bucket.');
           if (!html.includes('collapsed')) throw new Error('Groups should default to collapsed like Cloud Terminal.');
           if (html.includes('ops-home-project-list')) throw new Error('Old project-grouped home overview is still being rendered.');
@@ -1160,7 +1163,6 @@ def test_phase11_quick_task_screenshots_persist_and_reach_started_session():
             SRef: () => state,
             addFiles: (files) => { addFilesCount += files.length; },
             renderTray: () => {},
-            clearSessionReadableOutput: () => {},
             clearPersistedSessionId: () => {},
             sendTurn: async () => { sentPrompt = msg.value; },
             autoResize: () => {},
@@ -1176,7 +1178,8 @@ def test_phase11_quick_task_screenshots_persist_and_reach_started_session():
           if (uploadBody.filename !== 'shot.png' || !String(uploadBody.content || '').startsWith('data:image/png;base64,')) {
             throw new Error('Screenshot upload did not include the selected image file.');
           }
-          if (addFilesCount !== 1) throw new Error('Expected raw screenshot file to remain forwarded to composer upload.');
+          if (addFilesCount !== 0) throw new Error('Persisted task screenshots should not be forwarded again as raw composer uploads.');
+          if (state.pendingFiles.length !== 0) throw new Error('Quick task image handoff should not leave raw pending files in the session composer.');
           if (!sentPrompt.includes('Attached task screenshots/images:') || !sentPrompt.includes(savedImagePath)) {
             throw new Error('Started quick task prompt did not include saved task screenshot path: ' + sentPrompt);
           }
@@ -1989,7 +1992,6 @@ def test_phase11_project_runs_match_cloud_terminal_card_shape():
                 metadata: { command: 'git push origin master' },
                 updated_at: 1746400800,
               }],
-              runReadableOutput: { exists: false },
               runArtifacts: [],
               runLogs: [],
               runEvents: [],
@@ -2438,7 +2440,6 @@ def test_phase11_ops_active_session_click_loads_target_before_closing_dashboard(
             SRef: () => ({ session: { session_id: 'current-session' }, messages: [], entries: [] }),
             addFiles: () => {},
             renderTray: () => {},
-            clearSessionReadableOutput: () => {},
             clearPersistedSessionId: () => {},
             sendTurn: async () => {},
             autoResize: () => {},
@@ -2522,7 +2523,6 @@ def test_phase11_open_ops_session_enters_simplified_inspect_mode_after_dashboard
             SRef: () => ({ session: { session_id: 'current-session' }, messages: [], entries: [] }),
             addFiles: () => {},
             renderTray: () => {},
-            clearSessionReadableOutput: () => {},
             clearPersistedSessionId: () => {},
             sendTurn: async () => {},
             autoResize: () => {},
@@ -2620,7 +2620,6 @@ def test_phase11_ops_task_execution_selects_project_profile_before_sending_turn(
             SRef: () => state,
             addFiles: () => {},
             renderTray: () => {},
-            clearSessionReadableOutput: () => {},
             clearPersistedSessionId: () => {},
             sendTurn: async () => { calls.push(`send-profile:${state.activeProfile}`); },
             autoResize: () => {},

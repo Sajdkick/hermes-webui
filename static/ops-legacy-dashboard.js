@@ -6,7 +6,7 @@
   const RUN_ACTIVE_STATUS_VALUES=['queued','starting','running','waiting-input','waiting-approval'];
   const RUN_ATTENTION_STATUS_VALUES=['waiting-input','waiting-approval','failed','stale'];
   const RUN_REQUEST_STATUS_VALUES=['pending','responded','dismissed','resolved','expired'];
-  const RUN_ARTIFACT_TYPE_VALUES=['file','image','screenshot','temp-input','readable-output','log','report','link','other'];
+  const RUN_ARTIFACT_TYPE_VALUES=['file','image','screenshot','temp-input','log','report','link','other'];
   const RUN_LOG_STREAM_VALUES=['stdout','stderr','system','agent','tool','browser','test','other'];
   const RUN_LOG_LEVEL_VALUES=['debug','info','warning','error'];
   const TASK_EXECUTION_PREFACE='Execute on this task from the user';
@@ -98,7 +98,6 @@
     runsByProject:{},
     selectedRunId:'',
     runDetail:null,
-    runReadableOutput:null,
     runEvents:null,
     runRequests:null,
     runArtifacts:null,
@@ -753,7 +752,6 @@
       SRef:()=>typeof S!=='undefined'?S:null,
       addFiles:typeof addFiles==='function'?addFiles:null,
       renderTray:typeof renderTray==='function'?renderTray:null,
-      clearSessionReadableOutput:typeof clearSessionReadableOutput==='function'?clearSessionReadableOutput:null,
       clearPersistedSessionId:typeof clearPersistedSessionId==='function'?clearPersistedSessionId:null,
       sendTurn:typeof send==='function'?send:null,
       autoResize:typeof autoResize==='function'?autoResize:null,

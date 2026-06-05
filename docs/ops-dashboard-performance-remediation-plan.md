@@ -223,7 +223,7 @@ Acceptance criteria:
 
 Current issue:
 
-`ops_runs.list_ops_runs()` enriches every run as though the caller opened a detail view. This includes session summaries, pending requests, readable output state, task context, and Play handoff metadata.
+`ops_runs.list_ops_runs()` enriches every run as though the caller opened a detail view. This includes session summaries, pending requests, task context, and Play handoff metadata.
 
 Plan:
 
@@ -243,7 +243,6 @@ Plan:
   - `completedAt`;
   - minimal `metadata` needed for badges.
 - [ ] Summary rows must not:
-  - resolve readable output;
   - inspect full task context;
   - scan all sidecars per row;
   - trigger Play handoff;
@@ -268,7 +267,7 @@ Plan:
   - `GET /api/ops/runs/{runId}`;
   - optionally `GET /api/core/runs/{runId}`.
 - [ ] Make detail endpoint accept optional sections if useful:
-  - `?include=readable_output,requests,task,play`.
+  - `?include=requests,task,play`.
 
 Acceptance criteria:
 

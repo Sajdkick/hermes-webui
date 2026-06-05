@@ -4,13 +4,14 @@
 
 ### Added
 
-- Hermes WebUI now exposes a documented in-process Core API under `/api/core`, including capabilities/health discovery and shell-neutral facades for projects, deployments, database, Git/GitHub, runtime gather/inspect tools, host descriptors, tasks, and session readable-output/activity data.
+- Hermes WebUI now exposes a documented in-process Core API under `/api/core`, including capabilities/health discovery and shell-neutral facades for projects, deployments, database, Git/GitHub, runtime gather/inspect tools, host descriptors, tasks, and session activity data.
 - Ops dashboard Deployments now includes a first-class **Redeploy** action for existing Cloud Terminal deployment records; Core redeploy/update routes preserve the deployment's current database mode and data, show immediate in-panel progress while the build is running, preserve previous hashed browser assets during snapshot promotion, and `local-legacy` deployments are rebuilt/promoted directly by Core without requiring Cloud Terminal session authentication.
 - Hermes WebUI now includes a native gather-report helper (`scripts/hermes-gather.py` plus `/api/gather/<id>/events`) for temporary instrumentation workflows where agents ask users to reproduce a browser/runtime issue and then inspect captured structured events directly.
 - The workspace file panel now accepts local file/folder drops, uploading files into the dropped-on directory (or current workspace directory) while preserving nested subfolders and showing per-file upload progress.
 
 ### Changed
 
+- GitHub imports in the Ops create-project flow now prompt for a branch name before importing; if the requested branch is missing, Hermes creates it from the repository default branch and pushes the new branch to `origin` before registering the project.
 - Ops dashboard deployment data now loads provider metadata and project deployment state through Core API routes, while legacy Ops deployment routes remain compatibility wrappers.
 - Hermes Ops Play calls now route through a documented `api.core_play` boundary before reaching the existing Play pipeline implementation, preserving the current HTTP route shapes while creating a stable seam for future core-runtime extraction.
 - Ops Quick Task and Epic task executions now start linked task prompts as standing `/goal` turns by default, including execute-ready batch sessions, so long task queues can continue through goal-mode continuation instead of stopping at the first tool-call ceiling.
@@ -18,10 +19,11 @@
 - Workspace panel file editing now treats the textarea buffer as the save source of truth, keeps newer in-flight edits visible and dirty after a save snapshot completes, and blocks stale preview/close paths from clearing unsaved edits.
 - Hermes WebUI agent runs now register the repository `.agents/skills` directory through each active profile's `skills.external_dirs`, so shared Cloud Terminal-port skills can be discovered across profiles without per-profile copies.
 - Workspace creation from the Spaces panel now asks the server to create missing folders before saving the new workspace, while preserving the existing rejection for missing paths submitted without the explicit create intent.
-- The bundled readable-output skill is now Hermes-native: it tells agents to prefer `HERMES_READABLE_OUTPUT_*` session env vars, keeps legacy Cloud Terminal aliases for compatibility, and includes a direct shell helper for writing Markdown reports.
 
 ### Fixed
 
+- Ops Active Sessions now keeps completed Quick Task/Ops task sessions visible until the user explicitly closes them, while still showing pending Play handoffs as needing attention.
+- Session, project, and activity resume links now resolve stale lineage/root session ids to the current chat tip before loading transcript data, while sidebar lineage segment inspection can still opt into exact historical segments.
 - Ops dashboard Deployments now recognizes existing Cloud Terminal deployment records from `.deployments/deployments.json`, including the deployment slug and database mode, so projects deployed through Cloud Terminal show as deployed in Hermes without rewriting or recreating their databases.
 - Ops dashboard redeploy no longer requires Cloud Terminal session authentication for existing `local-legacy` deployments: Hermes Core runs the project deploy build when available, atomically promotes the local deployment snapshot, keeps previous hashed browser assets available for already-open/cached pages, and leaves the existing deployment database/provider metadata intact; build failures leave the published snapshot and metadata unchanged with a clear error.
 - Native Hermes deployment proxying now treats deployed-app `/api/trpc/*` auth requests as public deployment traffic when they carry `/deploy/<slug>` referer/cookie context, routes those POSTs before WebUI CSRF/body parsing, and forwards the raw tRPC body to the deployment runtime so debug empty login and signup no longer fall through to WebUI `not found`.
@@ -38,7 +40,7 @@
 - Play notification inspection now sends the current resolved/tip Hermes session id into the Play pipeline and injected session overlay, so the popup opens the session that triggered the notification instead of a stale root session.
 - Play notification inspection now reopens the linked Hermes session popup on every Play preview load instead of preserving a stale collapsed desktop state, replaces stale overlay instances when a different run/session opens, and keeps an in-panel full-session fallback if the iframe preview is blocked or slow.
 - Proxied Play HTML now rewrites restrictive app CSP directives enough for Hermes' injected proxy/session overlay scripts, inline overlay styles, and same-origin session iframe to run consistently.
-- Hermes WebUI agent runs now inject session-scoped readable-output paths into both thread-local and process fallback env so the readable-output skill has a reliable target file and asset directory.
+- Hermes WebUI agent runs rely on native Markdown chat rendering instead of injecting separate session file-output paths.
 - Workspace panel local file uploads no longer fail on a missing auth-redirect helper; browser-style multipart route coverage now verifies the workspace upload endpoint directly, and all-failed upload toasts/indicators include the first underlying error.
 - Ops project task rows now switch to "Needs more work" immediately after feedback is saved, while the slower task-file persistence and detail refresh finish in the background.
 - Quick Task runner screenshots now reach immediately-started sessions via persisted task image paths as well as the composer upload handoff.
@@ -457,7 +459,6 @@
 
 - Project page **Push changes** now stages only the same visible project changes that the Git status card reports, instead of running `git add -A .` over the whole worktree. Ignored local runtime folders such as `.cloud-terminal/` no longer make the push button fail with Git's `advice.addIgnoredFile` message, and already-staged hidden runtime artifacts are reset before the auto-commit so they are not silently included.
 - Ops dashboard active-session dedupe now prefers the current continuation/tip session over a touched root session for the same project task, so resumed task sessions open the transcript with the latest user messages instead of an older parent segment.
-- Readable-output overlays are now keyed per Hermes session, so closing or loading output in one session no longer hides or reuses output for another session; reload clears only the current session's dismissal.
 - Quick-task "create and run" now switches into the simplified Ops session inspect view before sending the task prompt, so users see only the chat and input instead of briefly landing in the full Hermes shell.
 - Play notification inspect overlays now embed the linked Hermes session in simplified inspect mode and allow `/session/<id>` pages to be framed by same-origin Play previews, fixing the broken-link iframe shown when opening a Play notification.
 - Play handoff now rebuilds/restarts on each task-linked session completion, including repeated successful completions for the same Ops run, so Play notifications point at the latest build instead of reusing an hours-old ready/built pipeline state.

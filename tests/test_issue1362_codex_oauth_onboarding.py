@@ -463,6 +463,82 @@ def test_runtime_provider_wrapper_repairs_stale_profile_codex_from_root(monkeypa
     assert repaired["providers"]["openai-codex"]["tokens"]["refresh_token"] == "root-refresh-secret"
 
 
+def test_provider_call_token_expired_repairs_profile_codex_from_root(tmp_path):
+    """A Codex 401 after provider resolution should still repair named-profile auth.
+
+    WebUI sign-in can refresh root/default Codex credentials while an Ops project
+    session runs under a named profile whose local pool entry shadows root.  That
+    stale profile entry can resolve successfully, then fail on the actual Codex
+    API call with ``token_expired``.  The streaming self-heal path passes that
+    provider-call failure here so the profile can be repaired before retry.
+    """
+    import api.oauth as oauth
+
+    root_home = tmp_path / "home"
+    profile_home = root_home / "profiles" / "hermes"
+    root_home.mkdir(parents=True)
+    profile_home.mkdir(parents=True)
+    (root_home / "auth.json").write_text(json.dumps({
+        "version": 1,
+        "credential_pool": {
+            "openai-codex": [{
+                "id": "root-codex",
+                "label": "Codex OAuth",
+                "auth_type": "oauth",
+                "source": "manual:device_code",
+                "access_token": "root-access-secret",
+                "refresh_token": "root-refresh-secret",
+                "last_refresh": "2026-06-05T12:58:49Z",
+            }],
+        },
+        "providers": {
+            "openai-codex": {
+                "tokens": {"access_token": "root-access-secret", "refresh_token": "root-refresh-secret"},
+                "last_refresh": "2026-06-05T12:58:49Z",
+                "auth_mode": "chatgpt",
+            },
+        },
+    }), encoding="utf-8")
+    (profile_home / "auth.json").write_text(json.dumps({
+        "version": 1,
+        "credential_pool": {
+            "openai-codex": [{
+                "id": "webui-old",
+                "label": "web ui device_code",
+                "auth_type": "oauth",
+                "source": "manual:webui_device_code",
+                "access_token": "old-profile-access-secret",
+                "refresh_token": "old-profile-refresh-secret",
+                "last_refresh": "2026-05-12T05:17:45Z",
+            }],
+        },
+        "providers": {"openai-codex": {"tokens": {}, "auth_mode": "chatgpt"}},
+    }), encoding="utf-8")
+
+    repaired = oauth.repair_runtime_oauth_state_after_auth_failure(
+        "openai-codex",
+        "Error code: 401 - token_expired: Provided authentication token is expired",
+        hermes_home=profile_home,
+    )
+
+    assert repaired is True
+    profile_store = json.loads((profile_home / "auth.json").read_text(encoding="utf-8"))
+    assert profile_store["credential_pool"]["openai-codex"][0]["access_token"] == "root-access-secret"
+    assert profile_store["providers"]["openai-codex"]["tokens"] == {
+        "access_token": "root-access-secret",
+        "refresh_token": "root-refresh-secret",
+    }
+
+
+def test_streaming_self_heal_passes_provider_auth_error_to_oauth_repair():
+    streaming_src = (REPO / "api" / "streaming.py").read_text(encoding="utf-8")
+
+    assert "read_auth_json(hermes_home=hermes_home)" in streaming_src
+    assert "repair_runtime_oauth_state_after_auth_failure" in streaming_src
+    assert "auth_error=_last_err" in streaming_src
+    assert "auth_error=e" in streaming_src
+
+
 def test_frontend_uses_onboarding_oauth_endpoints_and_no_secret_poll_url():
     js = (REPO / "static" / "onboarding.js").read_text(encoding="utf-8")
     assert "/api/onboarding/oauth/start" in js

@@ -719,12 +719,6 @@ def _build_agent_thread_env(profile_runtime_env: dict | None, workspace: str, se
     agent starts, so merge into one dict first and let the active workspace win.
     """
     env = dict(profile_runtime_env or {})
-    try:
-        from api.session_readable_output import build_session_readable_output_env
-
-        env.update(build_session_readable_output_env(session_id))
-    except Exception:
-        logger.debug("Failed to build readable-output environment for %s", session_id, exc_info=True)
     env.update(_build_runtime_bridge_env(workspace, session_id, env))
     env.update({
         'TERMINAL_CWD': str(workspace),
@@ -2738,7 +2732,7 @@ def _last_resort_sync_from_core(session, stream_id, agent_lock):
 
 
 def _attempt_credential_self_heal(
-    provider_id, session_id, _agent_lock_ref, hermes_home=None,
+    provider_id, session_id, _agent_lock_ref, hermes_home=None, auth_error=None,
 ):
     """Try to silently refresh credentials after a 401/auth error (#1401).
 
@@ -2758,6 +2752,7 @@ def _attempt_credential_self_heal(
     try:
         from api.oauth import (
             read_auth_json,
+            repair_runtime_oauth_state_after_auth_failure,
             resolve_runtime_provider_with_anthropic_env_lock,
         )
         from api.config import (
@@ -2766,11 +2761,20 @@ def _attempt_credential_self_heal(
         )
         from hermes_cli.runtime_provider import resolve_runtime_provider
 
-        # 1. Re-read auth.json (triggers a fresh credential scan)
-        _fresh_auth = read_auth_json()
+        # 1. Re-read the session profile's auth.json.  If the provider call
+        # itself returned an auth failure (e.g. Codex 401 token_expired), let
+        # the OAuth layer repair stale named-profile credentials from the root
+        # profile before we invalidate caches and re-resolve.
+        _fresh_auth = read_auth_json(hermes_home=hermes_home)
         if not _fresh_auth:
             logger.debug('[webui] self-heal: auth.json empty or missing, skipping')
             return None
+        if auth_error is not None:
+            repair_runtime_oauth_state_after_auth_failure(
+                provider_id,
+                auth_error,
+                hermes_home=hermes_home,
+            )
 
         # 2. Evict the cached agent for this session
         with SESSION_AGENT_CACHE_LOCK:
@@ -3258,13 +3262,6 @@ def _run_agent_streaming(
                 _reset_hermes_home_override = None
                 _hermes_home_override_token = None
         _set_thread_env(**_thread_env)
-        _readable_output_process_env = {
-            key: value
-            for key, value in _thread_env.items()
-            if key.startswith('HERMES_READABLE_OUTPUT_')
-            or key.startswith('CLOUD_TERMINAL_READABLE_OUTPUT_')
-            or key == 'CLOUD_TERMINAL_SESSION_ID'
-        }
         _runtime_bridge_process_env = {
             key: value
             for key, value in _thread_env.items()
@@ -3280,8 +3277,8 @@ def _run_agent_streaming(
         # The finally block re-acquires to restore — keeping critical sections short
         # and preventing a deadlock where the restore would re-enter the same lock.
         with _ENV_LOCK:
-            _profile_and_readable_env_keys = set(_profile_runtime_env) | set(_readable_output_process_env) | set(_runtime_bridge_process_env)
-            old_profile_env = {key: os.environ.get(key) for key in _profile_and_readable_env_keys}
+            _profile_and_runtime_env_keys = set(_profile_runtime_env) | set(_runtime_bridge_process_env)
+            old_profile_env = {key: os.environ.get(key) for key in _profile_and_runtime_env_keys}
             old_cwd = os.environ.get('TERMINAL_CWD')
             old_exec_ask = os.environ.get('HERMES_EXEC_ASK')
             old_session_key = os.environ.get('HERMES_SESSION_KEY')
@@ -3289,7 +3286,6 @@ def _run_agent_streaming(
             old_session_platform = os.environ.get('HERMES_SESSION_PLATFORM')
             old_hermes_home = os.environ.get('HERMES_HOME')
             os.environ.update(_profile_runtime_env)
-            os.environ.update(_readable_output_process_env)
             os.environ.update(_runtime_bridge_process_env)
             os.environ['TERMINAL_CWD'] = str(s.workspace)
             os.environ['HERMES_EXEC_ASK'] = '1'
@@ -4347,6 +4343,7 @@ def _run_agent_streaming(
                         _heal_result = None
                         _heal_rt = _attempt_credential_self_heal(
                             resolved_provider or '', session_id, _agent_lock, _profile_home_path,
+                            auth_error=_last_err,
                         )
                         if _heal_rt is not None:
                             logger.info('[webui] self-heal: retrying stream after credential refresh')
@@ -5168,6 +5165,7 @@ def _run_agent_streaming(
                 # ── Credential self-heal on 401 (#1401) ──
                 _heal_rt = _attempt_credential_self_heal(
                     resolved_provider or '', session_id, _agent_lock, _profile_home_path,
+                    auth_error=e,
                 )
                 if _heal_rt is not None:
                     logger.info('[webui] self-heal (except path): retrying stream after credential refresh')

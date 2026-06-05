@@ -66,7 +66,7 @@ def init_project_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def test_phase9_task_launch_creates_run_activity_and_readable_output_route(monkeypatch, tmp_path, git_available):
+def test_phase9_task_launch_creates_run_activity_and_session_links(monkeypatch, tmp_path, git_available):
     monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
 
     repo = init_project_repo(tmp_path)
@@ -113,7 +113,7 @@ def test_phase9_task_launch_creates_run_activity_and_readable_output_route(monke
     assert summary_payload["count"] == 1
     assert summary_payload["runs"][0]["id"] == run["id"]
     assert "requests" not in summary_payload["runs"][0]
-    assert "readableOutput" not in summary_payload["runs"][0]
+    assert summary_payload["runs"][0]["runUrl"].startswith("/api/ops/runs/")
 
     compat_create = _FakeHandler(
         {
@@ -144,16 +144,6 @@ def test_phase9_task_launch_creates_run_activity_and_readable_output_route(monke
     assert handle_get(requests, urlparse(f"http://example.com/api/ops/runs/{run['id']}/requests")) is True
     assert _response_json(requests)["count"] == 0
 
-    readable_dir = repo / ".cloud-terminal" / "readable-output" / session["session_id"]
-    readable_dir.mkdir(parents=True, exist_ok=True)
-    (readable_dir / "message.md").write_text("# Finished\n\nDone.\n", encoding="utf-8")
-
-    readable = _FakeHandler()
-    assert handle_get(readable, urlparse(f"http://example.com/api/ops/runs/{run['id']}/readable-output")) is True
-    readable_payload = _response_json(readable)
-    assert readable_payload["readableOutput"]["exists"] is True
-    assert readable_payload["readableOutput"]["title"] == "Finished"
-
     complete = _FakeHandler({"status": "succeeded", "summary": "Done"})
     assert handle_post(complete, urlparse(f"http://example.com/api/ops/runs/{run['id']}/complete")) is True
     assert _response_json(complete)["run"]["status"] == "succeeded"
@@ -162,10 +152,10 @@ def test_phase9_task_launch_creates_run_activity_and_readable_output_route(monke
     assert handle_get(detail, urlparse(f"http://example.com/api/ops/runs/{run['id']}")) is True
     detail_payload = _response_json(detail)["run"]
     assert detail_payload["status"] == "succeeded"
-    assert detail_payload["readableOutput"]["available"] is True
+    assert detail_payload["sessionUrl"].startswith("/session/")
 
 
-def test_phase9_run_follows_lineage_tip_and_marks_completed_without_readable_output(monkeypatch, tmp_path, git_available):
+def test_phase9_run_follows_lineage_tip_and_marks_completed_from_messages(monkeypatch, tmp_path, git_available):
     monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(tmp_path / "projects-root"))
 
     repo = init_project_repo(tmp_path)
@@ -280,7 +270,6 @@ def test_phase9_ops_ui_renders_run_activity_panel():
                   pendingRequestCount: 1,
                   project: { id: 'project-1', name: 'Phase 9 Project' },
                   task: { id: 'task-1', text: 'Inspect run activity' },
-                  readableOutput: { available: true, url: '/api/ops/runs/run-1/readable-output' }
                 }]
               })
             };
@@ -323,9 +312,6 @@ def test_phase9_ops_ui_renders_run_activity_panel():
         }
         if (!root.innerHTML.includes('Waiting approval')){
           throw new Error('Run status badge did not render');
-        }
-        if (!root.innerHTML.includes('Readable output')){
-          throw new Error('Readable output link did not render');
         }
         if (!fetchCalls.includes('/api/ops/runs')){
           throw new Error('Run activity endpoint was not requested');
@@ -386,4 +372,4 @@ def test_phase9_run_summary_skips_rich_enrichment(monkeypatch, tmp_path):
     assert run["projectName"] == "Hermes"
     assert run["taskText"] == "Do work"
     assert "requests" not in run
-    assert "readableOutput" not in run
+    assert run["runUrl"].startswith("/api/ops/runs/")

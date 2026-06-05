@@ -484,7 +484,7 @@ Shells should own agent-session launching and grading adapters:
 
 Those may call core for task state updates, but the actual agent provider/runtime choice should stay shell-specific.
 
-### 9. Session activity, readable output, screenshots, and audit assets
+### 9. Session activity, screenshots, and audit assets
 
 **Priority:** P2, shared contract only
 
@@ -495,16 +495,16 @@ Those may call core for task state updates, but the actual agent provider/runtim
   - `GET /api/sessions/activity` (`server.js:33501`)
   - activity grouping routes (`server.js:33530` through `33599`)
   - session input/refresh/file-input/native-command/takeover/audit/delete routes (`server.js:36031` through `36756`)
-  - readable-output and screenshot asset routes (`server.js:36428` through `36527`)
+  - screenshot asset routes (`server.js:36428` through `36527`)
 
 **Why only part belongs in core**
 
-A shared dashboard benefits from a normalized run/session activity feed and stable readable-output/screenshot asset handling. But Cloud Terminal’s sessions are Codex-oriented, while Hermes has its own session/run model and profiles. Core should not become a Codex session manager.
+A shared dashboard benefits from a normalized run/session activity feed and stable screenshot asset handling. But Cloud Terminal’s sessions are Codex-oriented, while Hermes has its own session/run model and profiles. Core should not become a Codex session manager.
 
 **Recommended Core contract**
 
 - Shared run activity/event schema.
-- Asset store contract for readable outputs and screenshots.
+- Asset store contract for screenshots.
 - Audit/event envelope fields.
 
 **Shell-owned exclusions**
@@ -733,7 +733,7 @@ Core file/artifact/config APIs must safe-resolve paths under the project root or
 - Deployment artifact detection and scaffolding.
 - Config save/load.
 - Task images.
-- Screenshots and readable-output assets.
+- Screenshot assets.
 - Inspect guide files.
 
 ### Provider capability negotiation
@@ -782,7 +782,7 @@ The host proxy can then route consistently for Cloud Terminal and Hermes.
 | Runtime inspect/tools | P1/P2 | `/agent/sessions/:id/runtime/*` | Partial | Extract substrate; keep notifications shell-owned. |
 | Host/proxy health/switching | P1 | `proxy.js` | Partial/Yes | High-risk; best as `core-host`. |
 | Task files/epics | P1/P2 | project task routes | Partial | Core owns documents; shells own agent launches/grading. |
-| Session activity/assets | P2 | session/readable-output routes | Partial | Shared schema/assets only. |
+| Session activity/assets | P2 | session activity and screenshot routes | Partial | Shared schema/assets only. |
 | Runtime timers | P2/P3 | `runtime-timers.js` | Maybe | Supporting utility, not a first slice. |
 | Codex native command | Exclude | session native command route | No | Provider-specific shell behavior. |
 | UI pages/navigation | Exclude | `public/*` | No | Core should expose data/actions, not layout. |

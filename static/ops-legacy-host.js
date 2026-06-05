@@ -32,6 +32,9 @@
     if(/^[a-z]+:/i.test(raw) || raw.startsWith('//')){
       return raw;
     }
+    if(raw.startsWith('/')){
+      return new URL(raw, window.location.origin).href;
+    }
     const normalized = raw.startsWith('/') ? raw.slice(1) : raw;
     return new URL(normalized, document.baseURI || window.location.href).href;
   }
@@ -322,7 +325,6 @@
     }catch(_error){}
   }
 
-  function clearSessionReadableOutput(){}
   function renderSessionList(){ return Promise.resolve(); }
   function syncTopbar(){}
 
@@ -352,7 +354,7 @@
       const fd = new FormData();
       fd.append('session_id', S.session.session_id);
       fd.append('file', file, file && file.name ? file.name : 'upload.bin');
-      const response = await fetch(appUrl('api/upload'), {
+      const response = await fetch(appUrl('/api/upload'), {
         method: 'POST',
         credentials: 'include',
         body: fd,
@@ -431,7 +433,6 @@
   window.showPromptDialog = showPromptDialog;
   window.showConfirmDialog = showConfirmDialog;
   window.syncTopbar = syncTopbar;
-  window.clearSessionReadableOutput = clearSessionReadableOutput;
   window.clearPersistedSessionId = clearPersistedSessionId;
   window.renderSessionList = renderSessionList;
   window.loadSession = loadSession;

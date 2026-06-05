@@ -101,7 +101,6 @@ Preferred frontend locations:
 
 - `static/ops-*.js`
 - `static/cloud-terminal-*.js`
-- `static/readable-output-ui.js`
 - `static/play-*.js`
 
 ### Rule 3: The Seam Is Not A Giant Bridge
@@ -125,7 +124,6 @@ Fork-owned linkage belongs in sidecars:
 - task id,
 - run id,
 - upstream-sync record key,
-- readable-output references,
 - Play linkage,
 - Cloud Terminal compatibility ids.
 
@@ -146,7 +144,6 @@ api/
   routes_ops_runs.py
   routes_ops_runtime.py
   routes_ops_play.py
-  routes_readable_output.py
   ops_projects.py
   ops_runs.py
   ops_runtime_tools.py
@@ -168,7 +165,6 @@ static/
   ops-tasks.js
   ops-runs.js
   ops-notifications.js
-  readable-output-ui.js
   play-inspect-shell.js
   cloud-terminal.css
 ```
@@ -184,7 +180,6 @@ Preferred persistence:
     runs.json
     notifications.json
     artifacts/
-    readable-output/
     session-links/
 ```
 
@@ -240,9 +235,9 @@ Goal: link Hermes sessions to fork tasks without changing Hermes session semanti
 
 Goal: start and resume Hermes sessions from tasks through small hooks.
 
-### Phase 5: Readable Output
+### Phase 5: Native Markdown output
 
-Goal: port readable-output support with minimal stream/session hooks.
+Goal: rely on native Markdown chat rendering with minimal stream/session hooks.
 
 ### Phase 6: Notifications, Approval, And Clarify
 

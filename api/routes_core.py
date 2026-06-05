@@ -96,7 +96,6 @@ _SESSION_ACTIVITY_GROUPS_RE = re.compile(r"^/api/core/session-activity/groups/?$
 _SESSION_ACTIVITY_GROUP_RENAME_RE = re.compile(r"^/api/core/session-activity/groups/([^/]+)/rename/?$")
 _SESSION_ACTIVITY_GROUP_DELETE_RE = re.compile(r"^/api/core/session-activity/groups/([^/]+)/delete/?$")
 _SESSION_ACTIVITY_ASSIGNMENT_RE = re.compile(r"^/api/core/session-activity/group-assignment/?$")
-_SESSION_READABLE_OUTPUT_RE = re.compile(r"^/api/core/sessions/([^/]+)/readable-output/?$")
 
 
 def _filters(parsed) -> dict:
@@ -247,10 +246,6 @@ def handle_get(handler, parsed) -> bool:
             return True
         if _SESSION_ACTIVITY_RE.match(parsed.path):
             j(handler, core_session_assets.list_activity())
-            return True
-        match = _SESSION_READABLE_OUTPUT_RE.match(parsed.path)
-        if match:
-            j(handler, core_session_assets.get_readable_output(unquote(match.group(1))))
             return True
         return False
     except Exception as exc:

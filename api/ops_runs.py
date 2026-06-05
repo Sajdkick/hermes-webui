@@ -6,12 +6,11 @@ import json
 import threading
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 from api.config import STATE_DIR
-from api import ops_projects, session_readable_output, session_sidecars
+from api import ops_projects, session_sidecars
 from api.models import get_session
 
 
@@ -245,25 +244,6 @@ def _task_context(project_id: str, task_id: str) -> dict | None:
     }
 
 
-def _readable_output_state(session_id: str) -> dict:
-    key = _text(session_id, limit=128)
-    if not key:
-        return {"available": False}
-    resolved_id = session_sidecars.resolve_session_id(key) or key
-    try:
-        payload = session_readable_output.get_session_readable_output(resolved_id)
-    except session_readable_output.SessionReadableOutputError:
-        return {"available": False}
-    artifact = payload.get("readableOutput") if isinstance(payload, dict) else None
-    if not isinstance(artifact, dict) or not artifact.get("exists"):
-        return {"available": False}
-    return {
-        "available": True,
-        "title": artifact.get("title"),
-        "updatedAt": artifact.get("updated_at"),
-    }
-
-
 def _run_requests_for_session(session_id: str) -> list[dict]:
     key = _text(session_id, limit=128)
     if not key:
@@ -307,7 +287,7 @@ def _run_requests_for_session(session_id: str) -> list[dict]:
     return requests
 
 
-def _derive_status(run: dict, session: dict | None, requests: list[dict], readable_output: dict) -> str:
+def _derive_status(run: dict, session: dict | None, requests: list[dict]) -> str:
     stored = _status(run.get("status"), default="running")
     if stored in RUN_TERMINAL_STATUSES:
         return stored
@@ -319,7 +299,7 @@ def _derive_status(run: dict, session: dict | None, requests: list[dict], readab
         return "waiting-input"
     if session.get("active_stream_id") or session.get("pending_user_message"):
         return "running"
-    if readable_output.get("available") or int(session.get("message_count") or 0) > 0:
+    if int(session.get("message_count") or 0) > 0:
         return "succeeded"
     return stored
 
@@ -329,14 +309,11 @@ def _enrich_run(run: dict) -> dict:
     session = _session_summary(stored_session_id)
     resolved_session_id = _text((session or {}).get("session_id"), limit=128) or stored_session_id
     requests = _run_requests_for_session(resolved_session_id)
-    readable_output = _readable_output_state(resolved_session_id)
     stored_status = _status(run.get("status"), default="running")
-    status = _derive_status(run, session, requests, readable_output)
+    status = _derive_status(run, session, requests)
     updated_at = run.get("updatedAt")
     if isinstance(session, dict):
         updated_at = _to_iso(session.get("updated_at")) or updated_at
-    if readable_output.get("available") and readable_output.get("updatedAt"):
-        updated_at = _to_iso(readable_output.get("updatedAt")) or updated_at
     lineage_root_id = _text((session or {}).get("_lineage_root_id"), limit=128)
     lineage_tip_id = _text((session or {}).get("_lineage_tip_id"), limit=128) or resolved_session_id
     enriched = {
@@ -353,14 +330,6 @@ def _enrich_run(run: dict) -> dict:
         "sessionUrl": _session_url(resolved_session_id) if resolved_session_id else "",
         "pendingRequestCount": len(requests),
         "requests": requests,
-        "readableOutput": {
-            **readable_output,
-            **(
-                {"url": f"/api/ops/runs/{quote(str(run.get('id') or ''), safe='')}/readable-output"}
-                if readable_output.get("available")
-                else {}
-            ),
-        },
         "runUrl": run_url(str(run.get("id") or "")),
     }
     # Read-side enrichment must stay read-only.  Play/run lifecycle handoff is
@@ -712,28 +681,5 @@ def get_ops_run_runtime_status(run_id: str) -> dict:
         "status": run.get("status"),
         "sessionId": run.get("sessionId"),
         "pendingRequestCount": run.get("pendingRequestCount"),
-        "readableOutputAvailable": bool((run.get("readableOutput") or {}).get("available")),
         "session": run.get("session"),
     }
-
-
-def get_ops_run_readable_output(run_id: str) -> dict:
-    run = get_ops_run(run_id)
-    session_id = _text(run.get("sessionId"), limit=128)
-    if not session_id:
-        raise OpsRunError("Run has no linked session.", 404)
-    try:
-        return session_readable_output.get_session_readable_output(session_id)
-    except session_readable_output.SessionReadableOutputError as exc:
-        raise OpsRunError(str(exc), exc.status) from exc
-
-
-def resolve_ops_run_readable_asset(run_id: str, asset_path: str) -> Path:
-    run = get_ops_run(run_id)
-    session_id = _text(run.get("sessionId"), limit=128)
-    if not session_id:
-        raise OpsRunError("Run has no linked session.", 404)
-    try:
-        return session_readable_output.resolve_session_readable_asset(session_id, asset_path)
-    except session_readable_output.SessionReadableOutputError as exc:
-        raise OpsRunError(str(exc), exc.status) from exc

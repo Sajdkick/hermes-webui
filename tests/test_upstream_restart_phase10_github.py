@@ -198,6 +198,64 @@ def test_phase10_import_repository_clones_and_registers_project(tmp_path, monkey
     assert calls[0]["args"][:3] == ["git", "clone", "--branch"]
 
 
+def test_phase10_import_missing_branch_creates_and_pushes_to_origin(tmp_path, monkeypatch, git_available):
+    projects_dir = tmp_path / "projects"
+    isolate_projects(monkeypatch, projects_dir)
+    calls = []
+
+    def fake_run(args, check=None, capture_output=None, text=None, timeout=None, cwd=None):
+        calls.append(
+            {
+                "args": args,
+                "check": check,
+                "capture_output": capture_output,
+                "text": text,
+                "timeout": timeout,
+                "cwd": cwd,
+            }
+        )
+        if args[:4] == ["git", "ls-remote", "--exit-code", "--heads"]:
+            branch = args[-1]
+            if branch == "feature/new-project":
+                return ops_github.subprocess.CompletedProcess(args, 2, stdout="", stderr="")
+            return ops_github.subprocess.CompletedProcess(args, 0, stdout=f"abc123\trefs/heads/{branch}\n", stderr="")
+        if args[:2] == ["git", "clone"]:
+            target = Path(args[-1])
+            (target / ".git").mkdir(parents=True)
+            (target / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+            (target / "README.md").write_text("# Repo\n", encoding="utf-8")
+            return ops_github.subprocess.CompletedProcess(args, 0, stdout="cloned main\n", stderr="")
+        if args[:3] == ["git", "checkout", "-B"]:
+            return ops_github.subprocess.CompletedProcess(args, 0, stdout="checked out\n", stderr="")
+        if args[:3] == ["git", "push", "--set-upstream"]:
+            return ops_github.subprocess.CompletedProcess(args, 0, stdout="pushed\n", stderr="")
+        return ops_github.subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(ops_github.subprocess, "run", fake_run)
+
+    result = ops_github.import_repository(
+        {
+            "owner": "acme",
+            "repo": "repo",
+            "branch": "feature/new-project",
+            "defaultBranch": "main",
+            "baseBranch": "main",
+            "createMissingBranch": True,
+        }
+    )
+
+    commands = [call["args"] for call in calls]
+    assert result["imported"] is True
+    assert result["branch"] == "feature/new-project"
+    assert result["baseBranch"] == "main"
+    assert result["branchCreated"] is True
+    assert result["branchPushed"] is True
+    assert result["project"]["coreBranch"] == "feature/new-project"
+    assert ["git", "clone", "--branch", "main", "--single-branch", "https://github.com/acme/repo.git", str(projects_dir / "repo")] in commands
+    assert ["git", "checkout", "-B", "feature/new-project", "origin/main"] in commands
+    assert ["git", "push", "--set-upstream", "origin", "feature/new-project"] in commands
+
+
 def test_phase10_github_routes_dispatch_through_ops_modules(monkeypatch):
     dispatch_calls = []
     handler = SimpleNamespace(command="POST", headers={}, host="127.0.0.1")

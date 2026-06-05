@@ -23,7 +23,7 @@
     const RUN_ACTIVE_STATUS_VALUES=['queued','starting','running','waiting-input','waiting-approval'];
     const RUN_ATTENTION_STATUS_VALUES=['waiting-input','waiting-approval','failed','stale'];
     const RUN_REQUEST_STATUS_VALUES=['pending','responded','dismissed','resolved','expired'];
-    const RUN_ARTIFACT_TYPE_VALUES=['file','image','screenshot','temp-input','readable-output','log','report','link','other'];
+    const RUN_ARTIFACT_TYPE_VALUES=['file','image','screenshot','temp-input','log','report','link','other'];
     const RUN_LOG_STREAM_VALUES=['stdout','stderr','system','agent','tool','browser','test','other'];
     const RUN_LOG_LEVEL_VALUES=['debug','info','warning','error'];
 
@@ -360,39 +360,6 @@
       `;
     }
 
-    function readableAssetUrl(ref,assetBaseUrl){
-      const value=String(ref||'').trim();
-      if(!value||/^[a-z][a-z0-9+.-]*:/i.test(value)||value.startsWith('#')||value.startsWith('/'))return value;
-      const base=String(assetBaseUrl||'');
-      if(!base)return value;
-      return base+value.split('/').map(part=>encodeURIComponent(part)).join('/');
-    }
-
-    function rewriteReadableOutputAssetRefs(markdown,artifact){
-      const base=artifact&&artifact.assetBaseUrl;
-      if(!base)return String(markdown||'');
-      return String(markdown||'').replace(/(!?\[[^\]\n]*\]\()([^) \t\r\n]+)(\))/g,(match,prefix,ref,suffix)=>{
-        return `${prefix}${readableAssetUrl(ref,base)}${suffix}`;
-      });
-    }
-
-    function renderReadableOutput(artifact){
-      if(!artifact)return '<div class="ops-empty">Loading readable output...</div>';
-      if(!artifact.exists)return '<div class="ops-empty">No readable output is linked to this run yet.</div>';
-      const markdown=rewriteReadableOutputAssetRefs(artifact.markdown||'',artifact);
-      const rendered=typeof renderMdRef==='function'?renderMdRef(markdown):`<pre>${esc(markdown)}</pre>`;
-      return `
-        <div class="ops-run-readable">
-          <div class="ops-run-readable-meta">
-            <span>${esc(artifact.path||'Readable output')}</span>
-            <span>${esc(String(artifact.size||0))} bytes</span>
-            ${(artifact.assets||[]).length?`<span>${esc(String(artifact.assets.length))} assets</span>`:''}
-          </div>
-          <div class="preview-md ops-run-readable-body">${rendered}</div>
-        </div>
-      `;
-    }
-
     function renderRunArtifacts(artifacts){
       if(!artifacts)return '<div class="ops-empty">Loading run artifacts...</div>';
       const ordered=(Array.isArray(artifacts)?artifacts:[]).slice().sort(compareRunArtifacts);
@@ -683,7 +650,6 @@
             </div>
             ${renderRunRequests(OPS.runRequests)}
             ${renderRunNotifications(run)}
-            ${renderReadableOutput(OPS.runReadableOutput)}
             ${renderRunLogs(OPS.runLogs)}
             ${renderRunArtifacts(OPS.runArtifacts)}
             ${renderRunEvents(OPS.runEvents)}
@@ -726,11 +692,8 @@
     async function loadRunDetail(runId){
       const id=String(runId||'').trim();
       if(!id)return null;
-      const [runData,readableData,eventData,requestData,artifactData,logData,notificationData]=await Promise.all([
+      const [runData,eventData,requestData,artifactData,logData,notificationData]=await Promise.all([
         AgentBridgeRef.runs.get(id),
-        AgentBridgeRef.runs.readableOutput(id).catch(err=>({
-          readableOutput:{exists:false,error:err&&err.message?err.message:'Readable output unavailable'},
-        })),
         AgentBridgeRef.runs.events(id,{limit:80}).catch(()=>({events:[]})),
         AgentBridgeRef.runs.requests(id,{includeResolved:1}).catch(()=>({requests:[]})),
         AgentBridgeRef.runs.artifacts(id).catch(()=>({artifacts:[]})),
@@ -740,7 +703,6 @@
           : Promise.resolve({notifications:OPS.notifications||[]}),
       ]);
       OPS.runDetail=runData&&runData.run?runData.run:null;
-      OPS.runReadableOutput=readableData&&readableData.readableOutput?readableData.readableOutput:null;
       OPS.runEvents=Array.isArray(eventData&&eventData.events)?eventData.events:[];
       OPS.runRequests=Array.isArray(requestData&&requestData.requests)?requestData.requests:[];
       OPS.runArtifacts=Array.isArray(artifactData&&artifactData.artifacts)?artifactData.artifacts:[];
@@ -754,7 +716,6 @@
       if(!id)return;
       OPS.selectedRunId=id;
       OPS.runDetail=null;
-      OPS.runReadableOutput=null;
       OPS.runEvents=null;
       OPS.runRequests=null;
       OPS.runArtifacts=null;
@@ -767,7 +728,6 @@
     function closeRunDetail(){
       OPS.selectedRunId='';
       OPS.runDetail=null;
-      OPS.runReadableOutput=null;
       OPS.runEvents=null;
       OPS.runRequests=null;
       OPS.runArtifacts=null;
@@ -869,8 +829,6 @@
       isRunActive,
       needsRunAttention,
       summarizeRuns,
-      readableAssetUrl,
-      rewriteReadableOutputAssetRefs,
       normalizeRunRequestStatus,
       runRequestStatusLabel,
       runRequestKind,
@@ -900,7 +858,6 @@
       '/api/ops/runs/*/requests',
       '/api/ops/runs/*/artifacts',
       '/api/ops/runs/*/logs',
-      '/api/ops/runs/*/readable-output',
     ],
     actions:[
       'scan-stale-runs',

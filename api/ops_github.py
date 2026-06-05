@@ -220,6 +220,99 @@ def _clone_url(owner: str, repo: str, protocol: str) -> str:
     return f"https://github.com/{owner}/{repo}.git"
 
 
+def _truthy(value: Any) -> bool:
+    if value is True:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _run_git(
+    args: list[str],
+    *,
+    cwd: Path | None = None,
+    check: bool = True,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    label: str = "Git command",
+) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(
+            args,
+            cwd=str(cwd) if cwd else None,
+            check=check,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except FileNotFoundError as exc:
+        raise OpsGitHubError("git is not available on the Hermes server.", 500) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise OpsGitHubError(f"{label} timed out.", 504) from exc
+    except subprocess.CalledProcessError as exc:
+        detail = _text((exc.stderr or exc.stdout or "").strip(), limit=1200)
+        raise OpsGitHubError(detail or f"{label} failed.", 502) from exc
+
+
+def _remote_branch_exists(remote: str, branch: str, *, cwd: Path | None = None) -> bool:
+    if not branch:
+        return False
+    result = _run_git(
+        ["git", "ls-remote", "--exit-code", "--heads", remote, branch],
+        cwd=cwd,
+        check=False,
+        timeout=DEFAULT_TIMEOUT_SECONDS,
+        label="GitHub branch lookup",
+    )
+    if result.returncode == 0:
+        return True
+    if result.returncode == 2:
+        return False
+    detail = _text((result.stderr or result.stdout or "").strip(), limit=1200)
+    raise OpsGitHubError(detail or "Unable to inspect GitHub branches.", 502)
+
+
+def _create_missing_branch_base_error(branch: str, base_branch: str) -> OpsGitHubError:
+    return OpsGitHubError(
+        f"Unable to create GitHub branch \"{branch}\" because origin/{base_branch} was not found.",
+        409,
+    )
+
+
+def _checkout_and_push_branch(target_path: Path, branch: str, base_branch: str) -> dict:
+    checkout = _run_git(
+        ["git", "checkout", "-B", branch, f"origin/{base_branch}"],
+        cwd=target_path,
+        timeout=DEFAULT_CLONE_TIMEOUT_SECONDS,
+        label="GitHub branch checkout",
+    )
+    push = _run_git(
+        ["git", "push", "--set-upstream", "origin", branch],
+        cwd=target_path,
+        timeout=DEFAULT_CLONE_TIMEOUT_SECONDS,
+        label="GitHub branch push",
+    )
+    return {
+        "created": True,
+        "pushed": True,
+        "name": branch,
+        "baseBranch": base_branch,
+        "checkoutStdout": _text(checkout.stdout, limit=1200),
+        "checkoutStderr": _text(checkout.stderr, limit=1200),
+        "pushStdout": _text(push.stdout, limit=1200),
+        "pushStderr": _text(push.stderr, limit=1200),
+    }
+
+
+def _fetch_remote_branch(repo_path: Path, branch: str) -> None:
+    _run_git(
+        ["git", "fetch", "--quiet", "--no-tags", "origin", branch],
+        cwd=repo_path,
+        timeout=DEFAULT_TIMEOUT_SECONDS,
+        label="GitHub branch fetch",
+    )
+
+
 def _clone_repository(clone_url: str, target_path: Path, branch: str) -> dict:
     target_path.parent.mkdir(parents=True, exist_ok=True)
     args = ["git", "clone"]
@@ -294,6 +387,34 @@ def _add_worktree(source_path: Path, target_path: Path, branch: str) -> dict:
         raise OpsGitHubError(detail or "GitHub worktree creation failed.", 502) from exc
     return {
         "command": ["git", "worktree", "add", "..."],
+        "stdout": _text(completed.stdout, limit=1200),
+        "stderr": _text(completed.stderr, limit=1200),
+        "sourcePath": str(source_path),
+    }
+
+
+def _add_worktree_from_base(source_path: Path, target_path: Path, branch: str, base_branch: str) -> dict:
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    _fetch_remote_branch(source_path, base_branch)
+    args = ["git", "worktree", "add", "-b", branch, str(target_path), f"origin/{base_branch}"]
+    try:
+        completed = subprocess.run(
+            args,
+            cwd=str(source_path),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=DEFAULT_CLONE_TIMEOUT_SECONDS,
+        )
+    except FileNotFoundError as exc:
+        raise OpsGitHubError("git is not available on the Hermes server.", 500) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise OpsGitHubError("GitHub worktree creation timed out.", 504) from exc
+    except subprocess.CalledProcessError as exc:
+        detail = _text((exc.stderr or exc.stdout or "").strip(), limit=1200)
+        raise OpsGitHubError(detail or "GitHub worktree creation failed.", 502) from exc
+    return {
+        "command": ["git", "worktree", "add", "-b", branch, "..."],
         "stdout": _text(completed.stdout, limit=1200),
         "stderr": _text(completed.stderr, limit=1200),
         "sourcePath": str(source_path),
@@ -394,6 +515,8 @@ def import_repository(body: dict | None = None) -> dict:
     owner = _github_name(body.get("owner"), "owner")
     repo = _github_name(body.get("repo") or body.get("name"), "repository", limit=256)
     branch = _branch_name(body.get("branch") or body.get("defaultBranch"))
+    base_branch = _branch_name(body.get("baseBranch") or body.get("missingCoreBranchBase") or body.get("defaultBranch")) or "main"
+    create_missing_branch = _truthy(body.get("createMissingBranch")) or _truthy(body.get("createMissingCoreBranch"))
     protocol = _text(body.get("protocol"), limit=32).lower()
     clone_url = _clone_url(owner, repo, protocol)
     target_path = _target_path(body, repo)
@@ -407,13 +530,26 @@ def import_repository(body: dict | None = None) -> dict:
 
     cloned = False
     worktree = False
+    branch_result: dict[str, Any] = {}
     clone_result: dict[str, Any] = {}
     if use_worktree and not reuse_existing:
         source_path = _source_repo_path(body.get("sourcePath") or body.get("source_path"))
-        clone_result = _add_worktree(source_path, target_path, branch)
+        if create_missing_branch and branch and not _remote_branch_exists("origin", branch, cwd=source_path):
+            if not _remote_branch_exists("origin", base_branch, cwd=source_path):
+                raise _create_missing_branch_base_error(branch, base_branch)
+            clone_result = _add_worktree_from_base(source_path, target_path, branch, base_branch)
+            branch_result = _checkout_and_push_branch(target_path, branch, base_branch)
+        else:
+            clone_result = _add_worktree(source_path, target_path, branch)
         worktree = True
     elif _target_is_empty(target_path):
-        clone_result = _clone_repository(clone_url, target_path, branch)
+        if create_missing_branch and branch and not _remote_branch_exists(clone_url, branch):
+            if not _remote_branch_exists(clone_url, base_branch):
+                raise _create_missing_branch_base_error(branch, base_branch)
+            clone_result = _clone_repository(clone_url, target_path, base_branch)
+            branch_result = _checkout_and_push_branch(target_path, branch, base_branch)
+        else:
+            clone_result = _clone_repository(clone_url, target_path, branch)
         cloned = True
 
     project_name = _text(body.get("projectName") or body.get("name"), limit=128) or repo
@@ -439,8 +575,12 @@ def import_repository(body: dict | None = None) -> dict:
         "owner": owner,
         "repo": repo,
         "branch": branch,
+        "baseBranch": base_branch,
+        "branchCreated": bool(branch_result.get("created")),
+        "branchPushed": bool(branch_result.get("pushed")),
         "cloneUrl": clone_url,
         "targetPath": str(target_path),
         "project": project,
         "clone": clone_result,
+        "branchOperation": branch_result,
     }

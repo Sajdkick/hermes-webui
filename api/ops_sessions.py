@@ -127,7 +127,7 @@ def _session_status_flags(run: dict | None) -> dict:
         "waitingForApproval": waiting_for_approval,
         "waitingForInput": waiting_for_input,
         "waitingSince": _epoch_seconds((run or {}).get("updatedAt")),
-        "lastOutputAt": _epoch_seconds(((run or {}).get("readableOutput") or {}).get("updatedAt")),
+        "lastOutputAt": _epoch_seconds((run or {}).get("updatedAt")),
     }
 
 
@@ -602,9 +602,13 @@ def launch_task_session(project_id: str, task_id: str, body: dict | None = None)
             project.get("id"),
             profile,
         )
-    model, model_provider = _payload_session_defaults(body)
-    if not model:
-        model, model_provider = _project_session_defaults(project, profile)
+    payload = body if isinstance(body, dict) else {}
+    if payload.get("model") or payload.get("model_provider"):
+        logger.info(
+            "Ignoring task-launch request model/provider for project %s; using project/profile launch defaults",
+            project.get("id"),
+        )
+    model, model_provider = _project_session_defaults(project, profile)
     existing = None if force_new_session else _find_existing_task_session(project["id"], task["id"])
     if existing and _linked_session_matches_launch_defaults(existing["session"], profile, model, model_provider):
         session = existing["session"]

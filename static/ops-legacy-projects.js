@@ -576,7 +576,6 @@
       OPS.taskFormSelectionEnd=null;
       OPS.selectedRunId='';
       OPS.runDetail=null;
-      OPS.runReadableOutput=null;
       OPS.runEvents=null;
       OPS.runRequests=null;
       OPS.runArtifacts=null;

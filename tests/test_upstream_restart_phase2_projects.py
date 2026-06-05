@@ -1230,7 +1230,6 @@ def test_phase2_dashboard_restores_saved_ops_project_detail_state_on_open():
             showConfirmDialog: async () => false,
             showPromptDialog: async () => null,
             syncTopbar: () => {},
-            clearSessionReadableOutput: () => {},
             renderSessionList: async () => {},
             loadSession: async () => {},
             addFiles: () => {},

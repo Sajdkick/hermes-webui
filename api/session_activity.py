@@ -22,6 +22,7 @@ SESSION_ACTIVITY_GROUP_ASSIGNMENT_LIMIT = int(
     os.getenv("SESSION_ACTIVITY_GROUP_ASSIGNMENT_LIMIT_PER_USER") or "400"
 )
 SESSION_ACTIVITY_REFRESH_INTERVAL_MS = 5000
+SESSION_ACTIVITY_PLAY_HANDOFF_VISIBILITY_SECONDS = 24 * 60 * 60
 _ACTIVE_RUN_STATUSES = {
     "queued",
     "starting",
@@ -30,6 +31,14 @@ _ACTIVE_RUN_STATUSES = {
     "waiting-approval",
 }
 _VISIBLE_RUN_STATUSES = _ACTIVE_RUN_STATUSES | {"failed", "stopped", "succeeded"}
+_ACTIVE_PLAY_HANDOFF_STATUSES = {
+    "",
+    "unknown",
+    "queued",
+    "building",
+    "starting",
+    "running",
+}
 
 
 class SessionActivityError(Exception):
@@ -196,9 +205,36 @@ def _session_has_live_stream(session: dict) -> bool:
     return bool(session.get("is_streaming"))
 
 
+def _recent_epoch(value, *, max_age_seconds: int = SESSION_ACTIVITY_PLAY_HANDOFF_VISIBILITY_SECONDS) -> bool:
+    stamp = _epoch_seconds(value)
+    if stamp <= 0:
+        return False
+    return stamp >= datetime.now(timezone.utc).timestamp() - max_age_seconds
+
+
+def _play_handoff_activity_status(run: dict) -> str:
+    if not isinstance(run, dict):
+        return ""
+    raw_metadata = run.get("metadata")
+    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+    triggered_at = metadata.get("playPipelineTriggeredAt")
+    attempted_at = metadata.get("playPipelineAttemptedAt")
+    status_at = triggered_at or attempted_at or run.get("updatedAt") or run.get("updated_at")
+    if not _recent_epoch(status_at):
+        return ""
+    if str(metadata.get("playPipelineError") or "").strip():
+        return "failed"
+    if not triggered_at:
+        return ""
+    status = str(metadata.get("playPipelineStatus") or "").strip().lower().replace("_", "-").replace(" ", "-")
+    return status if status in _ACTIVE_PLAY_HANDOFF_STATUSES else ""
+
+
 def _activity_status(session: dict) -> dict | None:
-    run = session.get("ops_run") if isinstance(session.get("ops_run"), dict) else {}
+    raw_run = session.get("ops_run")
+    run = raw_run if isinstance(raw_run, dict) else {}
     run_status = str(run.get("status") or "").strip().lower()
+    play_handoff_status = _play_handoff_activity_status(run)
     has_live_stream = _session_has_live_stream(session)
     if session.get("waitingForApproval") or run_status == "waiting-approval":
         return {
@@ -242,6 +278,20 @@ def _activity_status(session: dict) -> dict | None:
             "labelText": "Codex degraded",
             "title": "Codex app-server is degraded for this session.",
         }
+    if play_handoff_status:
+        if play_handoff_status == "failed":
+            return {
+                "key": "degraded",
+                "toneClass": "degraded",
+                "labelText": "Play handoff failed",
+                "title": "Play handoff failed for this completed Ops run.",
+            }
+        return {
+            "key": "play-handoff",
+            "toneClass": "connecting",
+            "labelText": "Play handoff pending",
+            "title": "Play was triggered for this completed Ops run and is still pending or needs attention.",
+        }
     if run_status in {"stopped", "succeeded"}:
         return {
             "key": "done",
@@ -255,14 +305,20 @@ def _activity_status(session: dict) -> dict | None:
 def _is_activity_session(session: dict) -> bool:
     if not isinstance(session, dict) or session.get("archived"):
         return False
-    run = session.get("ops_run") if isinstance(session.get("ops_run"), dict) else {}
+    raw_run = session.get("ops_run")
+    run = raw_run if isinstance(raw_run, dict) else {}
     run_status = str(run.get("status") or "").strip().lower()
-    task = session.get("ops_task") if isinstance(session.get("ops_task"), dict) else {}
+    raw_task = session.get("ops_task")
+    task = raw_task if isinstance(raw_task, dict) else {}
     if session.get("waitingForApproval") or session.get("waitingForInput"):
         return True
     if _session_has_live_stream(session):
         return True
-    if str(task.get("id") or "").strip() and task.get("done") is not True:
+    if str(task.get("id") or "").strip():
+        return True
+    if str(session.get("source_tag") or "").strip() == ops_sessions.OPS_TASK_SOURCE_TAG:
+        return True
+    if _play_handoff_activity_status(run):
         return True
     return run_status in _ACTIVE_RUN_STATUSES
 
@@ -296,7 +352,6 @@ def _activity_repo_label(session: dict) -> str:
 
 def _activity_last_output_at(session: dict, run: dict) -> float | None:
     for candidate in (
-        ((run.get("readableOutput") or {}).get("updatedAt") if isinstance(run, dict) else None),
         session.get("lastOutputAt"),
         session.get("lastActivityAt"),
         session.get("updated_at"),
@@ -560,7 +615,7 @@ def _lean_activity_source() -> dict:
     """Build the activity list from cheap indexes and raw run records only.
 
     The rich Ops sessions endpoint intentionally resolves projects, tasks,
-    linkages, runs, pending requests, readable output, and session sidecars. The
+    linkages, runs, pending requests, and session sidecars. The
     activity poller runs every few seconds, so it must avoid that N+1 enrichment
     path and use already-indexed session summaries plus a single raw runs read.
     """
@@ -638,7 +693,6 @@ def _lean_activity_source() -> dict:
         run = dict(raw_run)
         run["status"] = status
         run.setdefault("pendingRequestCount", 0)
-        run.setdefault("readableOutput", {"available": False})
         project_id = _text(run.get("projectId") or run.get("project_id") or _project_id_for_session(session), limit=128)
         project = project_by_id.get(project_id) or _project_context_for_session(session, project_by_id)
         task = _run_task_context(run, project, task_cache)
@@ -677,7 +731,6 @@ def _serialize_activity_session(session: dict, assignment_map: dict[str, str]) -
         "title": "No recent Codex activity detected for this session.",
     }
     last_output_at = _activity_last_output_at(session, run)
-    readable_output = run.get("readableOutput") if isinstance(run.get("readableOutput"), dict) else {}
     task = session.get("ops_task") if isinstance(session.get("ops_task"), dict) else {}
     return {
         "id": str(session.get("session_id") or "").strip(),
@@ -697,8 +750,6 @@ def _serialize_activity_session(session: dict, assignment_map: dict[str, str]) -
         "promptLine": None,
         "waitingForInput": bool(session.get("waitingForInput")),
         "waitingForInputSince": session.get("waitingSince"),
-        "readableOutputPending": bool(readable_output.get("available")),
-        "readableOutputUpdatedAt": readable_output.get("updatedAt"),
         "groupId": group_id,
         "running": True,
         "activityStatus": status,

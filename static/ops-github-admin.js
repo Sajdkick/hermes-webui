@@ -46,7 +46,7 @@
         const branchName=String(branch && branch.name || '').trim();
         const importing=state && state.githubImportingRepoKey===key+':'+branchName;
         return [
-          '<button class="ops-admin-chip" type="button" data-ops-action="github-import-repo" data-owner="'+escapeHtml(repo && repo.owner || '')+'" data-repo="'+escapeHtml(repo && repo.name || '')+'" data-branch="'+escapeHtml(branchName)+'" data-project-name="'+escapeHtml(repo && repo.name || '')+'"'+(importing?' disabled':'')+'>',
+          '<button class="ops-admin-chip" type="button" data-ops-action="github-import-repo" data-owner="'+escapeHtml(repo && repo.owner || '')+'" data-repo="'+escapeHtml(repo && repo.name || '')+'" data-branch="'+escapeHtml(branchName)+'" data-default-branch="'+escapeHtml(repo && repo.defaultBranch || 'main')+'" data-project-name="'+escapeHtml(repo && repo.name || '')+'"'+(importing?' disabled':'')+'>',
           '<strong>'+escapeHtml(branchName)+'</strong>',
           '<span>'+(importing?'Importing…':'Import branch')+'</span>',
           '</button>'
@@ -77,7 +77,7 @@
         '</div>',
         '<div class="ops-runtime-actions">',
         '<button class="ops-shell-link" type="button" data-ops-action="github-load-branches" data-owner="'+escapeHtml(repo.owner||'')+'" data-repo="'+escapeHtml(repo.name||'')+'"'+(loadingBranches?' disabled':'')+'>'+(loadingBranches?'Loading…':'Load branches')+'</button>',
-        '<button class="ops-shell-link primary" type="button" data-ops-action="github-import-repo" data-owner="'+escapeHtml(repo.owner||'')+'" data-repo="'+escapeHtml(repo.name||'')+'" data-branch="'+escapeHtml(repo.defaultBranch||'main')+'" data-project-name="'+escapeHtml(repo.name||'')+'"'+(importingDefault?' disabled':'')+'>'+(importingDefault?'Importing…':'Import default')+'</button>',
+        '<button class="ops-shell-link primary" type="button" data-ops-action="github-import-repo" data-owner="'+escapeHtml(repo.owner||'')+'" data-repo="'+escapeHtml(repo.name||'')+'" data-branch="'+escapeHtml(repo.defaultBranch||'main')+'" data-default-branch="'+escapeHtml(repo.defaultBranch||'main')+'" data-project-name="'+escapeHtml(repo.name||'')+'"'+(importingDefault?' disabled':'')+'>'+(importingDefault?'Importing…':'Import default')+'</button>',
         '</div>',
         renderBranches(state,repo),
         '</article>'

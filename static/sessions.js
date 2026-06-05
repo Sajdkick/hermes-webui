@@ -36,6 +36,17 @@ function _clearSessionLoad(sid, token){
   if(_isCurrentSessionLoad(sid, token)) _loadingSessionId = null;
 }
 
+function _retargetCurrentSessionLoad(fromSid, toSid, token){
+  if(!_isCurrentSessionLoad(fromSid, token)) return fromSid;
+  const nextSid=String(toSid||'').trim();
+  if(nextSid&&nextSid!==fromSid) _loadingSessionId=nextSid;
+  return nextSid||fromSid;
+}
+
+function _sessionResolveLineageParam(exactSession){
+  return exactSession?'&resolve_lineage=0':'';
+}
+
 function _activeSessionPaneNeedsRecovery(sid){
   if(!sid||!S.session||S.session.session_id!==sid) return false;
   const el=typeof $==='function'?$('msgInner'):null;
@@ -612,6 +623,8 @@ if(typeof window!=='undefined'){
 async function loadSession(sid){
   const currentSid = S.session ? S.session.session_id : null;
   const options=(arguments.length>1&&arguments[1]&&typeof arguments[1]==='object')?arguments[1]:{};
+  const exactSession=options.exact===true;
+  const lineageParam=_sessionResolveLineageParam(exactSession);
   const explicitForce=options.force===true;
   const needsRecovery=_activeSessionPaneNeedsRecovery(sid);
   const forceReload=explicitForce || _loadingSessionId===sid || needsRecovery;
@@ -662,7 +675,7 @@ async function loadSession(sid){
     const retry=()=>{
       if(_isStaleSessionLoad(sid, loadToken)) return;
       if(typeof document!=='undefined'&&document.visibilityState==='hidden') return;
-      loadSession(sid,{force:true});
+      loadSession(sid,{force:true,exact:exactSession});
     };
     setTimeout(retry, (typeof navigator!=='undefined'&&navigator.onLine===false)?2500:1200);
     if(typeof window!=='undefined') window.addEventListener('online', retry, {once:true});
@@ -672,7 +685,7 @@ async function loadSession(sid){
   // Guard against network/server failures to prevent a permanently stuck loading state.
   let data;
   try {
-    data = await api(`/api/session?session_id=${encodeURIComponent(sid)}&messages=0&resolve_model=0`);
+    data = await api(`/api/session?session_id=${encodeURIComponent(sid)}&messages=0&resolve_model=0${lineageParam}`);
   } catch(e) {
     if(_isTransientLoadError(e)){
       _retryLoadAfterWake('Reconnecting to session…');
@@ -706,7 +719,11 @@ async function loadSession(sid){
   }
   // Stale response? A newer loadSession() call has already started (#1060).
   if (_isStaleSessionLoad(sid, loadToken)) return;
+  if(!exactSession&&data.session&&data.session.session_id){
+    sid=_retargetCurrentSessionLoad(sid,data.session.session_id,loadToken);
+  }
   S.session=data.session;
+  S.session._exact_session_load=exactSession;
   S.session._modelResolutionDeferred=true;
   S.lastUsage={...(data.session.last_usage||{})};
   // Reset scroll-direction tracker on session switch so the new chat's
@@ -1289,7 +1306,8 @@ function _resolveSessionModelForDisplaySoon(sid){
   if(!sid) return;
   setTimeout(async()=>{
     try{
-      const data=await api(`/api/session?session_id=${encodeURIComponent(sid)}&messages=0&resolve_model=1`);
+      const lineageParam=_sessionResolveLineageParam(S.session&&S.session.session_id===sid&&S.session._exact_session_load===true);
+      const data=await api(`/api/session?session_id=${encodeURIComponent(sid)}&messages=0&resolve_model=1${lineageParam}`);
       const model=data&&data.session&&data.session.model;
       const provider=data&&data.session&&data.session.model_provider;
       if(!model||!S.session||S.session.session_id!==sid) return;
@@ -1331,13 +1349,15 @@ let _messagesTruncated = false;
 // Older messages are loaded on-demand via _loadOlderMessages().
 const _INITIAL_MSG_LIMIT = 30;
 
-async function _ensureMessagesLoaded(sid) {
+async function _ensureMessagesLoaded(sid, options) {
+  const exactSession=(options&&options.exact===true)||(S.session&&S.session.session_id===sid&&S.session._exact_session_load===true);
+  const lineageParam=_sessionResolveLineageParam(exactSession);
   // Already have messages? (e.g. from INFLIGHT restore path, already set)
   if (S.messages && S.messages.length > 0 && S.messages[0] && S.messages[0].role) {
     return;
   }
   // Fetch session messages with a tail window for fast initial load.
-  const data = await api(`/api/session?session_id=${encodeURIComponent(sid)}&messages=1&resolve_model=0&msg_limit=${_INITIAL_MSG_LIMIT}`);
+  const data = await api(`/api/session?session_id=${encodeURIComponent(sid)}&messages=1&resolve_model=0&msg_limit=${_INITIAL_MSG_LIMIT}${lineageParam}`);
   // Guard: api() may have redirected (401) and returned undefined.
   if (!data || !data.session) return;
   _messagesTruncated = !!data.session._messages_truncated;
@@ -1425,13 +1445,14 @@ async function _loadOlderMessages() {
   if (!sid || !S.messages.length) return;
   if (_oldestIdx <= 0) { _messagesTruncated = false; return; }
   _loadingOlder = true;
+  const lineageParam=_sessionResolveLineageParam(S.session&&S.session.session_id===sid&&S.session._exact_session_load===true);
   // Snapshot the generation BEFORE we await. If S.messages is wholesale
   // replaced while the request is in flight, the post-await check below
   // bails out so we never prepend stale older messages onto a freshly
   // rebuilt transcript (#1937).
   const startGeneration = _messagesGeneration;
   try {
-    const data = await api(`/api/session?session_id=${encodeURIComponent(sid)}&messages=1&resolve_model=0&msg_before=${_oldestIdx}&msg_limit=${_INITIAL_MSG_LIMIT}`);
+    const data = await api(`/api/session?session_id=${encodeURIComponent(sid)}&messages=1&resolve_model=0&msg_before=${_oldestIdx}&msg_limit=${_INITIAL_MSG_LIMIT}${lineageParam}`);
     // Guard: api() may have redirected (401) and returned undefined.
     if (!data || !data.session) { _loadingOlder = false; return; }
     //  - response shape sane
@@ -1525,7 +1546,8 @@ async function _ensureAllMessagesLoaded() {
   _loadingOlder = true;
   try {
     const sid = S.session.session_id;
-    const data = await api(`/api/session?session_id=${encodeURIComponent(sid)}&messages=1&resolve_model=0`);
+    const lineageParam=_sessionResolveLineageParam(S.session&&S.session._exact_session_load===true);
+    const data = await api(`/api/session?session_id=${encodeURIComponent(sid)}&messages=1&resolve_model=0${lineageParam}`);
     // Guard: api() may have redirected (401) and returned undefined.
     if (!data || !data.session) return;
     // Session may have been switched while we awaited. Bail rather than
@@ -3283,7 +3305,7 @@ function renderSessionListFromCache(){
             try{await api('/api/session/import_cli',{method:'POST',body:JSON.stringify({session_id:seg.session_id})});}
             catch(_e){ /* read-only fallback */ }
           }
-          await loadSession(seg.session_id);
+          await loadSession(seg.session_id,{exact:true});
           renderSessionListFromCache();
         };
         lineageList.appendChild(row);
@@ -3310,7 +3332,7 @@ function renderSessionListFromCache(){
             try{await api('/api/session/import_cli',{method:'POST',body:JSON.stringify({session_id:child.session_id})});}
             catch(_e){ /* read-only fallback */ }
           }
-          await loadSession(child.session_id);
+          await loadSession(child.session_id,{exact:true});
           renderSessionListFromCache();
         };
         childList.appendChild(row);

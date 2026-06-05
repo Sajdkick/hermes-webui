@@ -22,13 +22,13 @@ Do not put readable user-facing output in the terminal. Reserve terminal output 
    - `CLOUD_TERMINAL_READABLE_OUTPUT_ASSET_DIR="$CLOUD_TERMINAL_READABLE_OUTPUT_DIR/assets"`
 3. Use that fallback path for project sessions when you know the project root. `Repair session env` writes vars into the interactive shell, but the already-running agent process may still not see them, so deriving the canonical path is expected in that case.
 4. If neither the env vars nor a safe fallback path can be derived, do not silently fall back to terminal scrollback. Tell the user readable-output is unavailable in this session.
+   - If an environment-probing command is blocked by the consent guard late in the task, do **not** retry or route around the guard just to discover the readable-output path. Use any already-known path/context if available; otherwise report that readable output could not be written and provide the same concise Markdown content in the final response.
 5. Create the target directories if needed:
    - `mkdir -p "$(dirname "$CLOUD_TERMINAL_READABLE_OUTPUT_PATH")" "$CLOUD_TERMINAL_READABLE_OUTPUT_ASSET_DIR"`
 6. Write a concise Markdown document to `CLOUD_TERMINAL_READABLE_OUTPUT_PATH`.
-7. If you want inline images, copy them into `CLOUD_TERMINAL_READABLE_OUTPUT_ASSET_DIR`, verify the copied files exist and open, and reference them from the Markdown with relative paths such as `![Result screenshot](assets/result.png)`. For chat final answers outside the readable-output Markdown, use `MEDIA:/absolute/path/to/file` links instead of Markdown image syntax. If a user reports broken images, first verify the files and copy them to a simple stable absolute path before re-linking.
+7. If you want inline images, copy them into `CLOUD_TERMINAL_READABLE_OUTPUT_ASSET_DIR` and reference them from the Markdown with relative paths such as `![Result screenshot](assets/result.png)`.
 8. Leave the file in place after writing it. Cloud Terminal shows it automatically and deletes it when the user clicks the read button.
 9. If you need to update the unread message, overwrite the same Markdown file instead of creating multiple variants.
-10. Before overwriting an existing readable-output file, read it first when possible. If another agent/session has already written content, preserve or intentionally replace it instead of blindly clobbering it; Cloud Terminal may warn when a sibling agent modified the file you are about to write.
 
 ## Content Guidance
 

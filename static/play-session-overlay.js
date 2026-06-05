@@ -88,6 +88,8 @@
       .hermes-play-session-action:hover{background:rgba(79,70,229,.42);}
       .hermes-play-session-frame-wrap{position:relative;display:flex;flex:1;min-height:0;background:#fff;}
       .hermes-play-session-frame{flex:1;width:100%;border:0;background:#fff;}
+      .hermes-play-session-frame.is-pending{visibility:hidden;}
+      .hermes-play-session-frame[hidden]{display:none;}
       .hermes-play-session-frame-status{position:absolute;inset:auto 12px 12px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid rgba(148,163,184,.28);border-radius:12px;background:rgba(15,23,42,.92);color:#f8fafc;padding:10px 12px;font-size:12px;box-shadow:0 14px 30px rgba(15,23,42,.28);}
       .hermes-play-session-frame-status[hidden]{display:none;}
       .hermes-play-session-frame-status a{color:#bfdbfe;font-weight:800;text-decoration:none;white-space:nowrap;}
@@ -159,25 +161,74 @@
     const frame=root.querySelector('.hermes-play-session-frame');
     const loading=root.querySelector('[data-hermes-play-session-loading]');
     const fallback=root.querySelector('[data-hermes-play-session-frame-fallback]');
-    let loaded=false;
+    let frameLoadSeen=false;
     let fallbackTimer=null;
+    let verifyTimer=null;
     function hideLoading(){
       if(loading)loading.hidden=true;
     }
-    function showFallback(){
+    function clearFrameTimers(){
+      if(fallbackTimer){
+        clearTimeout(fallbackTimer);
+        fallbackTimer=null;
+      }
+      if(verifyTimer){
+        clearTimeout(verifyTimer);
+        verifyTimer=null;
+      }
+    }
+    function frameInspectReady(){
+      try{
+        const doc=frame&&(frame.contentDocument||(frame.contentWindow&&frame.contentWindow.document));
+        if(!doc||!doc.body)return false;
+        return !!(doc.body.classList&&doc.body.classList.contains('ops-session-inspect'));
+      }catch(_error){
+        return false;
+      }
+    }
+    function markFrameReady(){
+      clearFrameTimers();
       hideLoading();
+      if(frame){
+        frame.hidden=false;
+        frame.classList.remove('is-pending');
+      }
+      if(fallback)fallback.hidden=true;
+    }
+    function showFallback(){
+      clearFrameTimers();
+      hideLoading();
+      if(frame)frame.hidden=true;
       if(fallback)fallback.hidden=false;
     }
+    function scheduleFrameVerification(){
+      const started=Date.now();
+      const check=()=>{
+        if(frameInspectReady()){
+          markFrameReady();
+          return;
+        }
+        if(Date.now()-started>=6000){
+          showFallback();
+          return;
+        }
+        verifyTimer=setTimeout(check,250);
+      };
+      check();
+    }
     if(frame){
+      frame.classList.add('is-pending');
       frame.addEventListener('load',()=>{
-        loaded=true;
-        hideLoading();
-        if(fallback)fallback.hidden=true;
-        if(fallbackTimer)clearTimeout(fallbackTimer);
+        frameLoadSeen=true;
+        if(fallbackTimer){
+          clearTimeout(fallbackTimer);
+          fallbackTimer=null;
+        }
+        scheduleFrameVerification();
       });
       frame.addEventListener('error',showFallback);
       fallbackTimer=setTimeout(()=>{
-        if(!loaded)showFallback();
+        if(!frameLoadSeen)showFallback();
       },8000);
     }
     function setCollapsed(collapsed){

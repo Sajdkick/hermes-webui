@@ -255,17 +255,16 @@ Result:
 
 ## Phase 5 deliverables
 
-- [x] Add fork-owned session readable-output lookup helpers in `api/session_readable_output.py`
-- [x] Add fork-owned session readable-output routes in `api/routes_ops_sessions.py`
-- [x] Mount a fork-owned readable-output host, stylesheet, and script on the main Hermes page
+- [x] Add fork-owned session native Markdown output routes in `api/routes_ops_sessions.py`
+- [x] Mount a fork-owned native Markdown output host, stylesheet, and script on the main Hermes page
 - [x] Reuse existing session lifecycle globals via wrappers instead of reshaping `sessions.js`
-- [x] Add one narrow `messages.js` completion hook so the active session refreshes readable output after a completed turn
+- [x] Add one narrow `messages.js` completion hook so the active session refreshes native Markdown output after a completed turn
 - [x] Run focused verification and a merge rehearsal for the Phase 5 snapshot
 
 ## Phase 5 verification
 
-- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase5_readable_output.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
-- `python -m py_compile upstream_restart_guardrails.py api/routes_ops_shell.py api/routes_ops.py api/routes_ops_projects.py api/routes_ops_sessions.py api/ops_projects.py api/ops_sessions.py api/session_sidecars.py api/session_readable_output.py`
+- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
+- `python -m py_compile upstream_restart_guardrails.py api/routes_ops_shell.py api/routes_ops.py api/routes_ops_projects.py api/routes_ops_sessions.py api/ops_projects.py api/ops_sessions.py api/session_sidecars.py`
 - `python upstream_restart_guardrails.py`
 - `git diff --check`
 
@@ -274,7 +273,7 @@ Result:
 - `30` tests passed
 - guardrail script stayed `ready`
 - hotspot churn remained within budget, with only `api/routes.py`, `static/boot.js`, `static/index.html`, and `static/messages.js` touched in upstream-owned files
-- the main Hermes chat view now loads and refreshes session-scoped readable output from fork-owned routes
+- the main Hermes chat view now loads and refreshes session-scoped native Markdown output from fork-owned routes
 - no whitespace or patch-format issues were reported
 
 ## Phase 5 merge rehearsal
@@ -293,9 +292,9 @@ Result:
 ## Minimal upstream-owned edits in Phase 5
 
 - `static/index.html`
-  Added one host mount plus one stylesheet and one script include so the readable-output UI can stay fork-owned.
+  Added one host mount plus one stylesheet and one script include so the native Markdown output UI can stay fork-owned.
 - `static/messages.js`
-  Added a single completion hook that refreshes the active session’s readable output after a successful turn.
+  Added a single completion hook that refreshes the active session’s native Markdown output after a successful turn.
 - `api/routes.py`
   No additional Phase 5 churn was added. The existing `/api/ops/*` dispatcher hook remained unchanged.
 
@@ -310,8 +309,8 @@ Result:
 
 ## Phase 6 verification
 
-- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase5_readable_output.py tests/test_upstream_restart_phase6_notifications.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
-- `python -m py_compile upstream_restart_guardrails.py api/routes_ops_shell.py api/routes_ops.py api/routes_ops_projects.py api/routes_ops_sessions.py api/routes_ops_notifications.py api/ops_projects.py api/ops_sessions.py api/ops_notifications.py api/session_sidecars.py api/session_readable_output.py`
+- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase6_notifications.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
+- `python -m py_compile upstream_restart_guardrails.py api/routes_ops_shell.py api/routes_ops.py api/routes_ops_projects.py api/routes_ops_sessions.py api/routes_ops_notifications.py api/ops_projects.py api/ops_sessions.py api/ops_notifications.py api/session_sidecars.py`
 - `python upstream_restart_guardrails.py`
 - `git diff --check`
 
@@ -343,9 +342,9 @@ Result:
 - `static/boot.js`
   No additional Phase 6 churn was added. The existing five-line empty-session keepalive hook remained unchanged.
 - `static/index.html`
-  No additional Phase 6 churn was added. The existing readable-output host mount remained unchanged.
+  No additional Phase 6 churn was added. The existing native Markdown output host mount remained unchanged.
 - `static/messages.js`
-  No additional Phase 6 churn was added. The existing readable-output refresh hook remained unchanged.
+  No additional Phase 6 churn was added. The existing native Markdown output refresh hook remained unchanged.
 
 ## Phase 7 runtime-guides checkpoint deliverables
 
@@ -358,8 +357,8 @@ Result:
 
 ## Phase 7 runtime-guides checkpoint verification
 
-- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase5_readable_output.py tests/test_upstream_restart_phase6_notifications.py tests/test_upstream_restart_phase7_runtime_guides.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
-- `python -m py_compile upstream_restart_guardrails.py api/routes_ops_shell.py api/routes_ops.py api/routes_ops_projects.py api/routes_ops_sessions.py api/routes_ops_notifications.py api/routes_ops_runtime.py api/ops_projects.py api/ops_sessions.py api/ops_notifications.py api/ops_guides.py api/ops_runtime_tools.py api/session_sidecars.py api/session_readable_output.py`
+- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase6_notifications.py tests/test_upstream_restart_phase7_runtime_guides.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
+- `python -m py_compile upstream_restart_guardrails.py api/routes_ops_shell.py api/routes_ops.py api/routes_ops_projects.py api/routes_ops_sessions.py api/routes_ops_notifications.py api/routes_ops_runtime.py api/ops_projects.py api/ops_sessions.py api/ops_notifications.py api/ops_guides.py api/ops_runtime_tools.py api/session_sidecars.py`
 - `python upstream_restart_guardrails.py`
 - `git diff --check`
 
@@ -400,8 +399,8 @@ Result:
 
 ## Phase 7 Play checkpoint verification
 
-- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase5_readable_output.py tests/test_upstream_restart_phase6_notifications.py tests/test_upstream_restart_phase7_runtime_guides.py tests/test_upstream_restart_phase7_play.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
-- `python -m py_compile upstream_restart_guardrails.py api/routes_ops_shell.py api/routes_ops.py api/routes_ops_projects.py api/routes_ops_sessions.py api/routes_ops_notifications.py api/routes_ops_runtime.py api/routes_ops_play.py api/play_pipeline.py api/ops_projects.py api/ops_sessions.py api/ops_notifications.py api/ops_guides.py api/ops_runtime_tools.py api/session_sidecars.py api/session_readable_output.py`
+- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase6_notifications.py tests/test_upstream_restart_phase7_runtime_guides.py tests/test_upstream_restart_phase7_play.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
+- `python -m py_compile upstream_restart_guardrails.py api/routes_ops_shell.py api/routes_ops.py api/routes_ops_projects.py api/routes_ops_sessions.py api/routes_ops_notifications.py api/routes_ops_runtime.py api/routes_ops_play.py api/play_pipeline.py api/ops_projects.py api/ops_sessions.py api/ops_notifications.py api/ops_guides.py api/ops_runtime_tools.py api/session_sidecars.py`
 - `python upstream_restart_guardrails.py`
 - `git diff --check`
 
@@ -442,8 +441,8 @@ Result:
 
 ## Phase 7 runtime inspect checkpoint verification
 
-- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase5_readable_output.py tests/test_upstream_restart_phase6_notifications.py tests/test_upstream_restart_phase7_runtime_guides.py tests/test_upstream_restart_phase7_play.py tests/test_upstream_restart_phase7_runtime_inspect.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
-- `python -m py_compile upstream_restart_guardrails.py api/ops_runtime_inspect.py api/ops_runtime_tools.py api/routes_ops_runtime.py api/play_pipeline.py api/routes_ops_play.py api/routes_ops_shell.py api/routes_ops.py api/routes_ops_projects.py api/routes_ops_sessions.py api/routes_ops_notifications.py api/ops_projects.py api/ops_sessions.py api/ops_notifications.py api/ops_guides.py api/session_sidecars.py api/session_readable_output.py`
+- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase6_notifications.py tests/test_upstream_restart_phase7_runtime_guides.py tests/test_upstream_restart_phase7_play.py tests/test_upstream_restart_phase7_runtime_inspect.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
+- `python -m py_compile upstream_restart_guardrails.py api/ops_runtime_inspect.py api/ops_runtime_tools.py api/routes_ops_runtime.py api/play_pipeline.py api/routes_ops_play.py api/routes_ops_shell.py api/routes_ops.py api/routes_ops_projects.py api/routes_ops_sessions.py api/routes_ops_notifications.py api/ops_projects.py api/ops_sessions.py api/ops_notifications.py api/ops_guides.py api/session_sidecars.py`
 - `python upstream_restart_guardrails.py`
 - `git diff --check`
 
@@ -531,12 +530,12 @@ Result:
 | --- | --- | --- | --- |
 | `/ops` shell plus project/task CRUD | `docs/migration/hermes-cloud-terminal-user-guide.md` daily workflow; legacy `api/ops_projects.py`, `static/ops-projects.js` | `api/ops_projects.py`, `api/routes_ops_projects.py`, `static/ops-projects.js`, `tests/test_upstream_restart_phase2_projects.py`, `tests/test_upstream_restart_phase2_ui.py` | Ported |
 | Task-linked execution sessions and task resume | legacy user guide “Quick task runner” / project detail workflow; legacy `api/ops_sessions.py` | `api/ops_sessions.py`, `api/session_sidecars.py`, `tests/test_upstream_restart_phase3_sidecars.py`, `tests/test_upstream_restart_phase4_sessions.py` | Ported as explicit task launch and resume from project detail |
-| Readable output for active work | legacy user guide “Runs, Requests, And Readable Output”; legacy `api/ops_artifacts.py`, `api/routes_ops_runs.py` | `api/session_readable_output.py`, `api/routes_ops_sessions.py`, `static/readable-output-ui.js`, `static/readable-output-ui.css`, `tests/test_upstream_restart_phase5_readable_output.py` | Ported for task-linked Hermes sessions |
+| Native Markdown output for active work | legacy `api/ops_artifacts.py`, `api/routes_ops_runs.py` | `api/routes_ops_sessions.py`, `static/native Markdown output-ui.js`, `static/native Markdown output-ui.css`, | Ported for task-linked Hermes sessions |
 | User-facing approval and clarify workflow | legacy runs/request UI and notification docs | `api/ops_notifications.py`, `api/routes_ops_notifications.py`, `static/ops-notifications.js`, `tests/test_upstream_restart_phase6_notifications.py` | Ported |
 | Runtime gather/review, Play, and inspect | legacy user guide “Runtime And Play”; legacy `api/ops_guides.py`, `api/ops_runtime_tools.py`, `api/play_pipeline.py`, `static/ops-play.js`, `static/play-inspect-shell.js` | `api/ops_guides.py`, `api/ops_runtime_tools.py`, `api/ops_runtime_inspect.py`, `api/play_pipeline.py`, `api/routes_ops_runtime.py`, `api/routes_ops_play.py`, `static/ops-runtime.js`, `static/play-proxy-compat.js`, `tests/test_upstream_restart_phase7_runtime_guides.py`, `tests/test_upstream_restart_phase7_play.py`, `tests/test_upstream_restart_phase7_runtime_inspect.py` | Ported |
 | Profile/model conveniences | legacy agent/profile bridge modules and upstream-sync launcher inputs | Upstream Hermes profile/model APIs reused directly; project-level defaults layered in `api/ops_projects.py`, `api/ops_sessions.py`, `static/ops-projects.js`, `tests/test_upstream_restart_phase8_project_defaults.py` | Reused upstream plus thin fork integration |
 | Project git and upstream/core-branch visibility | legacy `api/ops_git.py`, `static/ops-git.js` | `api/ops_git.py`, `api/routes_ops_git.py`, `static/ops-git.js`, `tests/test_upstream_restart_phase8_git_status.py` | Ported as read-only visibility; direct maintenance-session sync flow not reintroduced |
-| Durable run registry, run activity, artifact health, and run detail | legacy `api/routes_ops_runs.py`, `static/ops-runs.js`, `docs/migration/hermes-cloud-terminal-user-guide.md` | `api/ops_runs.py`, `api/routes_ops_runs.py`, `static/ops-runs.js`, `api/ops_sessions.py`, `tests/test_upstream_restart_phase9_runs.py` | Ported as task-linked run activity with readable-output and pending-request detail |
+| Durable run registry, run activity, artifact health, and run detail | legacy `api/routes_ops_runs.py`, `static/ops-runs.js`, `docs/migration/hermes-cloud-terminal-user-guide.md` | `api/ops_runs.py`, `api/routes_ops_runs.py`, `static/ops-runs.js`, `api/ops_sessions.py`, `tests/test_upstream_restart_phase9_runs.py` | Ported as task-linked run activity with native Markdown output and pending-request detail |
 | Database admin and project-scoped inspection | legacy guide “Deployment And Push Scope”; legacy `api/ops_database.py`, `static/ops-database.js` | `api/ops_database.py`, `api/routes_ops_database.py`, `static/ops-database.js`, `static/ops-projects.js`, `tests/test_upstream_restart_phase10_database.py`, `tests/test_upstream_restart_phase10_admin_ui.py` | Ported as clean read-only database admin and project inspection flows |
 | GitHub admin discovery and import | legacy guide “Deployment And Push Scope”; legacy `api/ops_github.py`, `static/ops-github.js` | `api/ops_github.py`, `api/routes_ops_github.py`, `static/ops-github-admin.js`, `static/ops-projects.js`, `tests/test_upstream_restart_phase10_github.py`, `tests/test_upstream_restart_phase10_admin_ui.py` | Ported |
 | Maintenance-session upstream sync and apply flow | legacy `api/routes_upstream_sync.py`, `api/upstream_sync.py`, `static/upstream-sync-ui.js` | `api/ops_upstream_sync.py`, `api/routes_ops_upstream_sync.py`, `api/ops_sessions.py`, `static/ops-upstream-sync.js`, `static/ops-projects.js`, `tests/test_upstream_restart_phase10_upstream_sync.py`, `tests/test_upstream_restart_phase10_admin_ui.py` | Ported as a clean project-scoped maintenance-session slice |
@@ -548,19 +547,19 @@ Result:
 | --- | --- | --- |
 | Start from latest `upstream/master` | Current branch snapshot at top of this file lists base commit `9e31a2ac65c3fa7c26a733e213a308aa4a04f992`; guardrail output still reports `base=upstream/master` and the same merge-base | Met |
 | Re-port features in small vertical slices | Phases 1-8 in this tracker each have scoped deliverables, focused verification, and merge rehearsals | Met |
-| Keep product behavior in fork-owned modules | `git diff --name-status upstream/master..HEAD` shows new behavior in fork-owned `api/ops_*.py`, `api/routes_ops_*.py`, `static/ops-*.js`, `static/cloud-terminal.css`, `static/cloud-terminal-entry.js`, `static/readable-output-ui.*`, `static/play-proxy-compat.js` | Met |
+| Keep product behavior in fork-owned modules | `git diff --name-status upstream/master..HEAD` shows new behavior in fork-owned `api/ops_*.py`, `api/routes_ops_*.py`, `static/ops-*.js`, `static/cloud-terminal.css`, `static/cloud-terminal-entry.js`, `static/native Markdown output-ui.*`, `static/play-proxy-compat.js` | Met |
 | Avoid broad edits to Hermes-owned hotspots | Guardrail output stays `ready`; `git diff --name-only upstream/master..HEAD -- api/models.py api/streaming.py api/config.py api/profiles.py static/ui.js static/sessions.js static/panels.js static/style.css` returns nothing; hotspot churn is still only `api/routes.py`, `static/boot.js`, `static/index.html`, `static/messages.js` within budget | Met |
 | Sidecars own fork workflow metadata | `api/session_sidecars.py` stores project/task linkage outside Hermes session JSON; covered by `tests/test_upstream_restart_phase3_sidecars.py` | Met |
 | Prefer behavior tests over source-shape tests | All restart coverage is phase behavior coverage in `tests/test_upstream_restart_phase1_shell.py` through `tests/test_upstream_restart_phase9_runs.py` plus `tests/test_upstream_restart_guardrails.py` | Met |
 | Upstream tests remain intact unless explicitly documented | `git diff --name-status upstream/master..HEAD -- tests` shows only added restart tests; `git diff --diff-filter=D --name-only upstream/master..HEAD` returns nothing | Met |
-| High-value fork workflows are rebuilt on latest upstream | Ported/reused rows in the Phase 9 parity audit cover project/task CRUD, task-linked sessions, readable output, requests, run activity, runtime gather/review, Play, inspect, profile/model defaults, project git visibility, database admin, GitHub admin, and maintenance-session upstream sync | Met |
+| High-value fork workflows are rebuilt on latest upstream | Ported/reused rows in the Phase 9 parity audit cover project/task CRUD, task-linked sessions, native Markdown output, requests, run activity, runtime gather/review, Play, inspect, profile/model defaults, project git visibility, database admin, GitHub admin, and maintenance-session upstream sync | Met |
 | Final merge should be cheap and mostly mechanical | Final Phase 9 rehearsal below merged `upstream/master` with `0` conflicts and guardrail state `ready` | Met |
 | Old branch no longer needed except as historical reference | The remaining legacy-only surfaces are now just migration health and deployment. Database admin, GitHub admin, and maintenance-session upstream sync were rebuilt in Phase 10 as clean `/ops` slices, so the old branch is no longer needed for those workflows either. | Met |
 
 ## Phase 9 verification
 
-- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase5_readable_output.py tests/test_upstream_restart_phase6_notifications.py tests/test_upstream_restart_phase7_runtime_guides.py tests/test_upstream_restart_phase7_play.py tests/test_upstream_restart_phase7_runtime_inspect.py tests/test_upstream_restart_phase8_project_defaults.py tests/test_upstream_restart_phase8_git_status.py tests/test_upstream_restart_phase9_runs.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
-- `python -m py_compile upstream_restart_guardrails.py api/ops_git.py api/ops_guides.py api/ops_notifications.py api/ops_projects.py api/ops_runs.py api/ops_runtime_inspect.py api/ops_runtime_tools.py api/ops_sessions.py api/play_pipeline.py api/routes_ops.py api/routes_ops_git.py api/routes_ops_notifications.py api/routes_ops_play.py api/routes_ops_projects.py api/routes_ops_runs.py api/routes_ops_runtime.py api/routes_ops_sessions.py api/routes_ops_shell.py api/session_readable_output.py api/session_sidecars.py`
+- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase6_notifications.py tests/test_upstream_restart_phase7_runtime_guides.py tests/test_upstream_restart_phase7_play.py tests/test_upstream_restart_phase7_runtime_inspect.py tests/test_upstream_restart_phase8_project_defaults.py tests/test_upstream_restart_phase8_git_status.py tests/test_upstream_restart_phase9_runs.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
+- `python -m py_compile upstream_restart_guardrails.py api/ops_git.py api/ops_guides.py api/ops_notifications.py api/ops_projects.py api/ops_runs.py api/ops_runtime_inspect.py api/ops_runtime_tools.py api/ops_sessions.py api/play_pipeline.py api/routes_ops.py api/routes_ops_git.py api/routes_ops_notifications.py api/routes_ops_play.py api/routes_ops_projects.py api/routes_ops_runs.py api/routes_ops_runtime.py api/routes_ops_sessions.py api/routes_ops_shell.py api/session_sidecars.py`
 - `python upstream_restart_guardrails.py`
 - `git diff --check`
 
@@ -599,7 +598,7 @@ Result:
 ## Phase 10 verification
 
 - `python -m pytest tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase10_database.py tests/test_upstream_restart_phase10_github.py tests/test_upstream_restart_phase10_upstream_sync.py tests/test_upstream_restart_phase10_admin_ui.py`
-- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase5_readable_output.py tests/test_upstream_restart_phase6_notifications.py tests/test_upstream_restart_phase7_runtime_guides.py tests/test_upstream_restart_phase7_play.py tests/test_upstream_restart_phase7_runtime_inspect.py tests/test_upstream_restart_phase8_project_defaults.py tests/test_upstream_restart_phase8_git_status.py tests/test_upstream_restart_phase9_runs.py tests/test_upstream_restart_phase10_database.py tests/test_upstream_restart_phase10_github.py tests/test_upstream_restart_phase10_upstream_sync.py tests/test_upstream_restart_phase10_admin_ui.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
+- `python -m pytest tests/test_upstream_restart_guardrails.py tests/test_upstream_restart_phase1_shell.py tests/test_upstream_restart_phase2_projects.py tests/test_upstream_restart_phase2_ui.py tests/test_upstream_restart_phase3_sidecars.py tests/test_upstream_restart_phase4_sessions.py tests/test_upstream_restart_phase6_notifications.py tests/test_upstream_restart_phase7_runtime_guides.py tests/test_upstream_restart_phase7_play.py tests/test_upstream_restart_phase7_runtime_inspect.py tests/test_upstream_restart_phase8_project_defaults.py tests/test_upstream_restart_phase8_git_status.py tests/test_upstream_restart_phase9_runs.py tests/test_upstream_restart_phase10_database.py tests/test_upstream_restart_phase10_github.py tests/test_upstream_restart_phase10_upstream_sync.py tests/test_upstream_restart_phase10_admin_ui.py tests/test_extension_hooks.py tests/test_session_static_assets.py`
 - `python -m py_compile api/ops_database.py api/routes_ops_database.py api/ops_github.py api/routes_ops_github.py api/ops_upstream_sync.py api/routes_ops_upstream_sync.py tests/test_upstream_restart_phase10_database.py tests/test_upstream_restart_phase10_github.py tests/test_upstream_restart_phase10_upstream_sync.py tests/test_upstream_restart_phase10_admin_ui.py`
 - `node --check static/ops-database.js`
 - `node --check static/ops-github-admin.js`

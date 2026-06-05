@@ -452,9 +452,19 @@ def test_launch_task_session_uses_project_profile_over_payload(monkeypatch, tmp_
     )
     monkeypatch.setattr(ops_runs, "run_url", lambda run_id: f"/ops/runs/{run_id}")
 
-    result = ops_sessions.launch_task_session("project-1", "task-1", {"profile": "laxlyftet"})
+    result = ops_sessions.launch_task_session(
+        "project-1",
+        "task-1",
+        {
+            "profile": "laxlyftet",
+            "model": "stale-browser-model",
+            "model_provider": "openai-codex",
+        },
+    )
 
     assert created["profile"] == "hermes-webui"
+    assert created["model"] == "project-default-model"
+    assert created["model_provider"] == "project-provider"
     assert result["session"]["profile"] == "hermes-webui"
     assert defaults_called == ["hermes-webui"]
 

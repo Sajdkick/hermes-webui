@@ -111,8 +111,6 @@ def test_streaming_thread_env_allows_profile_terminal_cwd_override():
     assert "_thread_env = _build_agent_thread_env(" in src
     assert "_set_thread_env(**_thread_env)" in src
     assert "_set_thread_env(\n            **_profile_runtime_env,\n            TERMINAL_CWD" not in src
-    assert "_readable_output_process_env =" in src
-    assert "os.environ.update(_readable_output_process_env)" in src
 
     match = re.search(
         r"(def _build_agent_thread_env\(.*?\n)(?=\ndef |\nclass )",
@@ -145,10 +143,7 @@ def test_streaming_thread_env_allows_profile_terminal_cwd_override():
     assert env["HERMES_SESSION_PLATFORM"] == "webui"
     assert env["HERMES_HOME"] == "/active/profile/home"
     assert env["TERMINAL_ENV"] == "ssh"
-    assert env["HERMES_READABLE_OUTPUT_PATH"].endswith("/readable-output/active-session/message.md")
-    assert env["HERMES_READABLE_OUTPUT_ASSET_DIR"].endswith("/readable-output/active-session/assets")
-    assert env["CLOUD_TERMINAL_READABLE_OUTPUT_PATH"] == env["HERMES_READABLE_OUTPUT_PATH"]
-    assert env["CLOUD_TERMINAL_SESSION_ID"] == "active-session"
+    assert "CLOUD_TERMINAL_SESSION_ID" not in env
 
 
 def test_streaming_thread_env_injects_hermes_runtime_bridge(tmp_path, monkeypatch):

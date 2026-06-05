@@ -4,13 +4,21 @@ from urllib.parse import urlparse
 
 
 class _FakeSession:
-    def __init__(self, *, is_cli_session=False, session_source=None, source_tag=None):
-        self.session_id = "native_webui_001"
+    def __init__(
+        self,
+        *,
+        session_id="native_webui_001",
+        messages=None,
+        is_cli_session=False,
+        session_source=None,
+        source_tag=None,
+    ):
+        self.session_id = session_id
         self.title = "Native WebUI"
         self.workspace = "/tmp"
         self.model = "gpt-test"
         self.model_provider = None
-        self.messages = []
+        self.messages = list(messages or [])
         self.tool_calls = []
         self.input_tokens = 0
         self.output_tokens = 0
@@ -36,7 +44,7 @@ class _FakeSession:
             "workspace": self.workspace,
             "model": self.model,
             "model_provider": self.model_provider,
-            "message_count": 0,
+            "message_count": len(self.messages),
             "context_length": self.context_length,
             "threshold_tokens": self.threshold_tokens,
             "last_prompt_tokens": self.last_prompt_tokens,
@@ -51,7 +59,16 @@ class _FakeSession:
         }
 
 
-def _invoke_api_session(session_obj, *, lookup_cli):
+def _invoke_api_session(
+    session_obj,
+    *,
+    lookup_cli,
+    request_sid="native_webui_001",
+    messages="0",
+    extra_query="",
+    resolve_session_id=None,
+    get_session_side_effect=None,
+):
     import api.routes as routes
 
     captured = {}
@@ -61,9 +78,17 @@ def _invoke_api_session(session_obj, *, lookup_cli):
         captured["status"] = status
         return data
 
-    parsed = urlparse("/api/session?session_id=native_webui_001&messages=0&resolve_model=0")
-    with patch("api.routes.get_session", return_value=session_obj), \
+    if resolve_session_id is None:
+        resolve_session_id = lambda sid: sid
+    if get_session_side_effect is None:
+        get_session_side_effect = lambda _sid, metadata_only=False: session_obj
+
+    parsed = urlparse(
+        f"/api/session?session_id={request_sid}&messages={messages}&resolve_model=0{extra_query}"
+    )
+    with patch("api.routes.get_session", side_effect=get_session_side_effect), \
          patch("api.routes._clear_stale_stream_state", return_value=False), \
+         patch("api.routes.session_sidecars.resolve_session_id", side_effect=resolve_session_id), \
          patch("api.routes._lookup_cli_session_metadata", side_effect=lookup_cli) as lookup, \
          patch("api.routes.j", side_effect=fake_j):
         routes.handle_get(SimpleNamespace(), parsed)
@@ -102,3 +127,60 @@ def test_api_session_metadata_keeps_cli_lookup_for_imported_cli_session():
     assert captured["status"] == 200
     assert captured["data"]["session"]["source_tag"] == "telegram"
     lookup.assert_called_once_with("native_webui_001")
+
+
+def test_api_session_default_open_resolves_stale_lineage_root_to_tip():
+    """Project/session resume links should load the latest lineage tip, not a stale root segment."""
+    tip = _FakeSession(
+        session_id="tip_session_001",
+        messages=[{"role": "user", "content": "delete the duplicate apps"}],
+    )
+    loaded = []
+
+    def fake_get_session(sid, metadata_only=False):
+        loaded.append((sid, metadata_only))
+        assert sid == "tip_session_001"
+        return tip
+
+    captured, lookup = _invoke_api_session(
+        tip,
+        lookup_cli=lambda _sid: {},
+        request_sid="root_session_001",
+        messages="1",
+        resolve_session_id=lambda sid: "tip_session_001" if sid == "root_session_001" else sid,
+        get_session_side_effect=fake_get_session,
+    )
+
+    assert captured["status"] == 200
+    assert captured["data"]["session"]["session_id"] == "tip_session_001"
+    assert captured["data"]["session"]["messages"] == tip.messages
+    assert loaded == [("tip_session_001", False)]
+    lookup.assert_not_called()
+
+
+def test_api_session_resolve_lineage_zero_keeps_exact_segment():
+    """Sidebar segment inspection can still open a historical segment exactly."""
+    root = _FakeSession(session_id="root_session_001")
+    loaded = []
+
+    def fail_resolver(_sid):
+        raise AssertionError("exact segment opens must not resolve to the lineage tip")
+
+    def fake_get_session(sid, metadata_only=False):
+        loaded.append((sid, metadata_only))
+        assert sid == "root_session_001"
+        return root
+
+    captured, lookup = _invoke_api_session(
+        root,
+        lookup_cli=lambda _sid: {},
+        request_sid="root_session_001",
+        extra_query="&resolve_lineage=0",
+        resolve_session_id=fail_resolver,
+        get_session_side_effect=fake_get_session,
+    )
+
+    assert captured["status"] == 200
+    assert captured["data"]["session"]["session_id"] == "root_session_001"
+    assert loaded == [("root_session_001", True)]
+    lookup.assert_not_called()

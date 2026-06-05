@@ -11,7 +11,11 @@ TASK_ACTIONS_JS = (ROOT / "static" / "ops-legacy-task-actions.js").read_text(enc
 
 def test_quick_task_create_and_run_requests_inspect_mode_after_stream_start():
     assert "openInspectAfterStart=opts.openInspectAfterStart===true" in TASK_ACTIONS_JS
-    assert "executeTaskMatch(project,match,{files:pendingQuickTaskFiles,goalMode,openInspectAfterStart:true,forceNewSession:true})" in TASK_ACTIONS_JS
+    assert "executeTaskMatch(project,match,{goalMode,openInspectAfterStart:true,forceNewSession:true})" in TASK_ACTIONS_JS
+    assert "files:pendingQuickTaskFiles" not in TASK_ACTIONS_JS
+    assert "model:modelState.model||undefined" not in TASK_ACTIONS_JS
+    assert "model_provider:modelState.model_provider||null" not in TASK_ACTIONS_JS
+    assert "project_id:project.id" in TASK_ACTIONS_JS
 
 
 def test_quick_task_create_and_run_uses_lean_task_start_path():
@@ -63,7 +67,7 @@ def test_execute_task_match_runtime_order_sends_before_inspect_navigation():
           AgentBridge: {{
             sessions: {{
               ensureTask: async (_projectId, _taskId, payload) => {{
-                events.push(`ensure:${{payload.profile}}`);
+                events.push(`ensure:${{payload.profile}}:${{Object.prototype.hasOwnProperty.call(payload,'model')}}:${{Object.prototype.hasOwnProperty.call(payload,'model_provider')}}`);
                 return {{ session: {{ session_id: 'sess-1', profile: 'summons', source_tag: 'ops_task', messages: [] }}, task: {{ ...task, inProgress: true, sessionId: 'sess-1' }} }};
               }},
             }},
@@ -106,7 +110,6 @@ def test_execute_task_match_runtime_order_sends_before_inspect_navigation():
           SRef: () => state,
           addFiles: () => null,
           renderTray: () => null,
-          clearSessionReadableOutput: () => null,
           clearPersistedSessionId: () => null,
           sendTurn: async () => {{ events.push(`send:${{msg.value}}`); state.session.active_stream_id = 'stream-1'; }},
           autoResize: () => {{ events.push('resize'); }},
@@ -122,6 +125,8 @@ def test_execute_task_match_runtime_order_sends_before_inspect_navigation():
           if (openIndex < 0) throw new Error(`inspect/open handoff was not called: ${{events.join(',')}}`);
           if (sendIndex > openIndex) throw new Error(`sendTurn happened after inspect/open navigation: ${{events.join(',')}}`);
           if (!events[sendIndex].includes('/goal Execute on this task from the user')) throw new Error(`task prompt was not sent through goal mode: ${{events[sendIndex]}}`);
+          const ensureEvent = events.find((entry) => entry.startsWith('ensure:'));
+          if (ensureEvent !== 'ensure:summons:false:false') throw new Error(`task session inherited stale launch state: ${{events.join(',')}}`);
         }})().catch((error) => {{ console.error(error && error.stack || error); process.exit(1); }});
         """
     )

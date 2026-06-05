@@ -195,7 +195,7 @@ Published local-legacy deployments are served through the native Core proxy at `
 | `/api/core/projects/{projectId}/runtime/inspect/action` | `POST` |
 | `/api/core/projects/{projectId}/runtime/inspect/action/latest` | `GET` |
 
-### Session activity and readable output
+### Session activity
 
 | Route | Method |
 | --- | --- |
@@ -204,7 +204,6 @@ Published local-legacy deployments are served through the native Core proxy at `
 | `/api/core/session-activity/groups/{groupId}/rename` | `POST` |
 | `/api/core/session-activity/groups/{groupId}/delete` | `POST` |
 | `/api/core/session-activity/group-assignment` | `POST` |
-| `/api/core/sessions/{sessionId}/readable-output` | `GET` |
 
 ## Migration notes
 

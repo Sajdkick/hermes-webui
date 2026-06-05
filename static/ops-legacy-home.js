@@ -514,12 +514,10 @@
         done:0,
         prompt:0,
         idle:0,
-        readableOutputPending:0,
       };
       (entries||[]).forEach(session=>{
         const state=sessionActivityStatus(session);
         if(Object.prototype.hasOwnProperty.call(counts,state.key))counts[state.key]+=1;
-        if(session&&session.readableOutputPending)counts.readableOutputPending+=1;
       });
       const parts=[];
       if(counts.active>0)parts.push(`${counts.active} working`);
@@ -530,9 +528,6 @@
       if(counts.prompt>0)parts.push(`${counts.prompt} at prompt`);
       if(counts.done>0)parts.push(`${counts.done} done`);
       if(counts.idle>0)parts.push(`${counts.idle} quiet`);
-      if(counts.readableOutputPending>0){
-        parts.push(`${counts.readableOutputPending} unread output${counts.readableOutputPending===1?'':'s'}`);
-      }
       const groupCount=Array.isArray(groups)?groups.length:0;
       const summaryParts=parts.length?` ${parts.join(' • ')}.`:'';
       const groupPart=groupCount?` ${groupCount} group${groupCount===1?'':'s'}.`:'';
@@ -856,7 +851,8 @@
             const preview=String(entry&&entry.previewUrl||'').trim();
             return `
               <div class="ops-quick-task-image">
-                ${preview?`<img src="${esc(preview)}" alt="">`:`<div class="ops-quick-task-image-fallback">${svg.folder}</div>`}
+                ${preview?`<img src="${esc(preview)}" alt="${esc(label)}" data-ops-quick-task-image-preview="true" onerror="this.hidden=true;this.nextElementSibling.hidden=false;">`:''}
+                <div class="ops-quick-task-image-fallback" ${preview?'hidden':''}>${svg.folder}</div>
                 <span title="${esc(String(file&&file.name||label))}">${esc(label)}</span>
                 <button class="ops-icon-btn" type="button" data-ops-action="remove-quick-task-image" data-quick-task-image-id="${esc(entry&&entry.id||'')}" title="Remove screenshot">${svg.close}</button>
               </div>
@@ -969,11 +965,10 @@
       const taskText=sessionActivityTaskText(session);
       const taskPreview=formatSessionActivityTaskPreview(session);
       const sessionKey=sessionActionRefValue(session);
-      const hasReadableOutput=session&&session.readableOutputPending===true;
       const projectPlayState=sessionActivityProjectPlayState(session);
       const activityStatusBadge=sessionActivityCompactStatusBadge(session);
       return `
-        <div class="menu-session-activity-item interactive ${hasReadableOutput?'has-readable-output':''}" tabindex="0" role="button" data-ops-action="open-session" data-session-key="${esc(sessionKey)}" data-ops-session-activity-item="true" data-readable-output-pending="${hasReadableOutput?'true':'false'}" data-project-play-state="${esc(projectPlayState&&projectPlayState.key||'')}">
+        <div class="menu-session-activity-item interactive" tabindex="0" role="button" data-ops-action="open-session" data-session-key="${esc(sessionKey)}" data-ops-session-activity-item="true" data-project-play-state="${esc(projectPlayState&&projectPlayState.key||'')}">
           <div class="menu-session-activity-main">
             <div class="menu-session-activity-heading">
               <div class="menu-session-activity-copy">
@@ -981,7 +976,6 @@
                   <div class="menu-session-activity-title">${esc(title)}</div>
                   ${activityStatusBadge}
                   ${projectPlayState?`<span class="menu-session-activity-badge project-play play-status-badge ${esc(projectPlayState.stateClass)}" title="${esc(projectPlayState.title)}">${esc(projectPlayState.label)}</span>`:''}
-                  ${hasReadableOutput?'<span class="menu-session-activity-badge readable-output">Unread output</span>':''}
                 </div>
                 ${repoLabel&&repoLabel!==title?`<div class="menu-session-activity-repo">${esc(repoLabel)}</div>`:''}
                 ${taskPreview?`<div class="menu-session-activity-task-preview" title="${esc(taskText)}"><span class="menu-session-activity-task-label">Task</span><span>${esc(taskPreview)}</span></div>`:''}
@@ -1002,11 +996,10 @@
         const state=sessionActivityStatus(session);
         return state.key==='waiting'||state.key==='approval';
       }).length;
-      const readableOutputCount=sessions.filter(session=>session&&session.readableOutputPending).length;
       const style=group&&group.isUngrouped?'':sessionGroupAccentStyle(group,index,'menu-session-activity-group');
-      const meta=`${sessions.length} active session${sessions.length===1?'':'s'}${waitingCount?` • ${waitingCount} waiting`:''}${readableOutputCount?` • ${readableOutputCount} unread output${readableOutputCount===1?'':'s'}`:''}`;
+      const meta=`${sessions.length} active session${sessions.length===1?'':'s'}${waitingCount?` • ${waitingCount} waiting`:''}`;
       return `
-        <section class="menu-session-activity-group ${group&&group.isUngrouped?'ungrouped':''} ${collapsed?'collapsed':''} ${readableOutputCount?'has-readable-output':''}" ${group&&group.isUngrouped?'':`data-group-id="${esc(String(group&&group.id||''))}"`} ${style?`style="${esc(style)}"`:''}>
+        <section class="menu-session-activity-group ${group&&group.isUngrouped?'ungrouped':''} ${collapsed?'collapsed':''}" ${group&&group.isUngrouped?'':`data-group-id="${esc(String(group&&group.id||''))}"`} ${style?`style="${esc(style)}"`:''}>
           <div class="menu-session-activity-group-header">
             <div class="menu-session-activity-group-header-main">
               <button class="menu-session-activity-group-toggle" type="button" data-ops-action="toggle-session-activity-group" data-session-activity-group-key="${esc(groupKey)}" aria-expanded="${collapsed?'false':'true'}" title="${collapsed?'Expand this group.':'Collapse this group.'}">

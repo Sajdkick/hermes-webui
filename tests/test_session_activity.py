@@ -54,6 +54,98 @@ def test_session_activity_keeps_durable_running_ops_task_without_live_stream(mon
     assert item["activityStatus"]["key"] == "active"
 
 
+def test_session_activity_keeps_recent_completed_play_handoff(monkeypatch):
+    _patch_activity_source(
+        monkeypatch,
+        [
+            {
+                "session_id": "play_handoff_session",
+                "title": "Summons: Promote champion",
+                "is_streaming": False,
+                "updated_at": 200,
+                "ops_project_id": "project-1",
+                "repositoryLabel": "Summons",
+                "ops_task": {"id": "task-1", "text": "Promote champion", "done": True},
+                "ops_run": {
+                    "id": "run-1",
+                    "status": "succeeded",
+                    "metadata": {
+                        "playPipelineTriggeredAt": session_activity._now_iso(),
+                        "playPipelineId": "pipe-1",
+                        "playPipelineStatus": "building",
+                    },
+                },
+            }
+        ],
+    )
+
+    payload = session_activity.list_session_activity()
+
+    assert payload["sessionCount"] == 1
+    [item] = payload["sessions"]
+    assert item["id"] == "play_handoff_session"
+    assert item["activityStatus"]["key"] == "play-handoff"
+    assert item["activityStatus"]["labelText"] == "Play handoff pending"
+
+
+def test_session_activity_keeps_completed_task_until_user_closes(monkeypatch):
+    _patch_activity_source(
+        monkeypatch,
+        [
+            {
+                "session_id": "completed_task_session",
+                "title": "Summons: Old champion promotion",
+                "is_streaming": False,
+                "updated_at": 200,
+                "ops_project_id": "project-1",
+                "repositoryLabel": "Summons",
+                "ops_task": {"id": "task-1", "text": "Old champion promotion", "done": True},
+                "ops_run": {
+                    "id": "run-1",
+                    "status": "succeeded",
+                    "metadata": {
+                        "playPipelineTriggeredAt": "2000-01-01T00:00:00Z",
+                        "playPipelineId": "pipe-1",
+                        "playPipelineStatus": "building",
+                    },
+                },
+            }
+        ],
+    )
+
+    payload = session_activity.list_session_activity()
+
+    assert payload["sessionCount"] == 1
+    [item] = payload["sessions"]
+    assert item["id"] == "completed_task_session"
+    assert item["activityStatus"]["key"] == "done"
+    assert item["activityStatus"]["labelText"] == "Codex completed"
+
+
+def test_session_activity_hides_completed_task_after_user_closes(monkeypatch):
+    _patch_activity_source(
+        monkeypatch,
+        [
+            {
+                "session_id": "closed_completed_task_session",
+                "title": "Summons: Closed champion promotion",
+                "archived": True,
+                "is_streaming": False,
+                "updated_at": 200,
+                "ops_project_id": "project-1",
+                "repositoryLabel": "Summons",
+                "ops_task": {"id": "task-1", "text": "Closed champion promotion", "done": True},
+                "ops_run": {"id": "run-1", "status": "succeeded"},
+            }
+        ],
+    )
+
+    payload = session_activity.list_session_activity()
+
+    assert payload["sessionCount"] == 0
+    assert payload["sessions"] == []
+
+
 def test_session_activity_keeps_live_non_ops_stream(monkeypatch):
     _patch_activity_source(
         monkeypatch,

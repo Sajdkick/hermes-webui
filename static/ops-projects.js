@@ -211,6 +211,7 @@
           owner:action.getAttribute('data-owner')||'',
           repo:action.getAttribute('data-repo')||'',
           branch:action.getAttribute('data-branch')||'',
+          defaultBranch:action.getAttribute('data-default-branch')||'',
           projectName:action.getAttribute('data-project-name')||'',
         });
         return;
@@ -779,7 +780,9 @@
   async function importGitHubRepository(root,state,payload){
     const owner=String(payload && payload.owner || '').trim();
     const repo=String(payload && payload.repo || '').trim();
-    const branch=String(payload && payload.branch || '').trim();
+    const suggestedBranch=String(payload && payload.branch || payload && payload.defaultBranch || 'main').trim() || 'main';
+    const defaultBranch=String(payload && payload.defaultBranch || suggestedBranch || 'main').trim() || 'main';
+    const branch=promptGitHubImportBranch(owner,repo,suggestedBranch);
     const key=owner+'/'+repo+':'+branch;
     if(!owner || !repo || !branch)return;
     state.githubImportingRepoKey=key;
@@ -792,7 +795,10 @@
           owner:owner,
           repo:repo,
           branch:branch,
-          defaultBranch:branch,
+          defaultBranch:defaultBranch,
+          baseBranch:defaultBranch,
+          createMissingBranch:true,
+          createMissingCoreBranch:true,
           projectName:String(payload && payload.projectName || repo).trim() || repo,
         },
       });
@@ -807,6 +813,20 @@
     }
     state.githubImportingRepoKey='';
     render(root,state);
+  }
+
+  function promptGitHubImportBranch(owner,repo,suggestedBranch){
+    const fallback=String(suggestedBranch||'main').trim() || 'main';
+    if(typeof window==='undefined' || typeof window.prompt!=='function'){
+      return fallback;
+    }
+    const repoLabel=[owner,repo].filter(Boolean).join('/');
+    const response=window.prompt(
+      'Branch name to import or create'+(repoLabel ? ' for '+repoLabel : '')+':',
+      fallback
+    );
+    if(response===null)return '';
+    return String(response||'').trim();
   }
 
   async function loadUpstreamSync(root,state){

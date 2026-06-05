@@ -1,7 +1,0 @@
-[2m2026-05-01T20:31:41.643449Z[0m [31mERROR[0m [2mcodex_app_server[0m[2m:[0m Codex could not find bubblewrap on PATH. Install bubblewrap with your OS package manager. See the sandbox prerequisites: https://developers.openai.com/codex/concepts/sandboxing#prerequisites. Codex will use the vendored bubblewrap in the meantime.
-codex app-server (WebSockets)
-  listening on: ws://127.0.0.1:47007
-  readyz: http://127.0.0.1:47007/readyz
-  healthz: http://127.0.0.1:47007/healthz
-  note: binds localhost only (use SSH port-forwarding for remote access)
-[2m2026-05-02T03:09:39.931399Z[0m [31mERROR[0m [2mcodex_core::tools::router[0m[2m:[0m [3merror[0m[2m=[0mapply_patch verification failed: Failed to read file to update /home/ubuntu/cloud-terminal-data/projects/hermes-webui/.cloud-terminal/readable-output/cfe7c7e0-441f-470b-a7b1-a7ce574dbf56/message.md: No such file or directory (os error 2)
