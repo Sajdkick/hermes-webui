@@ -88,7 +88,7 @@ def _legacy_ops_shell_html() -> str:
 def redirect_session_prefixed_ops_shell(handler, parsed) -> bool:
     if not _SESSION_PREFIXED_OPS_ROUTE_RE.match(parsed.path or ""):
         return False
-    target = "/ops-phase"
+    target = "/ops"
     if parsed.query:
         target += "?" + parsed.query
     handler.send_response(302)

@@ -296,7 +296,7 @@ def test_main_shell_exposes_ops_navigation_entry():
     assert "function openOpsDashboard()" in js
     assert "const base=(typeof document!=='undefined' && document.baseURI)" in js
     assert "return new URL(rel, base).href;" in js
-    assert "const target=_siteRootUrl('ops-phase');" in js
+    assert "const target=_siteRootUrl('ops');" in js
 
     assert html.count('onclick="openRecoveryPage()"') == 3
     assert html.count('aria-label="Recovery page"') == 2
@@ -337,8 +337,8 @@ def test_main_shell_ops_navigation_uses_site_root_from_session_routes():
         if (calls.length !== 1){
           throw new Error('Ops navigation should assign exactly one target URL.');
         }
-        if (calls[0] !== 'http://example.com/ops-phase'){
-          throw new Error('Ops navigation should leave session-prefixed routes and open the site-root ops shell.');
+        if (calls[0] !== 'http://example.com/ops'){
+          throw new Error('Ops navigation should leave session-prefixed routes and open the site-root ops dashboard.');
         }
         console.log('ok');
         """

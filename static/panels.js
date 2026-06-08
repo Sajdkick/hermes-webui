@@ -5733,7 +5733,7 @@ function _siteRootUrl(path){
 
 function openOpsDashboard(){
   if(typeof window==='undefined' || !window.location) return;
-  const target=_siteRootUrl('ops-phase');
+  const target=_siteRootUrl('ops');
   if(typeof window.location.assign==='function'){
     window.location.assign(target);
     return;

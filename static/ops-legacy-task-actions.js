@@ -582,6 +582,16 @@
       }
     }
 
+    const CLOSE_SESSION_CONFIRM_TASK_TEXT_LIMIT=180;
+
+    function closeSessionConfirmTaskText(value){
+      const normalized=String(value||'').replace(/\s+/g,' ').trim();
+      if(normalized.length<=CLOSE_SESSION_CONFIRM_TASK_TEXT_LIMIT)return normalized;
+      const clipped=normalized.slice(0,CLOSE_SESSION_CONFIRM_TASK_TEXT_LIMIT).replace(/\s+\S*$/,'').trim()
+        || normalized.slice(0,CLOSE_SESSION_CONFIRM_TASK_TEXT_LIMIT).trim();
+      return `${clipped}…`;
+    }
+
     async function setOpsSessionClosed(sessionId,closed,projectId){
       const sessionRef=sessionRefValue(sessionId);
       const project=projectId?findProject(projectId):OPS.currentProject;
@@ -610,8 +620,9 @@
         showToast('Session restored',2200);
         return;
       }
-      const label=linked&&linked.task&&linked.task.text
-        ? `Close the session for "${linked.task.text}"? This removes it from the active flow.`
+      const linkedTaskText=linked&&linked.task&&linked.task.text?closeSessionConfirmTaskText(linked.task.text):'';
+      const label=linkedTaskText
+        ? `Close the session for "${linkedTaskText}"? This removes it from the active flow.`
         : 'Close this session? This removes it from the active flow.';
       const ok=await showConfirmDialog({
         title:'Close session',

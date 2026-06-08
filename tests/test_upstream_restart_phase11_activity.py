@@ -1408,6 +1408,102 @@ def test_phase11_close_session_optimistically_removes_active_row_before_api_retu
     assert completed.stdout.strip() == "ok"
 
 
+def test_phase11_close_session_confirmation_truncates_long_task_text():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (async () => {
+          const source = fs.readFileSync('static/ops-legacy-task-actions.js', 'utf8');
+          const windowRef = { HermesOpsModules: {}, _opsDashboardOpen: true };
+          const context = { console, window: windowRef, document: {} };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const project = { id: 'hermes', name: 'Hermes', path: '/tmp/hermes' };
+          const longTail = 'TAIL_SHOULD_NOT_APPEAR_IN_CONFIRMATION';
+          const longTaskText = `${'Review the active session close confirmation copy and wrapping behavior '.repeat(8)}${longTail}`;
+          const task = { id: 'task-1', text: longTaskText, inProgress: true, sessionId: 'session-1' };
+          const epic = { id: 'epic-1', tasks: [task] };
+          const session = { session_id: 'session-1', taskId: 'task-1' };
+          let confirmMessage = '';
+          const OPS = {
+            currentProject: null,
+            taskData: null,
+            taskDataByProject: { hermes: { epics: [epic] } },
+            sessions: [session],
+            view: 'home',
+          };
+
+          const dashboard = context.window.HermesOpsModules.taskActions.bindDashboard({
+            OPS,
+            AgentBridge: { sessions: {}, runs: {} },
+            api: async () => ({}),
+            projectUrl: (projectId, suffix) => `/projects/${projectId}${suffix || ''}`,
+            projectPath: () => '/tmp/hermes',
+            nameOf: () => 'Hermes',
+            findProject: (projectId) => projectId === 'hermes' ? project : null,
+            findTask: () => ({ epic, task }),
+            findTaskInData: () => ({ epic, task }),
+            allTasks: () => [{ epic, task }],
+            findSession: (sid) => sid === 'session-1' ? session : null,
+            sessionTaskId: (item) => item && item.taskId || '',
+            latestSessionForTask: () => session,
+            sessionRefValue: (item) => typeof item === 'string' ? item : (item && item.session_id || item && item.sessionId || ''),
+            normalizeTaskGrade: (value) => value || 'green',
+            getTaskQaStatus: () => '',
+            getTaskMoreWork: () => '',
+            actionableTaskCount: () => 0,
+            summarizeTaskFilters: () => ({}),
+            renderProjectDetail: () => {},
+            loadProjectDetail: async () => OPS.taskDataByProject.hermes,
+            refreshOpsSessions: async () => OPS.sessions,
+            reloadProjectTasks: async () => OPS.taskDataByProject.hermes,
+            loadProjects: async () => [],
+            renderProjects: () => {},
+            renderHome: () => {},
+            loadSession: async () => null,
+            renderSessionList: () => {},
+            closeOpsDashboard: () => {},
+            showToast: () => {},
+            showPromptDialog: async () => null,
+            showConfirmDialog: async (options) => { confirmMessage = options.message; return false; },
+            setBusy: () => {},
+            domLookup: () => null,
+            documentRef: context.document,
+            clearQuickTaskImages: () => {},
+          });
+
+          await dashboard.setOpsSessionClosed('session-1', true, 'hermes');
+          if (!confirmMessage.includes('Close the session for "Review the active session')) {
+            throw new Error(`Confirmation did not include the task prefix: ${confirmMessage}`);
+          }
+          if (!confirmMessage.includes('…"? This removes it from the active flow.')) {
+            throw new Error(`Confirmation did not ellipsize the long task text: ${confirmMessage}`);
+          }
+          if (confirmMessage.includes(longTail)) {
+            throw new Error('Confirmation leaked the full long task text instead of truncating it.');
+          }
+          if (confirmMessage.length >= longTaskText.length) {
+            throw new Error('Confirmation message was not shortened.');
+          }
+          console.log('ok');
+        })().catch((error) => {
+          console.error(error && error.stack ? error.stack : error);
+          process.exit(1);
+        });
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
 def test_phase11_notifications_match_cloud_terminal_card_shape():
     script = textwrap.dedent(
         """

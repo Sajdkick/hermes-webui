@@ -148,19 +148,19 @@ def test_ops_phase_shell_back_link_resolves_to_main_app_under_trailing_slash_rou
     assert completed.stdout.strip() == "ok"
 
 
-def test_session_prefixed_ops_routes_redirect_to_site_root_ops_phase():
+def test_session_prefixed_ops_routes_redirect_to_site_root_ops_dashboard():
     from api.routes import handle_get
 
     stale_ops = _FakeHandler()
     assert handle_get(stale_ops, urlparse("http://example.com/session/demo/ops")) is True
     assert stale_ops.status == 302
-    assert stale_ops.header("Location") == "/ops-phase"
+    assert stale_ops.header("Location") == "/ops"
     assert stale_ops.header("Cache-Control") == "no-store"
 
     stale_ops_phase = _FakeHandler()
     assert handle_get(stale_ops_phase, urlparse("http://example.com/session/demo/ops-phase?via=cache")) is True
     assert stale_ops_phase.status == 302
-    assert stale_ops_phase.header("Location") == "/ops-phase?via=cache"
+    assert stale_ops_phase.header("Location") == "/ops?via=cache"
     assert stale_ops_phase.header("Cache-Control") == "no-store"
 
 
