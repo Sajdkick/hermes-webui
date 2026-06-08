@@ -459,7 +459,10 @@
     state.runsError='';
     render(root,state);
     try{
-      const payload=await api('/api/ops/runs');
+      // The dashboard list only renders summary fields.  Keep rich lineage,
+      // request, project, and task enrichment on the detail endpoint so the
+      // Ops home page does not repeatedly scan every saved session/run.
+      const payload=await api('/api/ops/runs/summary');
       state.runs=Array.isArray(payload.runs)?payload.runs:[];
     }catch(error){
       state.runs=[];

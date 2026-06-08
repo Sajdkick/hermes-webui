@@ -4,7 +4,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-from api.state_db_health import state_db_has_sqlite_header, warn_state_db_exception
+from api.state_db_health import connect_state_db_readonly, warn_state_db_exception
 
 logger = logging.getLogger(__name__)
 
@@ -363,14 +363,13 @@ def read_importable_agent_session_rows(
     ``exclude_sources=None``.
     """
     db_path = Path(db_path)
-    if not db_path.exists():
-        return []
-    if not state_db_has_sqlite_header(db_path, log=log or logger, purpose="agent session listing"):
+    log = log or logger
+    conn = connect_state_db_readonly(db_path, log=log, purpose="agent session listing")
+    if conn is None:
         return []
 
-    log = log or logger
     try:
-        with closing(sqlite3.connect(str(db_path))) as conn:
+        with closing(conn):
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
 
@@ -529,13 +528,12 @@ def read_session_lineage_report(db_path: Path, session_id: str | None, max_hops:
     if not sid:
         return _empty_lineage_report('')
     db_path = Path(db_path)
-    if not db_path.exists():
-        return _empty_lineage_report(sid)
-    if not state_db_has_sqlite_header(db_path, log=logger, purpose="session lineage report"):
+    conn = connect_state_db_readonly(db_path, log=logger, purpose="session lineage report")
+    if conn is None:
         return _empty_lineage_report(sid)
 
     try:
-        with closing(sqlite3.connect(str(db_path))) as conn:
+        with closing(conn):
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             cur.execute("PRAGMA table_info(sessions)")
@@ -664,13 +662,14 @@ def read_session_lineage_metadata(db_path: Path, session_ids: list[str] | set[st
     """
     wanted = {str(sid) for sid in (session_ids or []) if sid}
     db_path = Path(db_path)
-    if not wanted or not db_path.exists():
+    if not wanted:
         return {}
-    if not state_db_has_sqlite_header(db_path, log=logger, purpose="session lineage metadata"):
+    conn = connect_state_db_readonly(db_path, log=logger, purpose="session lineage metadata")
+    if conn is None:
         return {}
 
     try:
-        with closing(sqlite3.connect(str(db_path))) as conn:
+        with closing(conn):
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             cur.execute("PRAGMA table_info(sessions)")

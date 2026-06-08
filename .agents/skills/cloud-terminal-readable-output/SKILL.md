@@ -22,7 +22,6 @@ Do not put readable user-facing output in the terminal. Reserve terminal output 
    - `CLOUD_TERMINAL_READABLE_OUTPUT_ASSET_DIR="$CLOUD_TERMINAL_READABLE_OUTPUT_DIR/assets"`
 3. Use that fallback path for project sessions when you know the project root. `Repair session env` writes vars into the interactive shell, but the already-running agent process may still not see them, so deriving the canonical path is expected in that case.
 4. If neither the env vars nor a safe fallback path can be derived, do not silently fall back to terminal scrollback. Tell the user readable-output is unavailable in this session.
-   - If an environment-probing command is blocked by the consent guard late in the task, do **not** retry or route around the guard just to discover the readable-output path. Use any already-known path/context if available; otherwise report that readable output could not be written and provide the same concise Markdown content in the final response.
 5. Create the target directories if needed:
    - `mkdir -p "$(dirname "$CLOUD_TERMINAL_READABLE_OUTPUT_PATH")" "$CLOUD_TERMINAL_READABLE_OUTPUT_ASSET_DIR"`
 6. Write a concise Markdown document to `CLOUD_TERMINAL_READABLE_OUTPUT_PATH`.

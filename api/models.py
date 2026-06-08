@@ -27,6 +27,7 @@ from api.agent_sessions import (
     read_importable_agent_session_rows,
     read_session_lineage_metadata,
 )
+from api.state_db_health import connect_state_db_readonly
 
 logger = logging.getLogger(__name__)
 CLI_VISIBLE_SESSION_LIMIT = 20
@@ -106,6 +107,33 @@ def _cleanup_stale_tmp_files() -> None:
 
 
 _PERSISTED_SESSION_IDS_CACHE: tuple[Path | None, int | None, frozenset[str]] = (None, None, frozenset())
+_NON_SESSION_JSON_PREFIXES = (
+    # Slow-request diagnostics are request artifacts, not session sidecars. Some
+    # historical dumps were written beside real sessions without the underscore
+    # system-file prefix, so every hot session scanner must exclude them here
+    # instead of relying on ad-hoc call-site filters.
+    'request_dump_',
+)
+
+
+def _is_session_sidecar_path(path: Path) -> bool:
+    """Return True for canonical WebUI session sidecar JSON paths only."""
+    name = path.name
+    if not name.endswith('.json') or name.startswith('_'):
+        return False
+    if any(name.startswith(prefix) for prefix in _NON_SESSION_JSON_PREFIXES):
+        return False
+    return is_safe_session_id(path.stem)
+
+
+def _iter_session_sidecar_paths():
+    """Yield candidate session sidecars, excluding helper/system artifacts."""
+    try:
+        for path in SESSION_DIR.glob('*.json'):
+            if _is_session_sidecar_path(path):
+                yield path
+    except Exception:
+        return
 
 
 def _persisted_session_ids_snapshot() -> frozenset[str]:
@@ -127,11 +155,7 @@ def _persisted_session_ids_snapshot() -> frozenset[str]:
     if cached_dir == SESSION_DIR and cached_mtime_ns == dir_mtime_ns:
         return cached_ids
     try:
-        ids = frozenset(
-            p.stem
-            for p in SESSION_DIR.glob('*.json')
-            if not p.name.startswith('_')
-        )
+        ids = frozenset(p.stem for p in _iter_session_sidecar_paths())
     except Exception:
         ids = frozenset()
     _PERSISTED_SESSION_IDS_CACHE = (SESSION_DIR, dir_mtime_ns, ids)
@@ -141,7 +165,7 @@ def _persisted_session_ids_snapshot() -> frozenset[str]:
 def _session_dir_has_persisted_session_files() -> bool:
     """Return True when the current session dir has at least one session JSON file."""
     try:
-        return any(not p.name.startswith('_') for p in SESSION_DIR.glob('*.json'))
+        return any(True for _ in _iter_session_sidecar_paths())
     except Exception:
         return False
 
@@ -188,7 +212,7 @@ def _index_entry_exists(session_id: str, in_memory_ids=None) -> bool:
     if session_id in in_memory_ids:
         return True
     p = SESSION_DIR / f'{session_id}.json'
-    return p.exists()
+    return p.exists() and _is_session_sidecar_path(p)
 
 
 def _write_session_index(updates=None):
@@ -214,14 +238,15 @@ def _write_session_index(updates=None):
             }
             _cleanup_stale_tmp_files()  # best-effort sweep on startup / first call
             entry_map: dict[str, dict] = {}
-            for p in SESSION_DIR.glob('*.json'):
-                if p.name.startswith('_'):
-                    continue
+            for p in _iter_session_sidecar_paths():
                 try:
                     entry = updated_map.get(p.stem)
                     if entry is None:
                         s = Session.load_metadata_only(p.stem, lookup_index_message_count=False)
-                        entry = s.compact() if s else None
+                        if s and not getattr(s, '_metadata_unavailable', False):
+                            entry = s.compact()
+                        else:
+                            entry = None
                     if entry:
                         sid = entry.get('session_id')
                         if sid:
@@ -550,6 +575,91 @@ def _parse_nonnegative_int(value):
     return parsed if parsed >= 0 else None
 
 
+def _parse_optional_timestamp(value):
+    """Return ``value`` as a positive float timestamp, or ``None``."""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _metadata_only_fallback_session(sid, *, parsed=None, lookup_index_message_count=True):
+    """Build a bounded metadata-only stub when the sidecar prefix is unusable.
+
+    This is intentionally *not* a call to ``Session.load()``.  Sidebar/session
+    index paths are hot polling paths; if malformed or legacy metadata can make
+    them parse full transcripts, a large session store can stall the WebUI and
+    cause active runs to be recovered as interrupted after a restart.
+    """
+    if not is_safe_session_id(sid):
+        return None
+    p = SESSION_DIR / f'{sid}.json'
+    if not p.exists():
+        return None
+    data = parsed if isinstance(parsed, dict) else {}
+    try:
+        stat_ts = p.stat().st_mtime
+    except OSError:
+        stat_ts = time.time()
+    created_at = _parse_optional_timestamp(data.get('created_at')) or stat_ts
+    updated_at = _parse_optional_timestamp(data.get('updated_at')) or created_at
+    sidecar_message_count = _parse_nonnegative_int(data.get('message_count'))
+    index_message_count = None
+    if lookup_index_message_count and sidecar_message_count is None:
+        index_message_count = _lookup_index_message_count(sid)
+    known_counts = [
+        count for count in (index_message_count, sidecar_message_count)
+        if count is not None
+    ]
+    session = Session(
+        session_id=str(data.get('session_id') or sid),
+        title=str(data.get('title') or 'Untitled'),
+        workspace=data.get('workspace') or str(DEFAULT_WORKSPACE),
+        model=data.get('model') or DEFAULT_MODEL,
+        model_provider=data.get('model_provider'),
+        created_at=created_at,
+        updated_at=updated_at,
+        pinned=bool(data.get('pinned', False)),
+        archived=bool(data.get('archived', False)),
+        project_id=data.get('project_id'),
+        profile=data.get('profile'),
+        input_tokens=_parse_nonnegative_int(data.get('input_tokens')) or 0,
+        output_tokens=_parse_nonnegative_int(data.get('output_tokens')) or 0,
+        estimated_cost=data.get('estimated_cost'),
+        cache_read_tokens=_parse_nonnegative_int(data.get('cache_read_tokens')) or 0,
+        cache_write_tokens=_parse_nonnegative_int(data.get('cache_write_tokens')) or 0,
+        personality=data.get('personality'),
+        active_stream_id=data.get('active_stream_id'),
+        pending_user_message=data.get('pending_user_message'),
+        pending_attachments=data.get('pending_attachments') if isinstance(data.get('pending_attachments'), list) else [],
+        pending_started_at=data.get('pending_started_at'),
+        pre_compression_snapshot=bool(data.get('pre_compression_snapshot', False)),
+        last_message_at=(
+            _parse_optional_timestamp(data.get('last_message_at'))
+            or _parse_optional_timestamp(data.get('updated_at'))
+            or updated_at
+        ),
+        parent_session_id=data.get('parent_session_id'),
+        worktree_path=data.get('worktree_path'),
+        worktree_branch=data.get('worktree_branch'),
+        worktree_repo_root=data.get('worktree_repo_root'),
+        worktree_created_at=data.get('worktree_created_at'),
+        enabled_toolsets=data.get('enabled_toolsets'),
+        composer_draft=data.get('composer_draft') if isinstance(data.get('composer_draft'), dict) else {},
+        is_cli_session=bool(data.get('is_cli_session', False)),
+        source_tag=data.get('source_tag'),
+        raw_source=data.get('raw_source'),
+        session_source=data.get('session_source'),
+        source_label=data.get('source_label'),
+        read_only=bool(data.get('read_only', False)),
+        message_count=max(known_counts) if known_counts else None,
+    )
+    session._loaded_metadata_only = True
+    session._metadata_unavailable = not bool(parsed)
+    return session
+
+
 class Session:
     def __init__(self, session_id: str=None, title: str='Untitled',
                  workspace=str(DEFAULT_WORKSPACE), model=DEFAULT_MODEL,
@@ -577,6 +687,7 @@ class Session:
                  context_length=None, threshold_tokens=None,
                  last_prompt_tokens=None,
                  truncation_watermark=None,
+                 last_message_at=None,
                  gateway_routing=None, gateway_routing_history=None,
                  llm_title_generated: bool=False,
                 parent_session_id: str=None,
@@ -624,6 +735,7 @@ class Session:
         self.threshold_tokens = threshold_tokens
         self.last_prompt_tokens = last_prompt_tokens
         self.truncation_watermark = truncation_watermark
+        self.last_message_at = _parse_optional_timestamp(last_message_at)
         self.gateway_routing = gateway_routing if isinstance(gateway_routing, dict) else None
         self.gateway_routing_history = gateway_routing_history if isinstance(gateway_routing_history, list) else []
         self.llm_title_generated = bool(llm_title_generated)
@@ -690,7 +802,7 @@ class Session:
             'context_engine', 'compression_anchor_engine', 'compression_anchor_mode',
             'compression_anchor_details', 'context_engine_state',
             'context_length', 'threshold_tokens', 'last_prompt_tokens',
-            'truncation_watermark',
+            'truncation_watermark', 'last_message_at',
             'gateway_routing', 'gateway_routing_history', 'llm_title_generated',
             'parent_session_id',
             'worktree_path', 'worktree_branch', 'worktree_repo_root', 'worktree_created_at',
@@ -698,6 +810,12 @@ class Session:
             'enabled_toolsets', 'composer_draft',
         ]
         meta = {k: getattr(self, k, None) for k in METADATA_FIELDS}
+        self.last_message_at = (
+            _last_message_timestamp(self.messages)
+            or _parse_optional_timestamp(self.last_message_at)
+            or _parse_optional_timestamp(self.updated_at)
+        )
+        meta['last_message_at'] = self.last_message_at
         meta['message_count'] = len(self.messages or [])
         meta['messages'] = self.messages
         meta['tool_calls'] = self.tool_calls
@@ -802,7 +920,8 @@ class Session:
         Session JSON files have metadata fields (session_id, title, model, etc.)
         at the top level, before the large messages array. Read only up to the
         top-level "messages" field and synthesize a small metadata-only object.
-        Falls back to load() for legacy or unexpected file layouts.
+        If the metadata prefix is missing, malformed, or legacy-shaped, return
+        a degraded metadata stub instead of parsing the full transcript.
         """
         # Same path-safety contract as load(): hyphens are valid session ids,
         # path separators and traversal dots are not.
@@ -814,11 +933,18 @@ class Session:
         try:
             prefix = _read_metadata_json_prefix(p)
             if not prefix:
-                return cls.load(sid)
+                return _metadata_only_fallback_session(
+                    sid,
+                    lookup_index_message_count=lookup_index_message_count,
+                )
             parsed = json.loads(prefix)
             needed = {'session_id', 'title', 'created_at', 'updated_at'}
             if not needed.issubset(parsed.keys()):
-                return cls.load(sid)
+                return _metadata_only_fallback_session(
+                    sid,
+                    parsed=parsed,
+                    lookup_index_message_count=lookup_index_message_count,
+                )
             parsed['messages'] = []
             parsed['tool_calls'] = []
             session = cls(**parsed)
@@ -845,8 +971,12 @@ class Session:
             session._loaded_metadata_only = True
             return session
         except Exception:
-            # Corrupt prefix or decode error — fall back to full load
-            return cls.load(sid)
+            # Corrupt prefix/decode errors stay bounded; hot metadata/listing
+            # paths must never parse full transcripts as an error fallback.
+            return _metadata_only_fallback_session(
+                sid,
+                lookup_index_message_count=lookup_index_message_count,
+            )
 
     def compact(self, include_runtime=False, active_stream_ids=None) -> dict:
         active_stream_ids = active_stream_ids if active_stream_ids is not None else set()
@@ -858,7 +988,11 @@ class Session:
         )
         if has_pending_user_message:
             message_count = max(message_count, 1)
-        last_message_at = _last_message_timestamp(self.messages) or self.updated_at
+        last_message_at = (
+            _last_message_timestamp(self.messages)
+            or _parse_optional_timestamp(self.last_message_at)
+            or self.updated_at
+        )
         if has_pending_user_message and self.pending_started_at:
             last_message_at = self.pending_started_at
         return {
@@ -1997,8 +2131,8 @@ def _has_compression_continuation(session) -> bool:
     # the messages array, so this avoids loading multi-MB transcripts.
     try:
         needle = f'"parent_session_id": "{sid}"'
-        for path in SESSION_DIR.glob('*.json'):
-            if path.name.startswith('_') or path.stem == sid:
+        for path in _iter_session_sidecar_paths():
+            if path.stem == sid:
                 continue
             try:
                 head = path.read_text(encoding='utf-8', errors='ignore')[:4096]
@@ -2676,8 +2810,11 @@ def state_db_has_session(sid: str) -> bool:
     db_path = _active_state_db_path()
     if not db_path.exists():
         return False
+    conn = connect_state_db_readonly(db_path, log=logger, purpose="agent session file-ops probe")
+    if conn is None:
+        return False
     try:
-        with closing(sqlite3.connect(str(db_path))) as conn:
+        with closing(conn) as conn:
             cur = conn.cursor()
             cur.execute("SELECT 1 FROM sessions WHERE id = ? LIMIT 1", (str(sid),))
             return cur.fetchone() is not None
@@ -2758,8 +2895,11 @@ def agent_session_row_exists(session_id: str, *, profile=None) -> bool:
     if not db_path.exists():
         # No agent DB at all on this instance — can't claim the row is gone.
         return True
+    conn = connect_state_db_readonly(db_path, log=logger, purpose="agent session row-exists probe")
+    if conn is None:
+        return True
     try:
-        with closing(sqlite3.connect(str(db_path))) as conn:
+        with closing(conn) as conn:
             cur = conn.cursor()
             cur.execute("PRAGMA table_info(sessions)")
             cols = {str(row[1]) for row in cur.fetchall()}
@@ -2861,11 +3001,25 @@ def all_sessions(diag=None):
             backfilled = []
             for i, s in enumerate(index):
                 if 'last_message_at' not in s:
-                    _diag_stage(diag, "all_sessions.backfill_load")
-                    full = Session.load(s.get('session_id'))
-                    if full:
-                        index[i] = full.compact()
-                        backfilled.append(full)
+                    _diag_stage(diag, "all_sessions.backfill_metadata")
+                    meta = Session.load_metadata_only(
+                        s.get('session_id'),
+                        lookup_index_message_count=False,
+                    )
+                    if meta:
+                        compact = meta.compact()
+                        merged = {**compact, **s}
+                        merged['last_message_at'] = (
+                            compact.get('last_message_at')
+                            or s.get('last_message_at')
+                            or s.get('updated_at')
+                        )
+                        merged['message_count'] = max(
+                            _parse_nonnegative_int(s.get('message_count')) or 0,
+                            _parse_nonnegative_int(compact.get('message_count')) or 0,
+                        )
+                        index[i] = merged
+                        backfilled.append(meta)
             if backfilled:
                 try:
                     _diag_stage(diag, "all_sessions.backfill_write")
@@ -2933,11 +3087,11 @@ def all_sessions(diag=None):
     # Full scan fallback
     _diag_stage(diag, "all_sessions.full_scan")
     out = []
-    for p in SESSION_DIR.glob('*.json'):
-        if p.name.startswith('_'): continue
+    for p in _iter_session_sidecar_paths():
         try:
             s = Session.load_metadata_only(p.stem, lookup_index_message_count=False)
-            if s: out.append(s)
+            if s and not getattr(s, '_metadata_unavailable', False):
+                out.append(s)
         except Exception:
             logger.debug("Failed to load session from %s", p)
     _diag_stage(diag, "all_sessions.full_scan_overlay")
@@ -3745,8 +3899,11 @@ def get_state_db_session_messages(sid, *, stitch_continuations: bool = False, pr
     if not db_path.exists():
         return []
 
+    conn = connect_state_db_readonly(db_path, log=logger, purpose="state.db session messages")
+    if conn is None:
+        return []
     try:
-        with closing(sqlite3.connect(str(db_path))) as conn:
+        with closing(conn) as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             cur.execute("PRAGMA table_info(messages)")
@@ -3857,8 +4014,11 @@ def get_state_db_session_summary(sid, *, profile=None) -> dict:
     if not sid or not db_path.exists():
         return {"message_count": 0, "last_message_at": 0.0}
 
+    conn = connect_state_db_readonly(db_path, log=logger, purpose="state.db session summary")
+    if conn is None:
+        return {"message_count": 0, "last_message_at": 0.0}
     try:
-        with closing(sqlite3.connect(str(db_path))) as conn:
+        with closing(conn) as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             cur.execute("PRAGMA table_info(messages)")
@@ -4327,8 +4487,11 @@ def count_conversation_rounds(sid: str, since: float | None = None) -> int:
     if not db_path.exists():
         return 0
 
+    conn = connect_state_db_readonly(db_path, log=logger, purpose="state.db conversation rounds")
+    if conn is None:
+        return 0
     try:
-        with closing(sqlite3.connect(str(db_path))) as conn:
+        with closing(conn) as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             cur.execute(

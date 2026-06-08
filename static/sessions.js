@@ -4096,7 +4096,7 @@ function _sessionRowsWithActiveEphemeralSession(rows){
     message_count:0,
     last_message_at:S.session.last_message_at||S.session.updated_at||nowSec,
     updated_at:S.session.updated_at||S.session.last_message_at||nowSec,
-    profile:S.session.profile||S.activeProfile||'default',
+    profile:currentSessionProfileForTurn(S.session),
     is_streaming:false,
   };
   return [activeRow,...rows];

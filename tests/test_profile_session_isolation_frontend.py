@@ -87,10 +87,39 @@ def test_chat_start_uses_turn_profile_not_global_active_profile_directly():
 
 
 def test_queued_followups_goal_and_status_are_session_profile_aware():
-    assert "profile:currentSessionProfileForTurn()" in MESSAGES_JS
+    assert "profile:currentSessionProfileForTurn(_targetSession||S.session)" in MESSAGES_JS
+    assert MESSAGES_JS.count("profile:currentSessionProfileForTurn(S.session)") >= 3
     assert "profile:S.activeProfile||S.session.profile" not in MESSAGES_JS
     assert "profile:S.session.profile||S.activeProfile" not in SESSIONS_JS
     assert "profile:currentSessionProfileForTurn(S.session)" in SESSIONS_JS
+
+    helper_prefix = UI_JS[: UI_JS.index("const INFLIGHT=")]
+    sidebar_helper = _function_body(SESSIONS_JS, "_sessionRowsWithActiveEphemeralSession")
+    script = helper_prefix + sidebar_helper + textwrap.dedent(
+        """
+        function assertEqual(actual, expected, label){
+          if(actual!==expected){
+            throw new Error(`${label}: expected ${expected}, got ${actual}`);
+          }
+        }
+
+        S.activeProfile='default';
+        S.session={
+          session_id:'modelkit-session',
+          profile:'modelkit-profile',
+          message_count:0,
+          project_id:'modelkit',
+          title:'ModelKit task',
+        };
+        const projectRows=_sessionRowsWithActiveEphemeralSession([]);
+        assertEqual(projectRows[0].profile,'modelkit-profile','project-owned ephemeral sidebar row keeps session profile');
+
+        S.session={session_id:'plain-empty',profile:'modelkit-profile',message_count:0,title:'New Chat'};
+        const plainRows=_sessionRowsWithActiveEphemeralSession([]);
+        assertEqual(plainRows[0].profile,'default','plain empty placeholder can still adopt active profile');
+        """
+    )
+    subprocess.run(["node", "-e", script], check=True, cwd=ROOT)
 
     for fn_name in ("cmdGoal", "cmdQueue", "cmdInterrupt"):
         body = _function_body(COMMANDS_JS, fn_name)

@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 import uuid
+import ipaddress
 import re
 from pathlib import Path
 from contextlib import closing
@@ -31,6 +32,7 @@ from api.agent_sessions import (
     is_cli_session_row_visible,
     read_session_lineage_report,
 )
+from api.state_db_health import connect_state_db_readonly
 from api.compression_anchor import visible_messages_for_anchor
 from api.session_events import (
     publish_session_list_changed,
@@ -1442,6 +1444,41 @@ def _allowed_public_origins() -> set[str]:
     return result
 
 
+def _is_loopback_host(value: str) -> bool:
+    value = (value or "").strip().lower()
+    if not value:
+        return False
+    if value == "localhost":
+        return True
+    try:
+        addr = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    if addr.is_loopback:
+        return True
+    mapped = getattr(addr, "ipv4_mapped", None)
+    return bool(mapped and mapped.is_loopback)
+
+
+def _trust_forwarded_host_for_loopback_proxy(handler, host: str) -> bool:
+    """Allow loopback-only reverse proxies to preserve same-origin semantics.
+
+    Managed setups like Cloud Terminal proxy browser traffic to a loopback-bound
+    Hermes process and rewrite Host to 127.0.0.1:<port>. In that layout the
+    immediate upstream client is also loopback, so forwarded host headers are
+    still locally asserted rather than internet-facing.
+    """
+    host_name, _ = _normalize_host_port(host)
+    client_ip = ""
+    try:
+        address = getattr(handler, "client_address", None)
+        if address:
+            client_ip = str(address[0] or "")
+    except Exception:
+        client_ip = ""
+    return _is_loopback_host(host_name) and _is_loopback_host(client_ip)
+
+
 def _is_browser_unsafe_request(handler) -> bool:
     """Return True when request headers identify a browser unsafe request.
 
@@ -1523,7 +1560,10 @@ def _check_csrf(handler) -> bool:
             if h.strip()
         ]
         trust_forwarded_host = os.getenv("HERMES_WEBUI_TRUST_FORWARDED_HOST", "").strip().lower()
-        if trust_forwarded_host in ("1", "true", "yes", "on"):
+        if (
+            trust_forwarded_host in ("1", "true", "yes", "on")
+            or _trust_forwarded_host_for_loopback_proxy(handler, host)
+        ):
             allowed_hosts.extend(
                 h.strip()
                 for h in [
@@ -3854,7 +3894,10 @@ def _handle_insights(handler, parsed) -> bool:
         from api.models import _active_state_db_path
         db_path = _active_state_db_path()
         if db_path and db_path.exists():
-            with closing(sqlite3.connect(str(db_path))) as conn:
+            conn = connect_state_db_readonly(db_path, log=logger, purpose="insights CLI session usage")
+            if conn is None:
+                raise RuntimeError("state.db unavailable")
+            with closing(conn):
                 conn.row_factory = sqlite3.Row
                 cur = conn.cursor()
                 cur.execute("""
@@ -4323,6 +4366,7 @@ def _stream_runtime_diagnostics() -> dict:
     streams = []
     total_subscribers = 0
     total_offline_buffered_events = 0
+    total_offline_dropped_events = 0
     with STREAMS_LOCK:
         items = list(STREAMS.items())
     for stream_id, stream in items:
@@ -4337,18 +4381,27 @@ def _stream_runtime_diagnostics() -> dict:
                 snapshot = {}
         subscriber_count = int(snapshot.get("subscriber_count") or 0)
         offline_buffered_events = int(snapshot.get("offline_buffered_events") or 0)
+        offline_dropped_events = int(snapshot.get("offline_dropped_events") or 0)
+        offline_buffer_max = int(snapshot.get("offline_buffer_max") or 0)
         total_subscribers += subscriber_count
         total_offline_buffered_events += offline_buffered_events
-        streams.append({
+        total_offline_dropped_events += offline_dropped_events
+        stream_info = {
             "stream_id": str(stream_id),
             "subscriber_count": subscriber_count,
             "offline_buffered_events": offline_buffered_events,
-        })
+        }
+        if offline_dropped_events:
+            stream_info["offline_dropped_events"] = offline_dropped_events
+        if offline_buffer_max:
+            stream_info["offline_buffer_max"] = offline_buffer_max
+        streams.append(stream_info)
     streams.sort(key=lambda item: item["stream_id"])
     return {
         "active_streams": len(streams),
         "total_subscribers": total_subscribers,
         "total_offline_buffered_events": total_offline_buffered_events,
+        "total_offline_dropped_events": total_offline_dropped_events,
         "streams": streams,
     }
 
@@ -4447,12 +4500,19 @@ def _deep_health_checks(stream_check: dict | None = None) -> tuple[dict, bool]:
                 "ms": round((time.time() - t0) * 1000, 1),
             }
         else:
-            with closing(sqlite3.connect(str(db_path))) as conn:
-                conn.execute("PRAGMA schema_version").fetchone()
-            checks["state_db"] = {
-                "status": "ok",
-                "ms": round((time.time() - t0) * 1000, 1),
-            }
+            conn = connect_state_db_readonly(db_path, log=logger, purpose="deep health state_db")
+            if conn is None:
+                checks["state_db"] = {
+                    "status": "degraded",
+                    "ms": round((time.time() - t0) * 1000, 1),
+                }
+            else:
+                with closing(conn):
+                    conn.execute("PRAGMA schema_version").fetchone()
+                checks["state_db"] = {
+                    "status": "ok",
+                    "ms": round((time.time() - t0) * 1000, 1),
+                }
     except Exception as exc:
         checks["state_db"] = {
             "status": "error",

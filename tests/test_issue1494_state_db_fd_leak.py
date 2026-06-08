@@ -177,6 +177,86 @@ def test_read_importable_agent_session_rows_skips_corrupt_state_db_header(tmp_pa
     assert tracking_sqlite.instances == []
 
 
+def _reset_state_db_health_caches():
+    import api.state_db_health as state_db_health
+
+    state_db_health._UNAVAILABLE.clear()
+    state_db_health._LAST_WARNED.clear()
+
+
+def _write_header_valid_malformed_db(path):
+    path.write_bytes(b"SQLite format 3\x00" + b"not-a-real-database" * 32)
+
+
+def test_read_importable_agent_session_rows_quarantines_header_valid_malformed_db(tmp_path, monkeypatch):
+    """Valid SQLite headers are not enough: malformed DBs must back off too."""
+    _reset_state_db_health_caches()
+    db = tmp_path / "state.db"
+    _write_header_valid_malformed_db(db)
+    calls = []
+    real_connect = sqlite3.connect
+
+    def _tracking_connect(*args, **kwargs):
+        calls.append((args, kwargs))
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", _tracking_connect)
+    from api.agent_sessions import read_importable_agent_session_rows
+
+    assert read_importable_agent_session_rows(db) == []
+    first_call_count = len(calls)
+    assert first_call_count >= 1
+
+    assert read_importable_agent_session_rows(db) == []
+    assert len(calls) == first_call_count
+
+
+def test_read_session_lineage_metadata_quarantines_header_valid_malformed_db(tmp_path, monkeypatch):
+    """Sidebar lineage enrichment should skip a known-malformed DB on later polls."""
+    _reset_state_db_health_caches()
+    db = tmp_path / "state.db"
+    _write_header_valid_malformed_db(db)
+    calls = []
+    real_connect = sqlite3.connect
+
+    def _tracking_connect(*args, **kwargs):
+        calls.append((args, kwargs))
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", _tracking_connect)
+    from api.agent_sessions import read_session_lineage_metadata
+
+    assert read_session_lineage_metadata(db, ["s1"]) == {}
+    first_call_count = len(calls)
+    assert first_call_count >= 1
+
+    assert read_session_lineage_metadata(db, ["s1"]) == {}
+    assert len(calls) == first_call_count
+
+
+def test_gateway_fingerprint_quarantines_header_valid_malformed_db(tmp_path, monkeypatch):
+    """The gateway watcher must not fall back to expensive projection forever."""
+    _reset_state_db_health_caches()
+    db = tmp_path / "state.db"
+    _write_header_valid_malformed_db(db)
+    calls = []
+    real_connect = sqlite3.connect
+
+    def _tracking_connect(*args, **kwargs):
+        calls.append((args, kwargs))
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", _tracking_connect)
+    from api.gateway_watcher import _STATE_DB_UNAVAILABLE_FINGERPRINT, _cheap_change_fingerprint
+
+    assert _cheap_change_fingerprint(db) == _STATE_DB_UNAVAILABLE_FINGERPRINT
+    first_call_count = len(calls)
+    assert first_call_count >= 1
+
+    assert _cheap_change_fingerprint(db) == _STATE_DB_UNAVAILABLE_FINGERPRINT
+    assert len(calls) == first_call_count
+
+
 def test_read_session_lineage_metadata_closes_connection(tmp_path, tracking_sqlite):
     """`read_session_lineage_metadata` must close every sqlite connection."""
     db = tmp_path / "state.db"

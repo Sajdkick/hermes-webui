@@ -415,10 +415,65 @@
       return value;
     }
 
+    function playNotificationProjectId(note){
+      const target=notificationTarget(note||{});
+      return String(
+        target.projectId||
+        note&&note.project&&note.project.id||
+        note&&note.projectId||
+        note&&note.project_id||
+        ''
+      ).trim();
+    }
+
+    function isLoopbackPlayHost(host){
+      const value=String(host||'').trim().toLowerCase();
+      return value==='localhost'||value==='0.0.0.0'||value==='127.0.0.1'||value==='::1'||value==='[::1]'||/^127\./.test(value);
+    }
+
+    function playNotificationHasProxyPort(note){
+      return !!String(note&&(
+        note.allocatedPort||
+        note.allocated_port||
+        note.playAllocatedPort||
+        ''
+      )||'').trim();
+    }
+
+    function playProxyInspectUrl(note,inspectUrl){
+      const projectId=playNotificationProjectId(note||{});
+      if(!projectId)return '';
+      try{
+        const url=new URL(inspectUrl,windowRef.location.origin);
+        if(url.origin===windowRef.location.origin&&url.pathname.indexOf('/play-project/')===0)return url.href;
+        if(url.protocol!=='http:'&&url.protocol!=='https:')return '';
+        if(!isLoopbackPlayHost(url.hostname))return '';
+        const mode=String(note&&(
+          note.inspectMode||
+          note.inspect_mode||
+          note.playInspectMode||
+          ''
+        )||'').trim().toLowerCase();
+        if(mode!=='proxy'&&!playNotificationHasProxyPort(note))return '';
+        const path=`${url.pathname||'/'}${url.search||''}${url.hash||''}`;
+        const proxyPath=`/play-project/${encodeURIComponent(projectId)}${path.charAt(0)==='/'?path:`/${path}`}`;
+        return new URL(proxyPath,windowRef.location.origin).href;
+      }catch(_error){
+        return '';
+      }
+    }
+
     function playInspectOverlayUrl(note){
-      const inspectUrl=playNotificationInspectUrl(note||{});
+      const source=note||{};
+      const inspectUrl=playNotificationInspectUrl(source);
       if(!inspectUrl)return '';
-      return new URL(inspectUrl,windowRef.location.origin).href;
+      const proxyUrl=playProxyInspectUrl(source,inspectUrl);
+      if(proxyUrl)return proxyUrl;
+      try{
+        return new URL(inspectUrl,windowRef.location.origin).href;
+      }catch(_error){
+        return inspectUrl;
+      }
     }
 
     function playNotificationStatus(note){

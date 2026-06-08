@@ -26,6 +26,8 @@ Use `hermes-runtime` as the Hermes WebUI Play/inspect bridge. In a correctly wir
 1. Check current state:
    - `hermes-runtime status --json`
    - `hermes-runtime play status --json`
+   - Compare `projectId`, `configPath`, `configBranch`, and Play build logs against the current workspace. If they point at a different project checkout/profile/branch than the task workspace, use `references/play-project-runtime-binding-mismatch.md` before treating app-specific 404s as source-code router failures.
+   - For severe mismatches, also compare live non-secret env routing fields (`HERMES_SESSION_ID`, `HERMES_SESSION_KEY`, `HERMES_WEBUI_RUNTIME_API_BASE_URL`, `HERMES_WEBUI_RUNTIME_PROJECT_ID`, `TERMINAL_CWD`) with persisted session metadata. Mixed values from unrelated Ops task sessions indicate WebUI runtime/session isolation leakage rather than an app build-pipeline failure.
 2. Start Play and wait for an inspectable app:
    - `hermes-runtime play start --wait --json`
    - Add `--restart` when you need a clean rerun.
@@ -113,8 +115,17 @@ If `hermes-runtime doctor --json` reports missing WebUI runtime context in the a
   - `hermes-runtime play start --wait --timeout 8m --json`
   - `hermes-runtime play logs --limit 200 --json`
 
+## WebUI slowdown and recovery diagnostics
+
+When Hermes WebUI starts responsive but slows over time, crashes, or lands on the recovery page, do not jump straight to broad cleanup. First correlate request diagnostics and code stages. In particular, repeated `/api/sessions` polling can be taken down by optional Agent `state.db` lineage metadata if the SQLite DB is malformed, locked, or slow. Use `references/webui-session-sidebar-slowdown.md` for the diagnostic path and degrade-safe fix pattern: quarantine malformed DB stat states, use short read-only SQLite timeouts for optional metadata, preserve `/api/sessions` JSON-session results without lineage metadata, and test retry-after-file-change behavior.
+
+For project/session interruption reports where the session store is large or long-running transcripts are common, enforce the metadata-only hot-route boundary in `references/metadata-only-hot-route-boundary.md`: sidebar/session-list code must not silently fall back from metadata reads to full transcript parsing, because that can make UI polling heavy enough to trigger WebUI recovery and apparent response interruptions.
+
 ## References
 
+- `references/play-project-runtime-binding-mismatch.md` — diagnostic and recovery pattern for Play/runtime sessions bound to the wrong WebUI project id, causing app-specific tRPC/static 404s despite correct source routers.
 - `references/cloud-terminal-runtime-migration.md` — cleanup checklist and rationale for replacing Cloud Terminal-era runtime guidance with Hermes runtime usage.
 - `references/core-play-boundary-extraction.md` — proven Hermes-only Play core boundary pattern, contract shape, caller list, verification gate, and pitfalls.
 - `references/core-api-deployments-boundary.md` — broader Hermes Core API extraction and Ops Deployments page pattern, including Core route/domain shape, legacy Ops compatibility shims, and verification pitfalls.
+- `references/webui-session-sidebar-slowdown.md` — diagnostic and fix pattern for WebUI slowdown/recovery caused by `/api/sessions` sidebar polling stuck in optional Agent `state.db` lineage metadata.
+- `references/metadata-only-hot-route-boundary.md` — invariant and test pattern for keeping `/api/sessions`/sidebar metadata paths from falling back to full transcript parsing on large session stores.
