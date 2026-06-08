@@ -21,6 +21,7 @@ from pathlib import Path
 
 from api.config import HOME
 from api.agent_sessions import read_importable_agent_session_rows
+from api.state_db_health import connect_state_db_readonly, warn_state_db_exception
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ def _snapshot_hash(sessions: list) -> str:
 # cheap change-detection scan below sees exactly the same row set as the
 # expensive projection (otherwise cron message churn would defeat the gate).
 _WATCHER_EXCLUDED_SOURCES = ("cron", "webui")
+_STATE_DB_UNAVAILABLE_FINGERPRINT = "__state_db_unavailable__"
 
 
 def _cheap_change_fingerprint(db_path: Path) -> str | None:
@@ -86,8 +88,11 @@ def _cheap_change_fingerprint(db_path: Path) -> str | None:
         'user_id', 'chat_id', 'chat_type', 'thread_id', 'session_key',
         'origin_chat_id', 'origin_user_id', 'platform',
     )
+    conn = connect_state_db_readonly(db_path, log=logger, purpose="gateway session watcher")
+    if conn is None:
+        return _STATE_DB_UNAVAILABLE_FINGERPRINT
     try:
-        with closing(sqlite3.connect(str(db_path))) as conn:
+        with closing(conn):
             cur = conn.cursor()
             cur.execute("PRAGMA table_info(sessions)")
             cols = {row[1] for row in cur.fetchall()}
@@ -139,6 +144,9 @@ def _cheap_change_fingerprint(db_path: Path) -> str | None:
                     # signal the caller to run the full projection.
                     return None
             return h.hexdigest()
+    except sqlite3.DatabaseError as exc:
+        warn_state_db_exception(db_path, exc, log=logger, purpose="gateway session watcher")
+        return _STATE_DB_UNAVAILABLE_FINGERPRINT
     except Exception:
         return None
 
@@ -301,11 +309,19 @@ class GatewayWatcher:
                 # runs when this fingerprint actually changes, so an idle server
                 # with a large state.db stops re-aggregating tens of thousands
                 # of message rows every 5 seconds (issue #3506). A None
-                # fingerprint (error / unreadable db) forces the full read so we
-                # never silently skip a real change.
+                # fingerprint (unknown schema/transient shape mismatch) forces
+                # the full read so we never silently skip a real change; the
+                # unavailable sentinel means the shared health gate has already
+                # quarantined this optional DB until it changes or recovers.
                 db_path = _get_state_db_path()
                 cheap_fp = _cheap_change_fingerprint(db_path) if db_path.exists() else ''
-                if cheap_fp is not None and cheap_fp == self._last_cheap_fp:
+                if cheap_fp == _STATE_DB_UNAVAILABLE_FINGERPRINT:
+                    # The Agent DB is optional sidebar metadata.  If the shared
+                    # health gate has quarantined it, preserve the last known
+                    # watcher snapshot and wait for the DB file to change rather
+                    # than falling through to the expensive projection forever.
+                    self._last_cheap_fp = cheap_fp
+                elif cheap_fp is not None and cheap_fp == self._last_cheap_fp:
                     # Nothing changed in the sidebar-visible session set; skip
                     # the expensive projection and the notify entirely.
                     pass

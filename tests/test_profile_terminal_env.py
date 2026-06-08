@@ -203,3 +203,124 @@ def test_streaming_thread_env_preserves_explicit_profile_runtime_bridge(tmp_path
     assert env["HERMES_WEBUI_RUNTIME_API_BASE_URL"] == "http://example.test/custom/runtime"
     assert env["HERMES_WEBUI_REQUEST_INPUT_TOKEN"] == "profile-token"
     assert "HERMES_WEBUI_RUNTIME_PROJECT_ID" not in env
+
+
+def test_streaming_thread_env_overrides_stale_webui_bridge_for_project_session(tmp_path, monkeypatch):
+    from api import ops_projects, streaming
+
+    active_workspace = tmp_path / "monorepo-template-5"
+    active_workspace.mkdir()
+    projects_dir = tmp_path / "ops-projects"
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(projects_dir))
+    monkeypatch.setenv("HERMES_WEBUI_HOST", "0.0.0.0")
+    monkeypatch.setenv("HERMES_WEBUI_PORT", "4321")
+    monkeypatch.setattr(streaming, "TLS_ENABLED", False)
+    active_project = ops_projects.create_ops_project({"name": "Summons", "path": str(active_workspace)})
+
+    stale_project_id = "b840ee27-85ec-407a-9819-285d5953e0a2"
+    active_session_id = "20260608_055514_af1bfe"
+    env = streaming._build_agent_thread_env(
+        {
+            "HERMES_WEBUI_RUNTIME_API_BASE_URL": (
+                f"http://127.0.0.1:5003/api/ops/projects/{stale_project_id}/runtime"
+            ),
+            "HERMES_WEBUI_RUNTIME_PROJECT_ID": stale_project_id,
+            "HERMES_WEBUI_REQUEST_INPUT_TOKEN": "webui-session-20260608_034335_ccb22a",
+            "TERMINAL_CWD": "/home/ubuntu/cloud-terminal-data/projects/monorepo-template-2",
+            "HERMES_SESSION_KEY": "20260608_034335_ccb22a",
+            "HERMES_SESSION_ID": "20260608_034335_ccb22a",
+            "HERMES_SESSION_PLATFORM": "webui",
+            "HERMES_HOME": "/home/ubuntu/cloud-terminal-data/projects/.cloud-terminal/hermes/profiles/model-kit",
+        },
+        str(active_workspace),
+        active_session_id,
+        "/home/ubuntu/cloud-terminal-data/projects/.cloud-terminal/hermes/profiles/summons",
+        project_id=active_project["id"],
+    )
+
+    assert env["HERMES_WEBUI_RUNTIME_API_BASE_URL"] == (
+        f"http://127.0.0.1:4321/api/ops/projects/{active_project['id']}/runtime"
+    )
+    assert env["HERMES_WEBUI_RUNTIME_PROJECT_ID"] == active_project["id"]
+    assert env["HERMES_WEBUI_REQUEST_INPUT_TOKEN"] == f"webui-session-{active_session_id}"
+    assert env["TERMINAL_CWD"] == str(active_workspace)
+    assert env["HERMES_SESSION_KEY"] == active_session_id
+    assert env["HERMES_SESSION_ID"] == active_session_id
+    assert env["HERMES_HOME"].endswith("/profiles/summons")
+
+
+def test_streaming_thread_env_prefers_webui_bridge_over_legacy_profile_env(tmp_path, monkeypatch):
+    from api import streaming
+
+    workspace = tmp_path / "runtime-workspace"
+    workspace.mkdir()
+    projects_dir = tmp_path / "ops-projects"
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(projects_dir))
+    monkeypatch.setenv("HERMES_WEBUI_HOST", "0.0.0.0")
+    monkeypatch.setenv("HERMES_WEBUI_PORT", "4321")
+    monkeypatch.setattr(streaming, "TLS_ENABLED", False)
+
+    env = streaming._build_agent_thread_env(
+        {
+            "HERMES_RUNTIME_API_BASE_URL": "http://legacy.example/runtime",
+            "HERMES_REQUEST_INPUT_TOKEN": "legacy-token",
+        },
+        str(workspace),
+        "active-session",
+        "/active/profile/home",
+    )
+
+    runtime_base = env["HERMES_WEBUI_RUNTIME_API_BASE_URL"]
+    assert runtime_base.startswith("http://127.0.0.1:4321/api/ops/projects/")
+    assert runtime_base.endswith("/runtime")
+    assert env["HERMES_WEBUI_RUNTIME_PROJECT_ID"]
+    assert env["HERMES_WEBUI_REQUEST_INPUT_TOKEN"] == "webui-session-active-session"
+    assert env["HERMES_RUNTIME_API_BASE_URL"] == "http://legacy.example/runtime"
+    assert env["HERMES_REQUEST_INPUT_TOKEN"] == "legacy-token"
+
+    completed = subprocess.run(
+        ["node", "bin/hermes-runtime", "doctor", "--json"],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "HERMES_WEBUI_RUNTIME_API_BASE_URL": runtime_base,
+            "HERMES_WEBUI_REQUEST_INPUT_TOKEN": env["HERMES_WEBUI_REQUEST_INPUT_TOKEN"],
+            "HERMES_RUNTIME_API_BASE_URL": env["HERMES_RUNTIME_API_BASE_URL"],
+            "HERMES_REQUEST_INPUT_TOKEN": env["HERMES_REQUEST_INPUT_TOKEN"],
+        },
+    )
+    payload = json.loads(completed.stdout)
+    assert payload["ok"] is True
+    assert payload["runtimeApiBaseUrl"]["source"] == "HERMES_WEBUI_RUNTIME_API_BASE_URL"
+    assert payload["requestInputToken"]["source"] == "HERMES_WEBUI_REQUEST_INPUT_TOKEN"
+
+
+def test_streaming_thread_env_uses_project_id_when_workspace_inference_missing(tmp_path, monkeypatch):
+    from api import ops_projects, streaming
+
+    project_path = tmp_path / "registered-project"
+    project_path.mkdir()
+    missing_workspace = tmp_path / "missing-workspace"
+    projects_dir = tmp_path / "ops-projects"
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(projects_dir))
+    monkeypatch.setenv("HERMES_WEBUI_HOST", "0.0.0.0")
+    monkeypatch.setenv("HERMES_WEBUI_PORT", "4321")
+    monkeypatch.setattr(streaming, "TLS_ENABLED", False)
+    project = ops_projects.create_ops_project({"name": "Runtime Project", "path": str(project_path)})
+
+    env = streaming._build_agent_thread_env(
+        {},
+        str(missing_workspace),
+        "active-session",
+        "/active/profile/home",
+        project_id=project["id"],
+    )
+
+    assert env["HERMES_WEBUI_RUNTIME_PROJECT_ID"] == project["id"]
+    assert env["HERMES_WEBUI_RUNTIME_API_BASE_URL"] == (
+        f"http://127.0.0.1:4321/api/ops/projects/{project['id']}/runtime"
+    )
+    assert env["HERMES_WEBUI_REQUEST_INPUT_TOKEN"] == "webui-session-active-session"

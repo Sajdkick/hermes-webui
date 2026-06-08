@@ -6,10 +6,11 @@ def test_stream_channel_exposes_buffer_and_subscriber_counts():
     channel = create_stream_channel()
     channel.put_nowait(("token", {"text": "offline"}))
 
-    assert channel.diagnostic_snapshot() == {
-        "subscriber_count": 0,
-        "offline_buffered_events": 1,
-    }
+    snapshot = channel.diagnostic_snapshot()
+    assert snapshot["subscriber_count"] == 0
+    assert snapshot["offline_buffered_events"] == 1
+    assert snapshot["offline_dropped_events"] == 0
+    assert snapshot["offline_buffer_max"] >= 1
 
     subscriber = channel.subscribe()
     try:
@@ -21,8 +22,28 @@ def test_stream_channel_exposes_buffer_and_subscriber_counts():
         channel.unsubscribe(subscriber)
 
 
+def test_stream_channel_bounds_offline_buffer_and_replays_tail():
+    channel = create_stream_channel(offline_buffer_max=2)
+    channel.put_nowait(("token", {"text": "one"}))
+    channel.put_nowait(("token", {"text": "two"}))
+    channel.put_nowait(("token", {"text": "three"}))
+
+    snapshot = channel.diagnostic_snapshot()
+    assert snapshot["offline_buffered_events"] == 2
+    assert snapshot["offline_dropped_events"] == 1
+    assert snapshot["offline_buffer_max"] == 2
+
+    subscriber = channel.subscribe()
+    try:
+        assert subscriber.get_nowait() == ("token", {"text": "two"})
+        assert subscriber.get_nowait() == ("token", {"text": "three"})
+    finally:
+        channel.unsubscribe(subscriber)
+
+
 def test_stream_runtime_diagnostics_summarizes_active_stream_channels():
-    channel = create_stream_channel()
+    channel = create_stream_channel(offline_buffer_max=1)
+    channel.put_nowait(("token", {"text": "older"}))
     channel.put_nowait(("token", {"text": "offline"}))
     subscriber = channel.subscribe()
     try:
@@ -40,11 +61,14 @@ def test_stream_runtime_diagnostics_summarizes_active_stream_channels():
         assert payload["active_streams"] == 1
         assert payload["total_subscribers"] == 1
         assert payload["total_offline_buffered_events"] == 1
+        assert payload["total_offline_dropped_events"] == 1
         assert payload["streams"] == [
             {
                 "stream_id": "stream-one",
                 "subscriber_count": 1,
                 "offline_buffered_events": 1,
+                "offline_dropped_events": 1,
+                "offline_buffer_max": 1,
             }
         ]
     finally:

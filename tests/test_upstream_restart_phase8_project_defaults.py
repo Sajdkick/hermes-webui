@@ -581,7 +581,7 @@ def test_phase8_ops_ui_hides_run_activity_inside_projects_view():
           if (path === '/api/ops/notifications/pending'){
             return { ok: true, json: async () => ({ notifications: [] }) };
           }
-          if (path === '/api/ops/runs'){
+          if (path === '/api/ops/runs/summary'){
             return { ok: true, json: async () => ({ runs: [] }) };
           }
           if (path === '/api/profiles'){

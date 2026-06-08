@@ -76,6 +76,12 @@
         const operationRecord=data.operation||data;
         OPS.gitOperationsByProject[id]=operationRecord;
         if(operationRecord.finalStatus)OPS.gitStatusByProject[id]=operationRecord.finalStatus;
+        const handoff=operationRecord.conflictHandoff||null;
+        const conflictSessionUrl=String(
+          operationRecord.sessionUrl
+          || (handoff&&handoff.sessionUrl)
+          || ''
+        ).trim();
         if(typeof loadProjects==='function'){
           await loadProjects().catch(()=>null);
         }
@@ -89,6 +95,14 @@
           await refreshDetail().catch(()=>null);
         }
         showToast(operationRecord.summary||`${label} finished`,3200);
+        if(conflictSessionUrl&&typeof window!=='undefined'&&window.location){
+          if(typeof window.location.assign==='function'){
+            window.location.assign(conflictSessionUrl);
+            return operationRecord;
+          }
+          window.location.href=conflictSessionUrl;
+          return operationRecord;
+        }
         return operationRecord;
       }finally{
         delete OPS.gitBusyByProject[id];
@@ -280,6 +294,7 @@
                 <strong>${esc(operation.summary||'Git operation')}</strong>
                 <span>${esc(`${operation.operation||'git'} | ${operation.status||'unknown'} | ${operation.updatedAt||operation.createdAt||''}`)}</span>
                 ${operation.error?`<span class="error">${esc(operation.error)}</span>`:''}
+                ${operation.sessionUrl?`<a href="${esc(operation.sessionUrl)}">Open conflict session</a>`:''}
                 ${operation.operationPath?`<a href="/api/media?path=${encodeURIComponent(operation.operationPath)}" target="_blank" rel="noopener noreferrer">Operation record</a>`:''}
               </div>
             `:''}

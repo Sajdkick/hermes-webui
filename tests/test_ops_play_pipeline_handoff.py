@@ -820,6 +820,48 @@ def test_play_failed_notification_attaches_scrollable_logs(monkeypatch):
     assert "super-secret" not in notification["playLogText"]
 
 
+def test_play_ready_notification_exposes_proxy_rewrite_metadata(monkeypatch):
+    monkeypatch.setattr(
+        ops_notifications.ops_projects,
+        "get_ops_project_task",
+        lambda project_id, task_id: {
+            "task": {"id": task_id, "text": "Build app", "grade": "green", "done": False}
+        },
+    )
+
+    notification = ops_notifications._play_notification(
+        {"id": "project-1", "name": "Demo"},
+        {
+            "status": "ready",
+            "ready": True,
+            "readyAt": "2026-05-06T00:00:00.000Z",
+            "inspectUrl": "http://127.0.0.1:23456/play?case=1#state",
+            "inspectMode": "direct",
+            "allocatedPort": 23456,
+            "allocatedPortHost": "127.0.0.1",
+            "terminalTarget": {"runId": "run-1", "taskId": "task-1", "sessionId": "session-1"},
+        },
+    )
+
+    assert notification is not None
+    assert notification["inspectUrl"] == "http://127.0.0.1:23456/play?case=1#state"
+    assert notification["inspectMode"] == "direct"
+    assert notification["allocatedPort"] == 23456
+    assert notification["allocatedPortHost"] == "127.0.0.1"
+
+
+def test_play_notification_frontend_rewrites_loopback_inspect_urls_to_proxy():
+    source = (Path(__file__).resolve().parents[1] / "static" / "ops-legacy-notifications.js").read_text(encoding="utf-8")
+    play = (Path(__file__).resolve().parents[1] / "static" / "ops-legacy-play.js").read_text(encoding="utf-8")
+
+    assert "function playProxyInspectUrl" in source
+    assert "function isLoopbackPlayHost" in source
+    assert "playNotificationHasProxyPort" in source
+    assert "`/play-project/${encodeURIComponent(projectId)}" in source
+    assert "playInspectOverlayUrl(Object.assign({projectId,project:{id:projectId}},status||{}))" in play
+    assert "playInspectOverlayUrl(status||{})" in play
+
+
 def test_play_fallback_notification_attaches_metadata_logs(monkeypatch, tmp_path):
     _patch_run_context(monkeypatch, tmp_path).write_text(
         json.dumps(

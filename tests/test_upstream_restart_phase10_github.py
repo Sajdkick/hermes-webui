@@ -2,6 +2,7 @@ import io
 import json
 import shutil
 import subprocess
+import textwrap
 from pathlib import Path
 from types import SimpleNamespace
 from urllib import error as urlerror
@@ -10,6 +11,26 @@ import pytest
 
 import api.routes as routes
 from api import ops_github, ops_projects, routes_ops_github
+
+ROOT = Path(__file__).resolve().parents[1]
+OPS_PROJECTS_JS = (ROOT / "static" / "ops-projects.js").read_text(encoding="utf-8")
+
+
+def _function_body(src: str, name: str) -> str:
+    marker = f"async function {name}"
+    if marker not in src:
+        marker = f"function {name}"
+    start = src.index(marker)
+    brace = src.index("{", start)
+    depth = 0
+    for idx in range(brace, len(src)):
+        if src[idx] == "{":
+            depth += 1
+        elif src[idx] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[start : idx + 1]
+    raise AssertionError(f"Could not extract {name}()")
 
 
 class FakeResponse:
@@ -254,6 +275,60 @@ def test_phase10_import_missing_branch_creates_and_pushes_to_origin(tmp_path, mo
     assert ["git", "clone", "--branch", "main", "--single-branch", "https://github.com/acme/repo.git", str(projects_dir / "repo")] in commands
     assert ["git", "checkout", "-B", "feature/new-project", "origin/main"] in commands
     assert ["git", "push", "--set-upstream", "origin", "feature/new-project"] in commands
+
+
+def test_phase10_github_import_prompt_sends_requested_branch_with_default_base():
+    import_fn = _function_body(OPS_PROJECTS_JS, "importGitHubRepository")
+    prompt_fn = _function_body(OPS_PROJECTS_JS, "promptGitHubImportBranch")
+    script = import_fn + "\n" + prompt_fn + textwrap.dedent(
+        """
+        const calls=[];
+        const state={};
+        const root={};
+        global.window={
+          prompt(message, fallback){
+            calls.push({kind:'prompt', message, fallback});
+            return 'feature/from-prompt';
+          }
+        };
+        function render(){ calls.push({kind:'render'}); }
+        async function loadProjects(_root,_state,keepSelection){
+          calls.push({kind:'loadProjects', keepSelection});
+        }
+        async function api(path,options){
+          calls.push({kind:'api', path, body:options.body});
+          return {imported:true, project:{name:'repo'}};
+        }
+        function assertEqual(actual, expected, label){
+          if(actual!==expected){
+            throw new Error(`${label}: expected ${expected}, got ${actual}`);
+          }
+        }
+        (async()=>{
+          await importGitHubRepository(root,state,{
+            owner:'acme',
+            repo:'repo',
+            branch:'main',
+            defaultBranch:'main',
+            projectName:'repo',
+          });
+          const promptCall=calls.find((call)=>call.kind==='prompt');
+          const apiCall=calls.find((call)=>call.kind==='api');
+          assertEqual(promptCall.fallback,'main','prompt defaults to clicked/default branch');
+          assertEqual(apiCall.path,'/api/ops/github/import','import endpoint');
+          assertEqual(apiCall.body.branch,'feature/from-prompt','payload uses prompted branch');
+          assertEqual(apiCall.body.defaultBranch,'main','payload preserves repo default branch');
+          assertEqual(apiCall.body.baseBranch,'main','payload sends default branch as creation base');
+          assertEqual(apiCall.body.createMissingBranch,true,'payload opts into missing branch creation');
+          assertEqual(apiCall.body.createMissingCoreBranch,true,'payload opts into core branch creation');
+          assertEqual(state.githubImportingRepoKey,'','busy key is cleared after import');
+        })().catch((error)=>{
+          console.error(error && error.stack || error);
+          process.exit(1);
+        });
+        """
+    )
+    subprocess.run(["node", "-e", script], check=True, cwd=ROOT)
 
 
 def test_phase10_github_routes_dispatch_through_ops_modules(monkeypatch):

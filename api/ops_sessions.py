@@ -17,6 +17,8 @@ from api.models import all_sessions, get_session, new_session
 
 OPS_TASK_SOURCE_TAG = "ops_task"
 OPS_TASK_SOURCE_LABEL = "Ops task"
+OPS_GIT_CONFLICT_SOURCE_TAG = "ops_git_conflict"
+OPS_GIT_CONFLICT_SOURCE_LABEL = "Git conflict"
 logger = logging.getLogger(__name__)
 
 
@@ -276,6 +278,127 @@ def project_profile(project: dict) -> str | None:
 
 def project_session_defaults(project: dict) -> tuple[str | None, str | None]:
     return _project_session_defaults(project)
+
+
+def _project_session_title(project: dict, suffix: str) -> str:
+    project_name = str(project.get("name") or project.get("fullName") or project.get("id") or "Project").strip()
+    title = f"{project_name}: {suffix}" if project_name else suffix
+    return title[:160]
+
+
+def build_git_conflict_analysis_prompt(project: dict, conflict: dict | None = None) -> str:
+    """Return the first-turn prompt for an Ops project Git conflict handoff."""
+    conflict = conflict if isinstance(conflict, dict) else {}
+    project_id = str(project.get("id") or conflict.get("projectId") or "").strip()
+    project_name = str(project.get("name") or project.get("fullName") or project_id or "project").strip()
+    workspace = str(conflict.get("repositoryRoot") or _task_workspace(project) or "").strip()
+    core_branch = str(conflict.get("coreBranch") or project.get("coreBranch") or "main").strip() or "main"
+    current_branch = str(conflict.get("branch") or "").strip()
+    remote = str(conflict.get("remote") or "origin").strip() or "origin"
+    remote_branch = str(conflict.get("remoteBranch") or core_branch).strip() or core_branch
+    reason = str(conflict.get("reason") or "A project Git sync found merge conflicts.").strip()
+    attempted = str(conflict.get("attemptedMerge") or "").strip()
+    detail = str(conflict.get("detail") or "").strip()
+    raw_files_value = conflict.get("files")
+    raw_files = raw_files_value if isinstance(raw_files_value, list) else []
+    files = [str(item).strip() for item in raw_files if str(item or "").strip()]
+
+    lines = [
+        "A project Git sync/push found merge conflicts and opened this project-scoped repair session.",
+        "",
+        "Your first response must be analysis only: inspect the repository conflict state and report what resolving it will require. Do not edit files, stage changes, commit, merge --continue, or push in the first response.",
+        "After the user gives direction, resolve the conflicts, run targeted verification, complete the merge, commit if needed, and finish the sync so local and remote are synchronized.",
+        "",
+        "Context:",
+        f"- Project: {project_name}" + (f" ({project_id})" if project_id and project_id != project_name else ""),
+        f"- Workspace/repository: {workspace}" if workspace else "- Workspace/repository: current project workspace",
+        f"- Core branch: {core_branch}",
+        f"- Current branch: {current_branch}" if current_branch else "- Current branch: inspect with git status",
+        f"- Remote target: {remote}/{remote_branch}",
+        f"- Conflict trigger: {reason}",
+    ]
+    if attempted:
+        lines.append(f"- Attempted merge: {attempted}")
+    if files:
+        lines.append("- Conflict files:")
+        lines.extend(f"  - {path}" for path in files[:40])
+        if len(files) > 40:
+            lines.append(f"  - ...and {len(files) - 40} more")
+    if detail:
+        lines.extend(["", "Git reported:", "```text", detail[:1600], "```"])
+    lines.extend([
+        "",
+        "Required workflow:",
+        "1. Run non-destructive inspection first (`git status --short --branch`, conflict-file review, and any relevant logs/tests).",
+        "2. In your first assistant response, summarize each conflicted area, the likely resolution choices, and anything that needs user/product judgment.",
+        "3. Ask the user for the needed direction before editing. If the resolution is mechanical and safe, still explain that and wait for approval/input.",
+        "4. Only after the user responds, edit files to resolve conflicts, stage resolved files, complete the merge, run focused verification, push the synchronized branch, and report the real command results.",
+        "5. Preserve unrelated local changes and never expose secrets; redact tokens, cookies, passwords, and connection strings if encountered.",
+    ])
+    return "\n".join(lines)
+
+
+def launch_project_git_conflict_session(project: dict, conflict: dict | None = None, body: dict | None = None) -> dict:
+    """Create a project-scoped session and start/queue the Git conflict analysis turn."""
+    project_id = str(project.get("id") or "").strip()
+    if not project_id:
+        raise OpsSessionError("Project id is required for Git conflict handoff.", 400)
+    profile = _project_execution_profile(project)
+    model, model_provider = _project_session_defaults(project, profile)
+    session = new_session(
+        workspace=_task_workspace(project),
+        model=model,
+        model_provider=model_provider,
+        profile=profile,
+        project_id=project_id,
+    )
+    session.title = _project_session_title(project, "Git conflict analysis")
+    session.source_tag = OPS_GIT_CONFLICT_SOURCE_TAG
+    session.source_label = OPS_GIT_CONFLICT_SOURCE_LABEL
+    session.save()
+
+    prompt = build_git_conflict_analysis_prompt(project, conflict)
+    payload = body if isinstance(body, dict) else {}
+    requested_start = payload.get("startAgent", payload.get("start_agent", True))
+    should_start_agent = requested_start is not False
+    start_result: dict = {}
+    start_error = ""
+    if should_start_agent:
+        try:
+            from api import routes
+
+            start_turn = getattr(routes, "start_project_git_conflict_analysis_turn", None)
+            if callable(start_turn):
+                raw_start_result = start_turn(
+                    session.session_id,
+                    prompt,
+                    metadata={
+                        "projectId": project_id,
+                        "source": OPS_GIT_CONFLICT_SOURCE_TAG,
+                        "conflict": conflict if isinstance(conflict, dict) else {},
+                    },
+                )
+                start_result = raw_start_result if isinstance(raw_start_result, dict) else {}
+                if not start_result.get("ok", True):
+                    start_error = str(start_result.get("error") or "Could not start conflict analysis turn.")
+            else:
+                start_error = "Conflict analysis starter is unavailable."
+        except Exception as exc:
+            logger.warning("Failed to start Git conflict analysis turn for %s", session.session_id, exc_info=True)
+            start_error = str(exc) or "Could not start conflict analysis turn."
+
+    response = {
+        "sessionId": session.session_id,
+        "sessionUrl": session_url(session.session_id),
+        "session": session.compact() | {"messages": session.messages},
+        "source": OPS_GIT_CONFLICT_SOURCE_TAG,
+        "initialPrompt": prompt,
+        "agentStarted": bool(start_result.get("ok")) if should_start_agent else False,
+        "agentStart": start_result,
+    }
+    if start_error:
+        response["agentStartError"] = start_error
+    return response
 
 
 def _linked_session_matches_launch_defaults(session, profile: str, model: str | None, model_provider: str | None) -> bool:

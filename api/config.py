@@ -4833,6 +4833,11 @@ LOCK = threading.Lock()
 # tunable via HERMES_WEBUI_SESSIONS_MAX for installs with hundreds of sessions.
 SESSIONS_MAX = _env_int("HERMES_WEBUI_SESSIONS_MAX", 100)
 CHAT_LOCK = threading.Lock()
+# Bound the per-stream event tail held while no browser tab is connected.
+# Disconnected long-running streams can otherwise accumulate thousands of token,
+# metering, and tool events in RAM until the worker exits. The run journal remains
+# the durable source for replay; this in-memory buffer is only a reconnect tail.
+STREAM_OFFLINE_BUFFER_MAX = _env_int("HERMES_WEBUI_STREAM_OFFLINE_BUFFER_MAX", 1024)
 
 
 class StreamChannel:
@@ -4842,12 +4847,20 @@ class StreamChannel:
     subscriber still receives the stream tail that arrived during the gap.
     Once one or more subscribers are attached, new events are broadcast to all
     of them instead of being consumed destructively by a single queue reader.
+    The offline tail is bounded so abandoned browser tabs cannot grow WebUI
+    memory without limit during long-running agent turns.
     """
 
-    def __init__(self):
+    def __init__(self, offline_buffer_max: int | None = None):
         self._lock = threading.Lock()
         self._subscribers: list[queue.Queue] = []
         self._offline_buffer: list[tuple[str, object]] = []
+        self._offline_dropped = 0
+        try:
+            limit = int(STREAM_OFFLINE_BUFFER_MAX if offline_buffer_max is None else offline_buffer_max)
+        except (TypeError, ValueError):
+            limit = STREAM_OFFLINE_BUFFER_MAX
+        self._offline_buffer_max = max(1, limit)
 
     def subscribe(self) -> queue.Queue:
         q: queue.Queue = queue.Queue()
@@ -4874,6 +4887,10 @@ class StreamChannel:
             subscribers = list(self._subscribers)
             if not subscribers:
                 self._offline_buffer.append(item)
+                overflow = len(self._offline_buffer) - self._offline_buffer_max
+                if overflow > 0:
+                    del self._offline_buffer[:overflow]
+                    self._offline_dropped += overflow
                 return
             self._offline_buffer.clear()
         for q in subscribers:
@@ -4885,11 +4902,13 @@ class StreamChannel:
             return {
                 "subscriber_count": len(self._subscribers),
                 "offline_buffered_events": len(self._offline_buffer),
+                "offline_dropped_events": self._offline_dropped,
+                "offline_buffer_max": self._offline_buffer_max,
             }
 
 
-def create_stream_channel() -> StreamChannel:
-    return StreamChannel()
+def create_stream_channel(*, offline_buffer_max: int | None = None) -> StreamChannel:
+    return StreamChannel(offline_buffer_max=offline_buffer_max)
 
 
 STREAMS: dict = {}

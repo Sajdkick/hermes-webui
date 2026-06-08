@@ -151,7 +151,7 @@ def test_prune_session_from_index_removes_requested_row_only():
     assert s_b.path.exists()
 
 
-def test_all_sessions_backfills_last_message_at_for_legacy_index_rows():
+def test_all_sessions_backfills_last_message_at_for_legacy_index_rows_without_full_load():
     index_file = models.SESSION_INDEX_FILE
     s = Session(
         session_id="sess_legacy_index",
@@ -159,7 +159,26 @@ def test_all_sessions_backfills_last_message_at_for_legacy_index_rows():
         updated_at=300.0,
         messages=[{"role": "assistant", "content": "reply", "_ts": 100.0}],
     )
-    s.path.write_text(json.dumps(s.__dict__, ensure_ascii=False, indent=2), encoding="utf-8")
+    s.path.write_text(
+        json.dumps(
+            {
+                "session_id": s.session_id,
+                "title": s.title,
+                "workspace": s.workspace,
+                "model": s.model,
+                "model_provider": s.model_provider,
+                "created_at": s.created_at,
+                "updated_at": s.updated_at,
+                # Simulate a sidecar that predates persisted last_message_at but
+                # still has bounded metadata before the large messages array.
+                "messages": s.messages,
+                "tool_calls": s.tool_calls,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     _write_index_file(
         index_file,
         [
@@ -177,18 +196,23 @@ def test_all_sessions_backfills_last_message_at_for_legacy_index_rows():
         ],
     )
 
-    rows = models.all_sessions()
+    with patch.object(Session, "load", side_effect=AssertionError("full load should not run")):
+        rows = models.all_sessions()
 
     assert rows[0]["session_id"] == s.session_id
-    assert rows[0]["last_message_at"] == 100.0
+    # Legacy sidecars that predate persisted last_message_at cannot recover the
+    # exact tail timestamp without parsing messages.  The hot sidebar path must
+    # use the bounded metadata fallback instead.
+    assert rows[0]["last_message_at"] == 300.0
+    assert rows[0]["title"] == "Legacy Index"
 
     # Backfill must also be persisted to the index so subsequent /api/sessions
-    # polls don't re-read every legacy session file.  Without this, a 5-second
-    # poll cycle re-loads every legacy session JSON on every tick until each
-    # session is independently saved.
+    # polls don't re-check the legacy row. It must not parse the full transcript
+    # just to derive a more exact historical timestamp.
     persisted = _read_index(index_file)
     assert persisted[0]["session_id"] == s.session_id
-    assert persisted[0].get("last_message_at") == 100.0
+    assert persisted[0].get("last_message_at") == 300.0
+    assert persisted[0]["title"] == "Legacy Index"
 
 
 def test_all_sessions_prune_batches_persisted_id_snapshot(monkeypatch):
@@ -257,9 +281,10 @@ def test_incremental_patch_correctness():
     sB = _make_session("sess_b", "Bravo", updated_at=200.0)
     sC = _make_session("sess_c", "Charlie", updated_at=300.0)
 
-    # Write session files to disk (so full rebuild can find them)
+    # Write session files to disk (so full rebuild can find them) using the
+    # production metadata-before-messages ordering.
     for s in (sA, sB, sC):
-        s.path.write_text(json.dumps(s.__dict__, ensure_ascii=False, indent=2), encoding="utf-8")
+        s.save(touch_updated_at=False, skip_index=True)
 
     # Build initial index
     _write_session_index(updates=None)
@@ -374,6 +399,107 @@ def test_load_metadata_only_does_not_parse_large_message_body():
     assert meta.messages == []
     assert meta.tool_calls == []
     assert meta.compact()["message_count"] == 1
+    assert "last_message_at" in json.loads(s.path.read_text(encoding="utf-8"))
+
+
+def test_load_metadata_only_degrades_legacy_messages_first_sidecar_without_full_load():
+    """Malformed/legacy metadata must not punch through the hot-path boundary."""
+    sid = "sess_messages_first"
+    (models.SESSION_DIR / f"{sid}.json").write_text(
+        json.dumps(
+            {
+                # Put messages first to simulate pre-metadata-prefix or manually
+                # imported sidecars where the cheap prefix lacks required keys.
+                "messages": [{"role": "assistant", "content": "x" * 200_000}],
+                "session_id": sid,
+                "title": "Messages First",
+                "created_at": 10.0,
+                "updated_at": 20.0,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    _write_index_file(
+        models.SESSION_INDEX_FILE,
+        [
+            {
+                "session_id": sid,
+                "title": "Indexed Title",
+                "updated_at": 20.0,
+                "workspace": "/tmp",
+                "model": "test",
+                "message_count": 1,
+                "created_at": 10.0,
+                "pinned": False,
+                "archived": False,
+            }
+        ],
+    )
+
+    with patch.object(Session, "load", side_effect=AssertionError("full load should not run")):
+        meta = Session.load_metadata_only(sid)
+
+    assert meta is not None
+    assert getattr(meta, "_loaded_metadata_only", False) is True
+    assert meta.messages == []
+    assert meta.compact()["message_count"] == 1
+
+
+def test_full_index_rebuild_ignores_request_dump_artifacts_without_full_load():
+    """Diagnostics beside sessions must never be indexed as sessions."""
+    s = Session(
+        session_id="sess_real",
+        title="Real Session",
+        messages=[{"role": "assistant", "content": "ok", "timestamp": 30.0}],
+        updated_at=30.0,
+    )
+    s.save()
+    models.SESSION_INDEX_FILE.unlink(missing_ok=True)
+    (models.SESSION_DIR / "request_dump_deadbeef_20260605_130146_881997.json").write_text(
+        json.dumps(
+            {
+                "session_id": "deadbeef",
+                "path": "/api/sessions",
+                "messages": [{"role": "assistant", "content": "x" * 200_000}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with patch.object(Session, "load", side_effect=AssertionError("full load should not run")):
+        _write_session_index(updates=None)
+
+    ids = {entry["session_id"] for entry in _read_index(models.SESSION_INDEX_FILE)}
+    assert ids == {"sess_real"}
+    assert "request_dump_deadbeef_20260605_130146_881997" not in ids
+    assert "deadbeef" not in ids
+
+
+def test_full_index_rebuild_skips_degraded_metadata_stubs_without_full_load():
+    """A malformed sidecar should be skipped, not converted into a fake row."""
+    sid = "sess_messages_first"
+    (models.SESSION_DIR / f"{sid}.json").write_text(
+        json.dumps(
+            {
+                "messages": [{"role": "assistant", "content": "x" * 200_000}],
+                "session_id": sid,
+                "title": "Messages First",
+                "created_at": 10.0,
+                "updated_at": 20.0,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    with patch.object(Session, "load", side_effect=AssertionError("full load should not run")):
+        _write_session_index(updates=None)
+
+    assert _read_index(models.SESSION_INDEX_FILE) == []
 
 
 def test_full_index_rebuild_uses_metadata_only_loader_for_large_sessions():

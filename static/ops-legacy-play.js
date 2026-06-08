@@ -446,7 +446,7 @@
 
     function openProjectPlay(projectId){
       const status=playStatusFor(projectId);
-      const url=typeof playInspectOverlayUrl==='function'?playInspectOverlayUrl({inspectUrl:status.inspectUrl}):'';
+      const url=typeof playInspectOverlayUrl==='function'?playInspectOverlayUrl(Object.assign({projectId,project:{id:projectId}},status||{})):'';
       if(!url){
         showToast('No Play inspect URL found for this project.',3000);
         return;
@@ -462,7 +462,7 @@
     }
 
     function playStatusReadyUrl(status){
-      const url=typeof playInspectOverlayUrl==='function'?playInspectOverlayUrl({inspectUrl:status&&status.inspectUrl}):'';
+      const url=typeof playInspectOverlayUrl==='function'?playInspectOverlayUrl(status||{}):'';
       const state=String(status&&status.status||'').toLowerCase();
       return url&&(status&&status.ready===true||state==='ready')?url:'';
     }

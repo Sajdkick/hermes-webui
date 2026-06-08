@@ -18,6 +18,16 @@ def test_ops_session_inspect_keeps_composer_available():
     assert all(".composer-wrap" not in selector for selector in hidden_selectors)
 
 
+def test_app_dialog_long_messages_stay_within_viewport():
+    css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
+
+    assert ".app-dialog{width:min(460px,100%);max-height:calc(100dvh - 48px);display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box;" in css
+    assert ".app-dialog-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px;flex-shrink:0;}" in css
+    assert ".app-dialog-close{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;flex:0 0 auto;" in css
+    assert ".app-dialog-desc{font-size:13px;line-height:1.6;color:var(--muted);white-space:pre-wrap;min-height:0;overflow:auto;overflow-wrap:anywhere;}" in css
+    assert ".app-dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;flex-wrap:wrap;flex:0 0 auto;}" in css
+
+
 def test_ops_session_inspect_refresh_button_is_wired():
     index = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
     css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
@@ -45,7 +55,7 @@ def test_ops_session_inspect_refresh_uses_same_session_stale_response_guard():
 def test_forced_same_session_refresh_rebuilds_message_cache():
     sessions_js = (ROOT / "static" / "sessions.js").read_text(encoding="utf-8")
 
-    assert "const explicitForce=options.force===true" in sessions_js
+    assert "const explicitForce=opts.force===true" in sessions_js
     assert "const resetConversationPane=currentSid!==sid||explicitForce||needsRecovery" in sessions_js
     assert "S.messages = [];" in sessions_js
     assert "Refreshing conversation…" in sessions_js

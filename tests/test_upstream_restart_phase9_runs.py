@@ -254,7 +254,7 @@ def test_phase9_ops_ui_renders_run_activity_panel():
           if (path === '/api/ops/notifications/pending'){
             return { ok: true, json: async () => ({ count: 0, notifications: [] }) };
           }
-          if (path === '/api/ops/runs'){
+          if (path === '/api/ops/runs/summary'){
             return {
               ok: true,
               json: async () => ({
@@ -313,8 +313,11 @@ def test_phase9_ops_ui_renders_run_activity_panel():
         if (!root.innerHTML.includes('Waiting approval')){
           throw new Error('Run status badge did not render');
         }
-        if (!fetchCalls.includes('/api/ops/runs')){
-          throw new Error('Run activity endpoint was not requested');
+        if (!fetchCalls.includes('/api/ops/runs/summary')){
+          throw new Error('Run summary endpoint was not requested');
+        }
+        if (fetchCalls.includes('/api/ops/runs')){
+          throw new Error('Run activity panel should not request the rich runs endpoint');
         }
         console.log('ok');
         })().catch((error) => {

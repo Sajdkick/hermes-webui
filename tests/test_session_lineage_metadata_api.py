@@ -69,6 +69,33 @@ def _save_webui_session(sid, *, title, updated_at):
     return session
 
 
+def test_all_sessions_degrades_when_state_db_is_header_valid_malformed(_isolate, monkeypatch):
+    """Sidebar polling should not keep reopening a known-malformed Agent DB."""
+    import api.state_db_health as state_db_health
+
+    state_db_health._UNAVAILABLE.clear()
+    state_db_health._LAST_WARNED.clear()
+    _save_webui_session("lineage_api_visible", title="Visible WebUI row", updated_at=time.time())
+    _isolate.write_bytes(b"SQLite format 3\x00" + b"not-a-real-database" * 32)
+    calls = []
+    real_connect = sqlite3.connect
+
+    def _tracking_connect(*args, **kwargs):
+        calls.append((args, kwargs))
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", _tracking_connect)
+
+    rows = {row["session_id"]: row for row in all_sessions()}
+    assert "lineage_api_visible" in rows
+    first_call_count = len(calls)
+    assert first_call_count >= 1
+
+    rows = {row["session_id"]: row for row in all_sessions()}
+    assert "lineage_api_visible" in rows
+    assert len(calls) == first_call_count
+
+
 def test_all_sessions_exposes_state_db_lineage_metadata_for_webui_json_sessions(_isolate):
     """PR #1358 can only collapse rows when /api/sessions exposes lineage keys."""
     conn = _ensure_state_db(_isolate)

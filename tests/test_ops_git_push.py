@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import pytest
 
 import api.routes as routes
-from api import ops_git, routes_ops_git
+from api import ops_git, ops_sessions, routes_ops_git
 
 
 class _FakeHandler:
@@ -152,6 +152,202 @@ def test_execute_project_push_pushes_ahead_commit(monkeypatch, tmp_path, git_ava
     assert operation["operation"] == "push"
     assert "Pushed main to origin/main." in operation["summary"]
     assert operation["finalStatus"]["ahead"] == 0
+    assert _git(remote, "rev-parse", "refs/heads/main") == _git(repo, "rev-parse", "HEAD")
+
+
+def test_execute_project_sync_uses_project_page_git_workflow(monkeypatch, tmp_path, git_available):
+    remote = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True, text=True)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    _git(repo, "checkout", "-b", "main")
+    (repo / "README.md").write_text("initial\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+    _git(repo, "remote", "add", "origin", str(remote))
+    _git(repo, "push", "-u", "origin", "main")
+
+    (repo / "README.md").write_text("initial\nsync change\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "sync change")
+
+    project = {"id": "project-1", "resolvedPath": str(repo), "coreBranch": "main"}
+    monkeypatch.setattr(ops_git.ops_projects, "get_ops_project", lambda project_id: project)
+
+    operation = ops_git.execute_project_git_operation("project-1", "sync", {"confirm": "sync"})
+
+    assert operation["status"] == "succeeded"
+    assert operation["operation"] == "sync"
+    assert "Pushed main to origin/main." in operation["summary"]
+    assert operation["finalStatus"]["ahead"] == 0
+    assert _git(remote, "rev-parse", "refs/heads/main") == _git(repo, "rev-parse", "HEAD")
+
+
+def test_execute_project_push_fetches_and_merges_remote_updates_before_pushing(monkeypatch, tmp_path, git_available):
+    remote = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True, text=True)
+
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    _git(seed, "init")
+    _git(seed, "config", "user.email", "test@example.com")
+    _git(seed, "config", "user.name", "Test User")
+    _git(seed, "checkout", "-b", "main")
+    (seed / "README.md").write_text("initial\n", encoding="utf-8")
+    _git(seed, "add", "README.md")
+    _git(seed, "commit", "-m", "initial")
+    _git(seed, "remote", "add", "origin", str(remote))
+    _git(seed, "push", "-u", "origin", "main")
+    _git(remote, "symbolic-ref", "HEAD", "refs/heads/main")
+
+    repo = tmp_path / "repo"
+    peer = tmp_path / "peer"
+    subprocess.run(["git", "clone", str(remote), str(repo)], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "clone", str(remote), str(peer)], check=True, capture_output=True, text=True)
+    for clone in (repo, peer):
+        _git(clone, "config", "user.email", "test@example.com")
+        _git(clone, "config", "user.name", "Test User")
+
+    (peer / "remote.txt").write_text("remote change\n", encoding="utf-8")
+    _git(peer, "add", "remote.txt")
+    _git(peer, "commit", "-m", "remote change")
+    _git(peer, "push", "origin", "main")
+
+    (repo / "local.txt").write_text("local change\n", encoding="utf-8")
+    _git(repo, "add", "local.txt")
+    _git(repo, "commit", "-m", "local change")
+
+    project = {"id": "project-1", "resolvedPath": str(repo), "coreBranch": "main"}
+    monkeypatch.setattr(ops_git.ops_projects, "get_ops_project", lambda project_id: project)
+
+    before = ops_git.get_project_git_status("project-1")
+    assert before["ahead"] == 1
+    assert before["behind"] == 0
+
+    operation = ops_git.execute_project_git_operation("project-1", "push", {"confirm": "push"})
+
+    assert operation["status"] == "succeeded"
+    assert "Merged remote changes from origin/main." in operation["summary"]
+    assert "Pushed main to origin/main." in operation["summary"]
+    assert operation["finalStatus"]["ahead"] == 0
+    assert operation["finalStatus"]["behind"] == 0
+    assert _git(remote, "show", "main:local.txt") == "local change"
+    assert _git(remote, "show", "main:remote.txt") == "remote change"
+
+
+def test_execute_project_push_starts_conflict_handoff_session(monkeypatch, tmp_path, git_available):
+    remote = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True, text=True)
+
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    _git(seed, "init")
+    _git(seed, "config", "user.email", "test@example.com")
+    _git(seed, "config", "user.name", "Test User")
+    _git(seed, "checkout", "-b", "main")
+    (seed / "README.md").write_text("initial\nshared line\n", encoding="utf-8")
+    _git(seed, "add", "README.md")
+    _git(seed, "commit", "-m", "initial")
+    _git(seed, "remote", "add", "origin", str(remote))
+    _git(seed, "push", "-u", "origin", "main")
+    _git(remote, "symbolic-ref", "HEAD", "refs/heads/main")
+
+    repo = tmp_path / "repo"
+    peer = tmp_path / "peer"
+    subprocess.run(["git", "clone", str(remote), str(repo)], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "clone", str(remote), str(peer)], check=True, capture_output=True, text=True)
+    for clone in (repo, peer):
+        _git(clone, "config", "user.email", "test@example.com")
+        _git(clone, "config", "user.name", "Test User")
+
+    (peer / "README.md").write_text("initial\nremote edit\n", encoding="utf-8")
+    _git(peer, "add", "README.md")
+    _git(peer, "commit", "-m", "remote edit")
+    _git(peer, "push", "origin", "main")
+
+    (repo / "README.md").write_text("initial\nlocal edit\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "local edit")
+
+    project = {"id": "project-1", "name": "Conflict Project", "resolvedPath": str(repo), "coreBranch": "main"}
+    monkeypatch.setattr(ops_git.ops_projects, "get_ops_project", lambda project_id: project)
+
+    captured = {}
+
+    def fake_launch_conflict_session(project_arg, conflict, body=None):
+        captured["project"] = project_arg
+        captured["conflict"] = conflict
+        captured["body"] = body
+        return {
+            "sessionId": "session-conflict-1",
+            "sessionUrl": "/session/session-conflict-1",
+            "agentStarted": True,
+            "initialPrompt": ops_sessions.build_git_conflict_analysis_prompt(project_arg, conflict),
+        }
+
+    monkeypatch.setattr(ops_git.ops_sessions, "launch_project_git_conflict_session", fake_launch_conflict_session)
+
+    operation = ops_git.execute_project_git_operation("project-1", "push", {"confirm": "push"})
+
+    assert operation["status"] == "blocked"
+    assert operation["sessionId"] == "session-conflict-1"
+    assert operation["sessionUrl"] == "/session/session-conflict-1"
+    assert operation["conflictFiles"] == ["README.md"]
+    assert operation["finalStatus"]["operationInProgress"] is True
+    assert operation["finalStatus"]["conflicts"] == 1
+    assert captured["conflict"]["files"] == ["README.md"]
+    assert captured["conflict"]["remote"] == "origin"
+    assert captured["conflict"]["remoteBranch"] == "main"
+    prompt = operation["conflictHandoff"]["initialPrompt"]
+    assert "first response must be analysis only" in prompt
+    assert "Do not edit files" in prompt
+    assert "After the user gives direction" in prompt
+    assert (repo / ".git" / "MERGE_HEAD").exists()
+    readme = (repo / "README.md").read_text(encoding="utf-8")
+    assert "<<<<<<<" in readme
+    assert "local edit" in readme
+    assert "remote edit" in readme
+    assert _git(remote, "show", "main:README.md") == "initial\nremote edit"
+
+
+def test_execute_project_push_removes_stale_index_lock_before_auto_commit(monkeypatch, tmp_path, git_available):
+    remote = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True, text=True)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    _git(repo, "checkout", "-b", "main")
+    (repo / "README.md").write_text("initial\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+    _git(repo, "remote", "add", "origin", str(remote))
+    _git(repo, "push", "-u", "origin", "main")
+
+    (repo / "README.md").write_text("initial\nlocal dirty change\n", encoding="utf-8")
+    index_lock = repo / ".git" / "index.lock"
+    index_lock.write_text("stale lock\n", encoding="utf-8")
+
+    project = {"id": "project-1", "resolvedPath": str(repo), "coreBranch": "main"}
+    monkeypatch.setattr(ops_git.ops_projects, "get_ops_project", lambda project_id: project)
+
+    operation = ops_git.execute_project_git_operation(
+        "project-1",
+        "push",
+        {"confirm": "push", "message": "Auto commit after stale lock"},
+    )
+
+    assert operation["status"] == "succeeded"
+    assert "Removed stale Git index lock." in operation["summary"]
+    assert "Committed local changes." in operation["summary"]
+    assert not index_lock.exists()
+    assert _git(repo, "log", "-1", "--format=%s") == "Auto commit after stale lock"
     assert _git(remote, "rev-parse", "refs/heads/main") == _git(repo, "rev-parse", "HEAD")
 
 

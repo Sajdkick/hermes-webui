@@ -94,6 +94,4 @@ If the epic or task already has markers, append "AI suggestion" without removing
 Examples:
 - Epic: "markers": ["AI suggestion"]
 - Task: "markers": ["AI suggestion"]
-
-Always use the readable output skill when outputting text.
 <!-- cloud-terminal:shared-instructions:end -->
