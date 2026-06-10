@@ -17,9 +17,29 @@
     return String(value||'').trim();
   }
 
+  function currentMountPrefix(){
+    try{
+      const pathname=String((window.location&&window.location.pathname)||'');
+      const marker='/play-project/';
+      const index=pathname.indexOf(marker);
+      if(index>0)return pathname.slice(0,index).replace(/\/+$/,'');
+    }catch(_error){
+      return '';
+    }
+    return '';
+  }
+
   function appUrl(path){
     const raw=text(path)||'/';
     try{
+      if(/^[a-z][a-z0-9+.-]*:/i.test(raw)||raw.startsWith('//')){
+        return new URL(raw, window.location.href).href;
+      }
+      if(raw.startsWith('/')){
+        const mount=currentMountPrefix();
+        const rebased=(mount&&raw!==mount&&!raw.startsWith(mount+'/'))?mount+raw:raw;
+        return new URL(rebased, window.location.origin).href;
+      }
       return new URL(raw, window.location.origin).href;
     }catch(_error){
       return raw;

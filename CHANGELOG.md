@@ -24,6 +24,7 @@
 
 ### Fixed
 
+- Play session popup iframes now preserve the WebUI mount prefix when opening from a proxied `/play-project/...` page, so reverse-proxy/subpath installs load the linked Hermes chat instead of escaping to a root `/session/...` URL.
 - Ops project Git pushes now self-heal common Git races: stale `.git/index.lock` files are removed when no Git process is active, project push operations are serialized per repository, and non-fast-forward push rejections fetch/merge remote updates before retrying the push.
 - Ops project Git Sync now runs the same project-page self-healing fetch/merge/push workflow as Push instead of sending users to the separate upstream sync review flow.
 - Ops project Git push/sync conflicts now open a project-scoped Git conflict analysis session instead of surfacing raw merge failures; the session starts with an analysis-only prompt so the user can review the required resolution before the agent edits files and finishes synchronization.

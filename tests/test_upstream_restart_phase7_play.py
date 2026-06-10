@@ -276,6 +276,21 @@ def test_phase7_play_start_stop_status_and_logs(monkeypatch, tmp_path, git_avail
 
     monkeypatch.setattr(play_pipeline, "_run_build_stage", fake_run_build_stage)
     monkeypatch.setattr(play_pipeline, "_run_start_stage", fake_run_start_stage)
+    monkeypatch.setattr(
+        play_pipeline.managed_postgres,
+        "ensure_project_database_env",
+        lambda project_id: {
+            "DATASTORE_ADAPTER": "postgres",
+            "DATABASE_URL": f"postgresql://hermes:test@127.0.0.1:5433/hermes_{project_id}",
+            "DATASTORE_POSTGRES_URL": f"postgresql://hermes:test@127.0.0.1:5433/hermes_{project_id}",
+            "NAKAMA_DATABASE_URL": f"postgresql://hermes:test@127.0.0.1:5433/hermes_{project_id}",
+            "PGHOST": "127.0.0.1",
+            "PGPORT": "5433",
+            "PGUSER": "hermes",
+            "PGPASSWORD": "test",
+            "PGDATABASE": f"hermes_{project_id}",
+        },
+    )
 
     start = _FakeHandler({}, command="POST")
     assert handle_post(start, urlparse(f"http://example.com/api/ops/projects/{project_id}/play/start")) is True
@@ -792,3 +807,84 @@ def test_phase7_play_logs_include_status_snapshot(monkeypatch, tmp_path, git_ava
     assert "building app" in payload["text"]
     assert payload["status"]["status"] == "building"
     assert payload["status"]["running"] is True
+
+
+def test_phase7_play_injects_hermes_managed_postgres_env(monkeypatch, tmp_path):
+    from api import play_pipeline
+
+    monkeypatch.setattr(play_pipeline, "_allocate_port", lambda _host, _range: 25001)
+    monkeypatch.setattr(
+        play_pipeline.managed_postgres,
+        "ensure_project_database_env",
+        lambda project_id: {
+            "DATASTORE_ADAPTER": "postgres",
+            "DATABASE_URL": "postgresql://hermes:test@127.0.0.1:5433/hermes_project_1",
+            "DATASTORE_POSTGRES_URL": "postgresql://hermes:test@127.0.0.1:5433/hermes_project_1",
+            "NAKAMA_DATABASE_URL": "postgresql://hermes:test@127.0.0.1:5433/hermes_project_1",
+            "PGHOST": "127.0.0.1",
+            "PGPORT": "5433",
+            "PGUSER": "hermes",
+            "PGPASSWORD": "test",
+            "PGDATABASE": "hermes_project_1",
+        },
+    )
+    config = play_pipeline.normalize_play_config(
+        {
+            "version": 2,
+            "build": {"command": "echo build"},
+            "start": {
+                "command": "echo start",
+                "port": {"mode": "auto", "host": "127.0.0.1", "envVar": "PORT"},
+            },
+            "inspect": {"mode": "proxy", "url": "/app"},
+        },
+        tmp_path,
+    )
+    state = play_pipeline.PlayPipelineState(project_id="project-1")
+
+    runtime = play_pipeline._prepare_start_runtime("project-1", config["config"], state)
+    env = runtime["config"]["start"]["env"]
+
+    assert env["PORT"] == "25001"
+    assert env["DATASTORE_ADAPTER"] == "postgres"
+    assert env["DATABASE_URL"] == "postgresql://hermes:test@127.0.0.1:5433/hermes_project_1"
+    assert env["DATASTORE_POSTGRES_URL"] == env["DATABASE_URL"]
+    assert env["NAKAMA_DATABASE_URL"] == env["DATABASE_URL"]
+    assert env["PGDATABASE"] == "hermes_project_1"
+    assert any("Hermes managed Postgres ready" in item["message"] for item in state.logs)
+
+
+def test_phase7_play_explicit_database_url_skips_managed_postgres_and_aligns_aliases(monkeypatch, tmp_path):
+    from api import play_pipeline
+
+    called = []
+    monkeypatch.setattr(play_pipeline, "_allocate_port", lambda _host, _range: 25001)
+    monkeypatch.setattr(
+        play_pipeline.managed_postgres,
+        "ensure_project_database_env",
+        lambda project_id: called.append(project_id) or {},
+    )
+    config = play_pipeline.normalize_play_config(
+        {
+            "version": 2,
+            "build": {"command": "echo build"},
+            "start": {
+                "command": "echo start",
+                "env": {"DATABASE_URL": "postgresql://explicit:test@db.example/app"},
+                "port": {"mode": "auto", "host": "127.0.0.1", "envVar": "PORT"},
+            },
+            "inspect": {"mode": "proxy", "url": "/app"},
+        },
+        tmp_path,
+    )
+    state = play_pipeline.PlayPipelineState(project_id="project-1")
+
+    runtime = play_pipeline._prepare_start_runtime("project-1", config["config"], state)
+    env = runtime["config"]["start"]["env"]
+
+    assert called == []
+    assert env["DATABASE_URL"] == "postgresql://explicit:test@db.example/app"
+    assert env["DATASTORE_POSTGRES_URL"] == env["DATABASE_URL"]
+    assert env["NAKAMA_DATABASE_URL"] == env["DATABASE_URL"]
+    assert "PGDATABASE" not in env
+    assert any("Using Play-provided database connection env" in item["message"] for item in state.logs)

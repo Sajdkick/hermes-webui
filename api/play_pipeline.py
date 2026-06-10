@@ -20,7 +20,7 @@ from urllib import error as urlerror
 from urllib import parse as urlparse
 from urllib import request as urlrequest
 
-from api import ops_projects
+from api import managed_postgres, ops_projects
 
 
 LEGACY_PLAY_FILE_NAME = "project_play.json"
@@ -46,6 +46,22 @@ _LOCK = threading.RLock()
 _BUILD_LOCK = threading.Lock()
 _RESERVED_PORTS: set[tuple[str, int]] = set()
 _PIPELINES: dict[str, "PlayPipelineState"] = {}
+_DATABASE_URL_ENV_KEYS = ("DATABASE_URL", "DATASTORE_POSTGRES_URL", "NAKAMA_DATABASE_URL")
+_DATABASE_CONNECTION_ENV_KEYS = (
+    *_DATABASE_URL_ENV_KEYS,
+    "PGHOST",
+    "PGUSER",
+    "PGPASSWORD",
+    "PGDATABASE",
+    "DB_HOST",
+    "DB_USER",
+    "DB_PASSWORD",
+    "DB_NAME",
+    "POSTGRES_HOST",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "POSTGRES_DB",
+)
 
 
 class PlayPipelineError(Exception):
@@ -302,6 +318,71 @@ def _normalize_env(value: Any) -> dict[str, str]:
         else:
             env[name] = str(raw)
     return env
+
+
+def _read_env_string(env: dict[str, str], key: str) -> str:
+    value = env.get(key)
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
+
+
+def _normalize_database_url_aliases(env: dict[str, str], overrides: dict[str, str] | None = None) -> dict[str, str]:
+    normalized = dict(env or {})
+    overrides = overrides or {}
+    override_url = ""
+    for key in _DATABASE_URL_ENV_KEYS:
+        value = _read_env_string(overrides, key)
+        if value:
+            override_url = value
+            break
+    if override_url:
+        for key in _DATABASE_URL_ENV_KEYS:
+            normalized[key] = override_url
+        return normalized
+
+    resolved_url = ""
+    for key in _DATABASE_URL_ENV_KEYS:
+        value = _read_env_string(normalized, key)
+        if value:
+            resolved_url = value
+            break
+    if resolved_url:
+        for key in _DATABASE_URL_ENV_KEYS:
+            normalized[key] = resolved_url
+    return normalized
+
+
+def _has_explicit_database_connection(env: dict[str, str]) -> bool:
+    return any(_read_env_string(env, key) for key in _DATABASE_CONNECTION_ENV_KEYS)
+
+
+def _prepare_database_env(project_id: str, explicit_env: dict[str, str], state: PlayPipelineState) -> dict[str, str]:
+    if _has_explicit_database_connection(explicit_env):
+        normalized = _normalize_database_url_aliases(explicit_env, explicit_env)
+        if any(_read_env_string(explicit_env, key) for key in _DATABASE_URL_ENV_KEYS):
+            _append_log(
+                state,
+                stage="database",
+                stream="system",
+                message="Using Play-provided database connection env.",
+            )
+        return normalized
+
+    managed_env = managed_postgres.ensure_project_database_env(project_id)
+    if not managed_env:
+        return dict(explicit_env)
+    merged = _normalize_database_url_aliases({**managed_env, **explicit_env})
+    database = merged.get("PGDATABASE") or "project database"
+    host = merged.get("PGHOST") or "127.0.0.1"
+    port = merged.get("PGPORT") or "5432"
+    _append_log(
+        state,
+        stage="database",
+        stream="system",
+        message=f"Hermes managed Postgres ready: {host}:{port}/{database}.",
+    )
+    return merged
 
 
 def _normalize_relative_cwd(value: Any) -> str:
@@ -749,7 +830,7 @@ def _run_build_stage(project_path: Path, config: dict, state: PlayPipelineState)
 
 def _prepare_start_runtime(project_id: str, config: dict, state: PlayPipelineState) -> dict:
     start_config = dict(config["start"])
-    start_env = dict(start_config.get("env") or {})
+    start_env = _prepare_database_env(project_id, dict(start_config.get("env") or {}), state)
     inspect = config["inspect"]
     inspect_mode = inspect["mode"]
     inspect_url = inspect["url"]

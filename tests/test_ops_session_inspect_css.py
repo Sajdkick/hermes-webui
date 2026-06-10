@@ -73,6 +73,105 @@ def test_play_session_overlay_requires_real_inspect_shell_before_showing_iframe(
     assert "loaded=true" not in overlay_js
 
 
+def test_play_session_overlay_resolves_session_iframe_under_subpath_mount():
+    script = textwrap.dedent(
+        f"""
+        const fs = require('fs');
+        const vm = require('vm');
+        const code = fs.readFileSync({str(ROOT / 'static' / 'play-session-overlay.js')!r}, 'utf8');
+        let capturedFrameSrc = '';
+        const scriptEl = {{
+          dataset: {{
+            hermesPlayOverlay: 'enabled',
+            hermesPlayProjectId: 'project-1',
+            hermesPlayRunId: 'run-1',
+            hermesPlayTaskId: 'task-1',
+            hermesPlaySessionId: 'sess-1',
+            hermesPlaySessionUrl: '/session/sess-1',
+          }},
+        }};
+        const frame = {{
+          attrs: {{}},
+          classList: {{ add: () => null, remove: () => null }},
+          addEventListener: () => null,
+          setAttribute(name, value) {{ this.attrs[name] = String(value); if (name === 'src') capturedFrameSrc = String(value); }},
+          getAttribute(name) {{ return this.attrs[name] || ''; }},
+        }};
+        const fullLink = {{ setAttribute: () => null }};
+        const noopElement = {{
+          hidden: false,
+          style: {{}},
+          classList: {{ add: () => null, remove: () => null, toggle: () => null, contains: () => false }},
+          setAttribute: () => null,
+          getAttribute: () => '',
+          addEventListener: () => null,
+        }};
+        function elementFor(tag) {{
+          const el = {{
+            id: '',
+            className: '',
+            dataset: {{}},
+            style: {{}},
+            classList: {{ add: () => null, remove: () => null, toggle: () => null, contains: () => false }},
+            setAttribute: () => null,
+            getAttribute: () => '',
+            addEventListener: () => null,
+            remove: () => null,
+            appendChild: () => null,
+            querySelector(selector) {{
+              if (selector === '.hermes-play-session-frame') return frame;
+              if (selector === '[data-hermes-play-full-session]') return fullLink;
+              return noopElement;
+            }},
+          }};
+          Object.defineProperty(el, 'innerHTML', {{
+            get() {{ return this._html || ''; }},
+            set(value) {{
+              this._html = String(value || '');
+              const match = this._html.match(/<iframe[^>]+src=\"([^\"]+)\"/);
+              if (match) frame.setAttribute('src', match[1].replace(/&amp;/g, '&'));
+            }},
+          }});
+          return el;
+        }}
+        const context = {{
+          console,
+          URL,
+          Date,
+          setTimeout: () => null,
+          clearTimeout: () => null,
+          window: {{
+            location: {{
+              origin: 'http://example.test',
+              pathname: '/hermes/play-project/project-1/app',
+              href: 'http://example.test/hermes/play-project/project-1/app',
+            }},
+          }},
+          document: {{
+            currentScript: scriptEl,
+            readyState: 'complete',
+            baseURI: 'http://example.test/',
+            querySelectorAll: () => [scriptEl],
+            getElementById: () => null,
+            createElement: elementFor,
+            head: {{ appendChild: () => null }},
+            body: {{ appendChild: () => null }},
+            addEventListener: () => null,
+          }},
+        }};
+        vm.createContext(context);
+        vm.runInContext(code, context, {{ filename: 'play-session-overlay.js' }});
+        const expected = 'http://example.test/hermes/session/sess-1?opsSessionInspect=1&opsSessionInspectSource=play';
+        if (capturedFrameSrc !== expected) {{
+          throw new Error('Session iframe escaped the WebUI mount: ' + capturedFrameSrc);
+        }}
+        console.log('ok');
+        """
+    )
+    completed = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True, cwd=ROOT)
+    assert completed.stdout.strip() == "ok"
+
+
 def test_standalone_ops_host_resolves_root_relative_api_urls_from_session_pages():
     script = textwrap.dedent(
         f"""
