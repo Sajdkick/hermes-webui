@@ -80,6 +80,14 @@ Use the boundary-first pattern from `references/core-play-boundary-extraction.md
 
 For broader `/api/core` extraction and Ops Deployments work, use `references/core-api-deployments-boundary.md`: keep Core shell-neutral, add compatibility shims for legacy `/api/ops` routes, make the dedicated Deployments view load provider/project deployment data from `/api/core`, and preserve legacy project capability shapes unless explicitly migrating them.
 
+For live UI iteration/runtime work, use `references/core-ui-mode-live-preview-boundary.md`: keep UI Mode as a Core API sibling to Play, start a loopback dev server once, proxy it through `/ui-project/{projectId}/...`, and pair the preview with a normal WebUI chat session iframe instead of creating a direct Hermes-agent integration.
+
+For Play popup/session overlay failures under a mounted WebUI subpath, use `references/play-popup-subpath-loading.md`: audit the popup/open URL, injected helper script URLs, proxy-compat fetch/WebSocket rewrites, and project-scoped helper static route together. Do not stop after fixing only the visible iframe URL.
+
+For queued UI Mode edit workflows, use `references/ui-mode-queued-edit-turns.md`: reuse the normal chat queue but queue prepared turns with frozen UI Mode selection/context snapshots captured at enqueue time; never re-read live highlighted elements when a queued turn drains.
+
+For UI Mode vs Play data/auth/runtime mismatches, use `references/ui-mode-play-database-parity.md`: Play injects Hermes managed Postgres env before starting the app, while native UI Mode may only merge UI config env plus port/host variables. Verify DB env parity before assuming an app bug.
+
 ## Manual Play-equivalent fallback
 
 This fallback is a workaround for the current session, not the desired steady state for Hermes WebUI-launched agents. The previous Summons flick-arrow investigation was successfully solved with `hermes-gather-information`, manual build/start, browser inspection, and targeted tests, but a correctly wired WebUI project session should still make `hermes-runtime doctor --json` pass.
@@ -127,5 +135,9 @@ For project/session interruption reports where the session store is large or lon
 - `references/cloud-terminal-runtime-migration.md` — cleanup checklist and rationale for replacing Cloud Terminal-era runtime guidance with Hermes runtime usage.
 - `references/core-play-boundary-extraction.md` — proven Hermes-only Play core boundary pattern, contract shape, caller list, verification gate, and pitfalls.
 - `references/core-api-deployments-boundary.md` — broader Hermes Core API extraction and Ops Deployments page pattern, including Core route/domain shape, legacy Ops compatibility shims, and verification pitfalls.
+- `references/core-ui-mode-live-preview-boundary.md` — Core UI Mode/live-preview pattern: loopback dev runtime lifecycle, `/ui-project/{projectId}/...` proxy, side-by-side chat shell, proxy-compat injection, and focused integration-test recipe.
+- `references/play-popup-subpath-loading.md` — mounted-prefix Play popup/session overlay failure pattern covering open URLs, injected helper scripts, proxy-compat rewrites, and backend helper static routes.
+- `references/ui-mode-queued-edit-turns.md` — UI Mode queued-edit design: prepared queue turns with frozen highlighted-element snapshots, safe drain behavior, queue-row UX, and verification cases.
+- `references/ui-mode-play-database-parity.md` — UI Mode/Play runtime parity diagnostic for different data/auth behavior caused by Play managed Postgres env injection not being mirrored by native UI Mode.
 - `references/webui-session-sidebar-slowdown.md` — diagnostic and fix pattern for WebUI slowdown/recovery caused by `/api/sessions` sidebar polling stuck in optional Agent `state.db` lineage metadata.
 - `references/metadata-only-hot-route-boundary.md` — invariant and test pattern for keeping `/api/sessions`/sidebar metadata paths from falling back to full transcript parsing on large session stores.

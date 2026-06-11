@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import html
 import json
+import mimetypes
 import os
+import posixpath
 import re
 import signal
 import socket
@@ -1210,28 +1212,76 @@ def _play_proxy_prefix(project_id: str) -> str:
     return f"{PLAY_PROJECT_PROXY_BASE_PATH}/{urlparse.quote(project_id, safe='')}"
 
 
+_PLAY_PROXY_WEBUI_STATIC_PREFIX = "/.hermes-webui/static/"
+_PLAY_PROXY_WEBUI_STATIC_FILES = {"play-proxy-compat.js", "play-session-overlay.js"}
+
+
+def _play_proxy_relative_webui_static_url(target_path: str, filename: str) -> str:
+    requested = str(filename or "").strip().lstrip("/")
+    if requested not in _PLAY_PROXY_WEBUI_STATIC_FILES:
+        requested = ""
+    if not requested:
+        return ""
+    path = str(target_path or "/").split("?", 1)[0] or "/"
+    if not path.startswith("/"):
+        path = f"/{path}"
+    base_dir = path if path.endswith("/") else path.rsplit("/", 1)[0] + "/"
+    target = f"{_PLAY_PROXY_WEBUI_STATIC_PREFIX}{requested}"
+    relative = posixpath.relpath(target, start=base_dir)
+    return relative if relative != "." else requested
+
+
+def _serve_play_proxy_webui_static(handler, target_path: str, *, method: str = "GET") -> bool:
+    path = str(target_path or "")
+    if not path.startswith(_PLAY_PROXY_WEBUI_STATIC_PREFIX):
+        return False
+    filename = path[len(_PLAY_PROXY_WEBUI_STATIC_PREFIX) :].split("?", 1)[0]
+    if "/" in filename or filename not in _PLAY_PROXY_WEBUI_STATIC_FILES:
+        return _proxy_error(handler, 404, "Play WebUI helper asset not found.") or True
+    static_root = Path(__file__).resolve().parents[1] / "static"
+    target = (static_root / filename).resolve()
+    try:
+        target.relative_to(static_root.resolve())
+        body = target.read_bytes()
+    except Exception:
+        return _proxy_error(handler, 404, "Play WebUI helper asset not found.") or True
+    content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+    if filename.endswith(".js"):
+        content_type = "application/javascript; charset=utf-8"
+    handler.send_response(200)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("X-Content-Type-Options", "nosniff")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    if method.upper() != "HEAD":
+        handler.wfile.write(body)
+    return True
+
+
 def _play_proxy_overlay_attributes(project_id: str) -> str:
     with _LOCK:
         state = _PIPELINES.get(project_id)
-        if not state or not state.session_id:
-            return ""
+        session_id = state.session_id if state else ""
         values = {
             "data-hermes-play-overlay": "enabled",
             "data-hermes-play-project-id": project_id,
-            "data-hermes-play-run-id": state.run_id or "",
-            "data-hermes-play-task-id": state.task_id or "",
-            "data-hermes-play-session-id": state.session_id or "",
-            "data-hermes-play-session-url": f"/session/{urlparse.quote(state.session_id or '', safe='')}",
+            "data-hermes-play-run-id": (state.run_id if state else "") or "",
+            "data-hermes-play-task-id": (state.task_id if state else "") or "",
+            "data-hermes-play-session-id": session_id or "",
+            "data-hermes-play-session-url": f"/session/{urlparse.quote(session_id or '', safe='')}" if session_id else "",
         }
     return " ".join(f'{name}="{html.escape(str(value), quote=True)}"' for name, value in values.items())
 
 
-def _inject_play_proxy_scripts(text: str, project_id: str) -> str:
+def _inject_play_proxy_scripts(text: str, project_id: str, target_path: str = "/") -> str:
     prefix = html.escape(_play_proxy_prefix(project_id), quote=True)
+    compat_src = html.escape(_play_proxy_relative_webui_static_url(target_path, "play-proxy-compat.js"), quote=True)
+    overlay_src = html.escape(_play_proxy_relative_webui_static_url(target_path, "play-session-overlay.js"), quote=True)
     overlay_attrs = _play_proxy_overlay_attributes(project_id)
-    overlay_loader = f'<script src="/static/play-session-overlay.js" {overlay_attrs}></script>' if overlay_attrs else ""
+    overlay_loader = f'<script src="{overlay_src}" {overlay_attrs}></script>' if overlay_attrs and overlay_src else ""
     loader = (
-        f'<script src="/static/play-proxy-compat.js" data-hermes-play-proxy-prefix="{prefix}"></script>'
+        f'<script src="{compat_src}" data-hermes-play-proxy-prefix="{prefix}"></script>'
         f"{overlay_loader}"
     )
     lowered = text.lower()
@@ -1241,7 +1291,7 @@ def _inject_play_proxy_scripts(text: str, project_id: str) -> str:
     return f"{loader}{text}"
 
 
-def _rewrite_html(body: bytes, project_id: str) -> bytes:
+def _rewrite_html(body: bytes, project_id: str, target_path: str = "/") -> bytes:
     try:
         text = body.decode("utf-8")
     except UnicodeDecodeError:
@@ -1250,7 +1300,7 @@ def _rewrite_html(body: bytes, project_id: str) -> bytes:
     escaped_prefix = html.escape(prefix, quote=True)
     text = re.sub(r'\b(src|href|action|poster)=(["\'])/(?!/)', rf'\1=\2{escaped_prefix}/', text, flags=re.I)
     text = re.sub(r"\burl\(/(?!/)", f"url({prefix}/", text, flags=re.I)
-    text = _inject_play_proxy_scripts(text, project_id)
+    text = _inject_play_proxy_scripts(text, project_id, target_path)
     return text.encode("utf-8")
 
 
@@ -1447,6 +1497,8 @@ def handle_play_proxy_request(handler, project_id: str, target_path: str, parsed
     path = target_path or "/"
     if not path.startswith("/"):
         path = f"/{path}"
+    if method.upper() in {"GET", "HEAD"} and _serve_play_proxy_webui_static(handler, path, method=method):
+        return
     if parsed.query:
         path = f"{path}?{parsed.query}"
     upstream_url = f"http://{host}:{int(port)}{path}"
@@ -1484,7 +1536,7 @@ def handle_play_proxy_request(handler, project_id: str, target_path: str, parsed
     content_type = response_headers.get("Content-Type", "")
     is_html = "text/html" in content_type.lower()
     if is_html:
-        response_body = _rewrite_html(response_body, project_id)
+        response_body = _rewrite_html(response_body, project_id, target_path or "/")
 
     handler.send_response(status)
     for key, value in response_headers.items():

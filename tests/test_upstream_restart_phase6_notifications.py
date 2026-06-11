@@ -242,6 +242,61 @@ def test_phase6_ops_legacy_notification_dismiss_is_optimistic():
     assert completed.stdout.strip() == "ok"
 
 
+def test_phase6_play_notification_proxy_url_preserves_subpath_mount():
+    script = textwrap.dedent(
+        """
+        (() => {
+        const fs = require('fs');
+        const vm = require('vm');
+        const source = fs.readFileSync('static/ops-legacy-notifications.js', 'utf8');
+        const context = { window: {}, console, setInterval, clearInterval, URL };
+        vm.createContext(context);
+        vm.runInContext(source, context);
+
+        const windowRef = {
+          location: {
+            origin: 'https://example.test',
+            pathname: '/hermes/ops',
+            href: 'https://example.test/hermes/ops',
+          },
+          navigator: {},
+        };
+        const bound = context.window.HermesOpsModules.notifications.bindDashboard({
+          OPS: { notifications: [] },
+          AgentBridge: { notifications: {}, runs: {}, sessions: {} },
+          renderCurrentOpsView(){},
+          showToast(){},
+          esc(value){ return String(value || ''); },
+          svg(){ return ''; },
+          windowRef,
+          documentRef: { activeElement: null },
+          loadRunDetail(){},
+          loadOpsRuns(){ return Promise.resolve({}); },
+        });
+
+        const resolved = bound.playInspectOverlayUrl({
+          kind: 'play',
+          projectId: 'project-1',
+          inspectUrl: 'http://127.0.0.1:5123/game?x=1#chat',
+          allocatedPort: 5123,
+          inspectMode: 'proxy',
+        });
+        const expected = 'https://example.test/hermes/play-project/project-1/game?x=1#chat';
+        if (resolved !== expected) throw new Error(`unexpected proxy URL: ${resolved}`);
+        console.log('ok');
+        })();
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+
 def test_phase6_notification_polling_skips_overlapping_refreshes():
     script = textwrap.dedent(
         """

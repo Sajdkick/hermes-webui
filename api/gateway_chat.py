@@ -267,6 +267,12 @@ def _run_gateway_chat_streaming(
                     "session_id": session_id,
                     "profile": getattr(s, "profile", None),
                     "workspace": s.workspace if s is not None else str(workspace),
+                    "session_mode": getattr(s, "session_mode", None),
+                    "ui_project_id": getattr(s, "ui_project_id", None) or getattr(s, "project_id", None),
+                    "ui_project_label": getattr(s, "ui_project_label", None),
+                    "ui_project_workspace": (getattr(s, "ui_project_workspace", None) or s.workspace) if str(getattr(s, "session_mode", "") or "").lower().replace("-", "_") == "ui_mode" else None,
+                    "ui_preview_path": getattr(s, "ui_preview_path", None),
+                    "ui_preview_title": getattr(s, "ui_preview_title", None),
                 },
                 config_data=cfg,
             )

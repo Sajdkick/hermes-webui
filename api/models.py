@@ -647,6 +647,7 @@ def _metadata_only_fallback_session(sid, *, parsed=None, lookup_index_message_co
         worktree_created_at=data.get('worktree_created_at'),
         enabled_toolsets=data.get('enabled_toolsets'),
         composer_draft=data.get('composer_draft') if isinstance(data.get('composer_draft'), dict) else {},
+        session_mode=data.get('session_mode'),
         is_cli_session=bool(data.get('is_cli_session', False)),
         source_tag=data.get('source_tag'),
         raw_source=data.get('raw_source'),
@@ -697,6 +698,13 @@ class Session:
                 worktree_created_at=None,
                 enabled_toolsets=None,
                 composer_draft=None,
+                session_mode=None,
+                ui_project_id=None,
+                ui_project_label=None,
+                ui_project_workspace=None,
+                ui_preview_path=None,
+                ui_preview_url=None,
+                ui_preview_title=None,
                 **kwargs):
         self.session_id = session_id or uuid.uuid4().hex[:12]
         self.title = title
@@ -752,6 +760,13 @@ class Session:
         self.read_only = bool(kwargs.get('read_only', False))
         self.enabled_toolsets = enabled_toolsets  # List[str] or None — per-session toolset override
         self.composer_draft = composer_draft if isinstance(composer_draft, dict) else {}
+        self.session_mode = _normalize_session_mode(session_mode or kwargs.get('session_mode'))
+        self.ui_project_id = _clean_ui_mode_session_text(ui_project_id or kwargs.get('ui_project_id'), 160)
+        self.ui_project_label = _clean_ui_mode_session_text(ui_project_label or kwargs.get('ui_project_label'), 240)
+        self.ui_project_workspace = _clean_ui_mode_session_text(ui_project_workspace or kwargs.get('ui_project_workspace'), 1200)
+        self.ui_preview_path = _clean_ui_mode_session_text(ui_preview_path or kwargs.get('ui_preview_path'), 800)
+        self.ui_preview_url = _clean_ui_mode_session_text(ui_preview_url or kwargs.get('ui_preview_url'), 1200)
+        self.ui_preview_title = _clean_ui_mode_session_text(ui_preview_title or kwargs.get('ui_preview_title'), 240)
         raw_message_count = kwargs.get('message_count')
         parsed_message_count = None
         if raw_message_count is not None:
@@ -807,7 +822,8 @@ class Session:
             'parent_session_id',
             'worktree_path', 'worktree_branch', 'worktree_repo_root', 'worktree_created_at',
             'is_cli_session', 'source_tag', 'raw_source', 'session_source', 'source_label', 'read_only',
-            'enabled_toolsets', 'composer_draft',
+            'enabled_toolsets', 'composer_draft', 'session_mode',
+            'ui_project_id', 'ui_project_label', 'ui_project_workspace', 'ui_preview_path', 'ui_preview_url', 'ui_preview_title',
         ]
         meta = {k: getattr(self, k, None) for k in METADATA_FIELDS}
         self.last_message_at = (
@@ -1053,6 +1069,13 @@ class Session:
             'read_only': self.read_only,
             'enabled_toolsets': self.enabled_toolsets,
             'composer_draft': self.composer_draft if isinstance(self.composer_draft, dict) else {},
+            'session_mode': self.session_mode,
+            'ui_project_id': self.ui_project_id,
+            'ui_project_label': self.ui_project_label,
+            'ui_project_workspace': self.ui_project_workspace,
+            'ui_preview_path': self.ui_preview_path,
+            'ui_preview_url': self.ui_preview_url,
+            'ui_preview_title': self.ui_preview_title,
             'is_streaming': _is_streaming_session(
                 self.active_stream_id, active_stream_ids
             ) if include_runtime else False,
@@ -2443,7 +2466,27 @@ def _profile_default_model_state(profile=None):
     return default_model or get_effective_default_model(), default_provider
 
 
-def new_session(workspace=None, model=None, profile=None, model_provider=None, project_id=None, worktree_info=None):
+def _normalize_session_mode(value) -> str | None:
+    """Normalize persisted session surface/mode labels."""
+    mode = str(value or '').strip().lower().replace('-', '_')
+    if mode in {'ui', 'ui_mode'}:
+        return 'ui_mode'
+    return None
+
+
+def _clean_ui_mode_session_text(value, max_length: int = 500) -> str | None:
+    """Normalize short UI Mode metadata persisted on a session."""
+    text = str(value or '').replace('\r', ' ').replace('\n', ' ').strip()
+    if not text:
+        return None
+    try:
+        limit = max(1, int(max_length))
+    except Exception:
+        limit = 500
+    return text[:limit]
+
+
+def new_session(workspace=None, model=None, profile=None, model_provider=None, project_id=None, worktree_info=None, session_mode=None, ui_metadata=None):
     """Create a new in-memory session.
 
     The session lives in the SESSIONS dict only — no disk write happens until
@@ -2484,6 +2527,7 @@ def new_session(workspace=None, model=None, profile=None, model_provider=None, p
             effective_model_provider = model_provider
 
     wt = worktree_info if isinstance(worktree_info, dict) else None
+    ui_meta = ui_metadata if isinstance(ui_metadata, dict) else {}
     workspace_path = (wt.get('path') if wt and wt.get('path') else workspace) if wt else workspace
     s = Session(
         workspace=workspace_path or get_last_workspace(),
@@ -2494,6 +2538,13 @@ def new_session(workspace=None, model=None, profile=None, model_provider=None, p
         personality=None,
         worktree_path=wt.get('path') if wt else None,
         worktree_branch=wt.get('branch') if wt else None,
+        session_mode=session_mode,
+        ui_project_id=ui_meta.get('ui_project_id'),
+        ui_project_label=ui_meta.get('ui_project_label'),
+        ui_project_workspace=ui_meta.get('ui_project_workspace'),
+        ui_preview_path=ui_meta.get('ui_preview_path'),
+        ui_preview_url=ui_meta.get('ui_preview_url'),
+        ui_preview_title=ui_meta.get('ui_preview_title'),
         worktree_repo_root=wt.get('repo_root') if wt else None,
         worktree_created_at=wt.get('created_at') if wt else None,
     )

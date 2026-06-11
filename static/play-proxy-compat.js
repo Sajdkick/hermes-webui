@@ -9,10 +9,21 @@
     return scripts[scripts.length-1]||document.currentScript||null;
   }
 
+  function webuiMountPrefix(){
+    const pathname=String(window.location&&window.location.pathname||'');
+    const marker='/play-project/';
+    const index=pathname.indexOf(marker);
+    if(index<=0)return '';
+    return pathname.slice(0,index).replace(/\/+$/,'');
+  }
+
   function proxyPrefix(){
     const source=currentScriptSource();
     const raw=source&&source.dataset?String(source.dataset.hermesPlayProxyPrefix||'').trim():'';
-    return raw.replace(/\/+$/,'');
+    const prefix=raw.replace(/\/+$/,'');
+    const mount=webuiMountPrefix();
+    if(mount&&prefix.startsWith('/')&&prefix!==mount&&!prefix.startsWith(mount+'/'))return `${mount}${prefix}`;
+    return prefix;
   }
 
   function pathNeedsProxy(pathname){

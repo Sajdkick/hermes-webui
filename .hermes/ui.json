@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "dev": {
+    "command": "python3 bootstrap.py --foreground --no-browser",
+    "cwd": ".",
+    "env": {
+      "HERMES_WEBUI_HOST": "127.0.0.1",
+      "HERMES_WEBUI_PRESERVE_ENV": "1",
+      "HERMES_WEBUI_SKIP_ONBOARDING": "1",
+      "HERMES_HOME": "/tmp/hermes-webui-ui-mode-home",
+      "HERMES_WEBUI_STATE_DIR": "/tmp/hermes-webui-ui-mode-state"
+    },
+    "port": {
+      "mode": "auto",
+      "host": "127.0.0.1",
+      "envVar": "HERMES_WEBUI_PORT",
+      "range": {
+        "min": 30000,
+        "max": 39999
+      }
+    }
+  },
+  "inspect": {
+    "mode": "proxy",
+    "url": "/",
+    "readyTimeoutMs": 90000,
+    "readyPattern": "Starting Hermes Web UI|Web UI is ready|Application startup complete|Serving"
+  }
+}

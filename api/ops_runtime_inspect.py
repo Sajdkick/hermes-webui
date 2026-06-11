@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 import os
 import shutil
 import subprocess
@@ -19,6 +21,7 @@ DEFAULT_TIMEOUT_MS = 10 * 60 * 1000
 COMMAND_TIMEOUT_SECONDS = 15 * 60
 VALID_RECORD_KINDS = {"snapshot", "screenshot", "action"}
 HERMES_RUNTIME_ENV = "HERMES_RUNTIME_BIN"
+SCREENSHOT_INLINE_MAX_BYTES = 20 * 1024 * 1024
 
 
 def _default_hermes_runtime_candidates() -> list[Path]:
@@ -304,6 +307,43 @@ def _normalize_screenshot_record(project_id: str, payload: dict, record_path: Pa
     }
 
 
+def _inline_screenshot_content(record: dict, project_path: Path) -> dict:
+    raw_image_path = _text(record.get("absolutePath"), limit=4096)
+    if not raw_image_path:
+        raise OpsRuntimeInspectError("Screenshot capture did not return an image path.", 500)
+    image_path = Path(raw_image_path).expanduser()
+    try:
+        resolved_project = project_path.resolve()
+        resolved_image = image_path.resolve()
+        resolved_image.relative_to(resolved_project)
+    except ValueError as exc:
+        raise OpsRuntimeInspectError("Screenshot image path escapes the project root.", 500) from exc
+    except OSError as exc:
+        raise OpsRuntimeInspectError("Unable to resolve screenshot image path.", 500) from exc
+    if not resolved_image.exists() or not resolved_image.is_file():
+        raise OpsRuntimeInspectError("Screenshot image file is missing.", 500)
+    try:
+        size = resolved_image.stat().st_size
+    except OSError as exc:
+        raise OpsRuntimeInspectError("Unable to stat screenshot image file.", 500) from exc
+    if size > SCREENSHOT_INLINE_MAX_BYTES:
+        raise OpsRuntimeInspectError("Screenshot image is too large to inline.", 413)
+    mime_type = mimetypes.guess_type(resolved_image.name)[0] or "image/png"
+    if not mime_type.startswith("image/"):
+        raise OpsRuntimeInspectError("Screenshot file is not an image.", 500)
+    try:
+        raw = resolved_image.read_bytes()
+    except OSError as exc:
+        raise OpsRuntimeInspectError("Unable to read screenshot image file.", 500) from exc
+    encoded = base64.b64encode(raw).decode("ascii")
+    enriched = dict(record)
+    enriched["mimeType"] = mime_type
+    enriched["size"] = len(raw)
+    enriched["content"] = encoded
+    enriched["dataUrl"] = f"data:{mime_type};base64,{encoded}"
+    return enriched
+
+
 def _normalize_action_record(project_id: str, payload: dict, record_path: Path) -> dict:
     inspect_session = payload.get("inspectSession") if isinstance(payload.get("inspectSession"), dict) else {}
     action_summary = payload.get("actions") if isinstance(payload.get("actions"), dict) else {}
@@ -383,6 +423,8 @@ def capture_screenshot(project_id: str, body: dict | None) -> dict:
     path = _record_path(project_path, "screenshot")
     record = _normalize_screenshot_record(project_id, result, path)
     _write_record(path, record)
+    if _bool(payload.get("includeContent")):
+        record = _inline_screenshot_content(record, project_path)
     return {"screenshot": record}
 
 

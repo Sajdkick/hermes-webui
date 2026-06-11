@@ -469,9 +469,9 @@ def test_phase7_play_proxy_dispatch_rewrites_html_and_locations(monkeypatch, tmp
     assert handle_get(html_handler, urlparse(f"http://example.com/play-project/{project_id}/app")) is True
     html = bytes(html_handler.body).decode("utf-8")
     assert html_handler.status == 200
-    assert "/static/play-proxy-compat.js" in html
+    assert 'src=".hermes-webui/static/play-proxy-compat.js"' in html
     assert f'data-hermes-play-proxy-prefix="/play-project/{project_id}"' in html
-    assert "/static/play-session-overlay.js" in html
+    assert 'src=".hermes-webui/static/play-session-overlay.js"' in html
     assert f'data-hermes-play-project-id="{project_id}"' in html
     assert 'data-hermes-play-run-id="run-1"' in html
     assert 'data-hermes-play-task-id="task-1"' in html
@@ -509,6 +509,142 @@ def test_phase7_play_session_overlay_embeds_simplified_session_view():
     assert "requestedByUrl=qs.get('opsSessionInspect')==='1'||qs.get('opsSessionInspect')==='true'" in sessions
     assert "allow_same_origin_frame=parsed.path.startswith(\"/session/\")" in routes
     assert "'X-Frame-Options', 'SAMEORIGIN' if allow_same_origin_frame else 'DENY'" in helpers
+
+
+def test_phase7_play_feedback_overlay_saves_user_feedback_tasks():
+    overlay = (Path(__file__).resolve().parents[1] / "static" / "play-session-overlay.js").read_text(encoding="utf-8")
+
+    assert "data-hermes-play-feedback" in overlay
+    assert "hermesPlayFeedbackCapture" in overlay
+    assert "includeContent:true" in overlay
+    assert "return appUrl('/api/core/projects/'+encodeURIComponent(projectId)+suffix);" in overlay
+    assert "feedbackApiFrame=document.createElement('iframe')" in overlay
+    assert "body:{title:'User Feedback'}" in overlay
+    assert "const savedText=\"We recieved this feedback from a user '\"+textValue+\"' analyze it in depth and fix it\";" in overlay
+    assert "body:{epicId,text:savedText,grade:'green',markers:['User Feedback']}" in overlay
+    assert "projectApiPath('/tasks/'+encodeURIComponent(createdTaskId)+'/images')" in overlay
+    assert "Note the red marker." in overlay
+    assert "Feedback sent. You can close this popup and keep playing." in overlay
+    assert "if(!projectId&&!sessionId)return;" in overlay
+    assert "if(!sessionId)return;" not in overlay
+
+
+def test_phase7_play_feedback_overlay_injected_without_linked_session():
+    from api import play_pipeline
+
+    attrs = play_pipeline._play_proxy_overlay_attributes("feedback-only-project")
+    assert 'data-hermes-play-overlay="enabled"' in attrs
+    assert 'data-hermes-play-project-id="feedback-only-project"' in attrs
+    assert 'data-hermes-play-session-id=""' in attrs
+
+    html = play_pipeline._inject_play_proxy_scripts("<html><head></head><body>ready</body></html>", "feedback-only-project")
+    assert 'src=".hermes-webui/static/play-session-overlay.js"' in html
+    assert 'data-hermes-play-project-id="feedback-only-project"' in html
+
+
+def test_phase7_play_proxy_injected_webui_scripts_are_relative_to_proxy_page(monkeypatch):
+    from api import play_pipeline
+
+    state = play_pipeline.PlayPipelineState(project_id="project-1")
+    state.session_id = "session-1"
+    monkeypatch.setitem(play_pipeline._PIPELINES, "project-1", state)
+
+    html = play_pipeline._inject_play_proxy_scripts(
+        "<html><head></head><body>ready</body></html>",
+        "project-1",
+        "/nested/app/",
+    )
+
+    assert 'src="../../.hermes-webui/static/play-proxy-compat.js"' in html
+    assert 'src="../../.hermes-webui/static/play-session-overlay.js"' in html
+    assert 'src="/static/play-proxy-compat.js"' not in html
+    assert 'src="/static/play-session-overlay.js"' not in html
+
+
+def test_phase7_play_proxy_compat_rewrites_app_calls_under_subpath_mount():
+    script = textwrap.dedent(
+        """
+        (() => {
+        const fs = require('fs');
+        const vm = require('vm');
+        const source = fs.readFileSync('static/play-proxy-compat.js', 'utf8');
+        let fetchUrl = '';
+        let socketUrl = '';
+        function NativeWebSocket(url){ socketUrl = url; }
+        NativeWebSocket.CONNECTING = 0;
+        NativeWebSocket.OPEN = 1;
+        NativeWebSocket.CLOSING = 2;
+        NativeWebSocket.CLOSED = 3;
+        const scriptTag = { dataset: { hermesPlayProxyPrefix: '/play-project/project-1' } };
+        const context = {
+          window: {
+            location: {
+              href: 'https://example.test/hermes/play-project/project-1/game',
+              origin: 'https://example.test',
+              pathname: '/hermes/play-project/project-1/game',
+              protocol: 'https:',
+            },
+            fetch(url){ fetchUrl = url; return Promise.resolve({ ok: true }); },
+            WebSocket: NativeWebSocket,
+          },
+          document: {
+            querySelectorAll(){ return [scriptTag]; },
+            currentScript: scriptTag,
+          },
+          URL,
+          console,
+        };
+        vm.createContext(context);
+        vm.runInContext(source, context);
+        context.window.fetch('/api/trpc/query?batch=1');
+        new context.window.WebSocket('/nakama/ws?token=1');
+        if (fetchUrl !== '/hermes/play-project/project-1/api/trpc/query?batch=1') {
+          throw new Error(`unexpected fetch URL: ${fetchUrl}`);
+        }
+        const expectedSocket = 'wss://example.test/hermes/play-project/project-1/nakama/ws?token=1';
+        if (socketUrl !== expectedSocket) throw new Error(`unexpected socket URL: ${socketUrl}`);
+        console.log('ok');
+        })();
+        """
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "ok"
+
+
+
+def test_phase7_play_proxy_serves_injected_webui_static_without_upstream(monkeypatch):
+    from api import play_pipeline
+
+    project_id = "project-1"
+    state = play_pipeline.PlayPipelineState(project_id=project_id)
+    state.running = True
+    state.ready = True
+    state.allocated_port = 4321
+    state.allocated_port_host = "127.0.0.1"
+    monkeypatch.setitem(play_pipeline._PIPELINES, project_id, state)
+
+    def fail_urlopen(*_args, **_kwargs):
+        raise AssertionError("injected WebUI static route should not call Play upstream")
+
+    monkeypatch.setattr(play_pipeline.urlrequest, "urlopen", fail_urlopen)
+    handler = _FakeHandler(command="GET")
+    play_pipeline.handle_play_proxy_request(
+        handler,
+        project_id,
+        "/.hermes-webui/static/play-session-overlay.js",
+        urlparse(f"http://example.com/play-project/{project_id}/.hermes-webui/static/play-session-overlay.js"),
+        method="GET",
+    )
+
+    assert handler.status == 200
+    assert handler.header("Content-Type") == "application/javascript; charset=utf-8"
+    body = bytes(handler.body).decode("utf-8")
+    assert "function appUrl(path)" in body
 
 
 def test_phase7_play_proxy_csp_allows_injected_session_overlay():

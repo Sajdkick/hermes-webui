@@ -998,6 +998,7 @@
                   <div class="tasks-card-body">
                     <div class="tasks-card-actions">
                       ${renderProjectPlayControls(project,{detail:true})}
+                      <a class="menu-action-btn secondary small" href="ui-mode?projectId=${encodeURIComponent(project.id||'')}&autostart=1" target="_blank" rel="noopener">UI Mode</a>
                       <button class="menu-action-btn danger small" type="button" data-ops-action="delete-project" data-project-id="${esc(project.id)}">Delete project</button>
                     </div>
                     ${!archived?`<button class="menu-action-btn secondary small" type="button" data-ops-action="execute-ready-tasks" ${!projectId||(!actionableCount&&!executeReadyBusy)?'disabled':''} title="Ask Codex to execute ready and needs-more-work tasks in sequence.">${executeReadyBusy?'Starting...':'Execute ready tasks with AI'}${!executeReadyBusy&&actionableCount?` (${actionableCount})`:''}</button>`:''}

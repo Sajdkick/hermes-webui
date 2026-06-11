@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Hermes UI Mode</title>
+  <link rel="icon" href="/favicon.ico">
+  <style>
+    :root{
+      color-scheme:dark;
+      --bg:#080b12;
+      --panel:#101827;
+      --panel-2:#0b1220;
+      --line:rgba(148,163,184,.24);
+      --text:#e5edf8;
+      --muted:#93a4b8;
+      --accent:#38bdf8;
+      --ok:#34d399;
+      --warn:#f59e0b;
+      --bad:#fb7185;
+      --shadow:0 24px 80px rgba(0,0,0,.35);
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      min-height:100vh;
+      background:radial-gradient(circle at top left,rgba(56,189,248,.18),transparent 32rem),linear-gradient(135deg,#080b12,#0f172a 45%,#111827);
+      color:var(--text);
+      font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      overflow:hidden;
+    }
+    button,input{font:inherit}
+    button{
+      border:1px solid var(--line);
+      background:rgba(15,23,42,.9);
+      color:var(--text);
+      border-radius:11px;
+      padding:9px 12px;
+      cursor:pointer;
+      transition:border-color .14s ease,background .14s ease;
+    }
+    button:hover:not(:disabled){border-color:rgba(56,189,248,.65);background:rgba(30,41,59,.95)}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .primary{background:linear-gradient(135deg,#2563eb,#06b6d4);border-color:transparent}
+    .danger{border-color:rgba(251,113,133,.4);color:#fecdd3}
+    .ghost{background:transparent}
+    .small-button{border-radius:999px;padding:6px 9px;font-size:12px}
+    .app{height:100vh;display:grid;grid-template-rows:auto 1fr;position:relative}
+    .app.chrome-collapsed{grid-template-rows:1fr}
+    .app.chrome-collapsed .topbar{display:none}
+    .topbar{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:10px 14px;
+      border-bottom:1px solid var(--line);
+      background:rgba(8,11,18,.82);
+      backdrop-filter:blur(14px);
+      z-index:5;
+    }
+    .brand{display:flex;flex-direction:column;min-width:220px}
+    .brand strong{font-size:16px}
+    .brand span,.meta,.status-text{color:var(--muted)}
+    .project-pill{
+      border:1px solid var(--line);
+      border-radius:999px;
+      padding:6px 10px;
+      background:rgba(148,163,184,.08);
+      max-width:34vw;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .spacer{flex:1}
+    .status{display:flex;align-items:center;gap:8px;min-width:180px}
+    .dot{width:9px;height:9px;border-radius:999px;background:var(--muted);box-shadow:0 0 0 3px rgba(148,163,184,.12)}
+    .dot.ready{background:var(--ok);box-shadow:0 0 0 3px rgba(52,211,153,.18)}
+    .dot.warning{background:var(--warn);box-shadow:0 0 0 3px rgba(245,158,11,.18)}
+    .dot.error{background:var(--bad);box-shadow:0 0 0 3px rgba(251,113,133,.18)}
+    .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .workspace{
+      min-height:0;
+      display:grid;
+      grid-template-columns:minmax(0,1.48fr) minmax(380px,.52fr);
+      gap:12px;
+      padding:12px;
+    }
+    .app.chat-collapsed .workspace{grid-template-columns:minmax(0,1fr)}
+    .app.chat-collapsed .chat-pane{display:none}
+    .pane{
+      min-width:0;
+      min-height:0;
+      display:grid;
+      grid-template-rows:auto minmax(0,1fr);
+      border:1px solid var(--line);
+      border-radius:18px;
+      overflow:hidden;
+      background:rgba(15,23,42,.72);
+      box-shadow:0 18px 48px rgba(0,0,0,.28);
+    }
+    .preview-pane{grid-template-rows:minmax(0,1fr) auto}
+    .chat-pane{grid-template-rows:auto minmax(0,1fr)}
+    .pane-header{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-height:42px;
+      padding:8px 12px;
+      border-bottom:1px solid var(--line);
+      background:rgba(15,23,42,.88);
+    }
+    .pane-heading{min-width:0;display:flex;align-items:baseline;gap:10px;flex:1}
+    .pane-title{font-weight:700;white-space:nowrap}
+    .pane-actions{display:flex;align-items:center;gap:8px}
+    .chat-preview-actions{flex:1;justify-content:flex-start}
+    .pane-body{min-height:0;position:relative;background:var(--panel-2)}
+    iframe{width:100%;height:100%;border:0;background:white}
+    .app.inspect-active .preview-pane{border-color:rgba(56,189,248,.7)}
+    .app.inspect-active [data-inspect-toggle]{border-color:rgba(56,189,248,.8);background:rgba(14,116,144,.34)}
+    .empty{position:absolute;inset:0;display:grid;place-items:center;padding:28px;text-align:center;color:var(--muted)}
+    .empty-card{max-width:520px;border:1px dashed var(--line);border-radius:18px;padding:24px;background:rgba(15,23,42,.72)}
+    .empty-card h2{margin:0 0 8px;font-size:20px;color:var(--text)}
+    .empty-card p{margin:0 0 14px}
+    .logs{
+      max-height:28vh;
+      overflow:auto;
+      white-space:pre-wrap;
+      font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;
+      color:#cbd5e1;
+      background:#020617;
+      padding:12px;
+      border-top:1px solid var(--line);
+      display:none;
+    }
+    .logs.show{display:block}
+    .small{font-size:12px}
+    .error-banner{
+      position:fixed;
+      left:16px;
+      right:16px;
+      bottom:16px;
+      z-index:20;
+      display:none;
+      color:#fecdd3;
+      background:rgba(127,29,29,.88);
+      border:1px solid rgba(248,113,113,.35);
+      border-radius:12px;
+      padding:8px 10px;
+      box-shadow:var(--shadow);
+    }
+    .error-banner.show{display:block}
+    .restore-rail{
+      position:fixed;
+      left:16px;
+      bottom:16px;
+      z-index:30;
+      display:flex;
+      gap:8px;
+      pointer-events:none;
+    }
+    .restore-rail button{
+      display:none;
+      pointer-events:auto;
+      box-shadow:0 10px 30px rgba(0,0,0,.32);
+      background:rgba(2,6,23,.88);
+      backdrop-filter:blur(12px);
+    }
+    .app.chrome-collapsed .restore-controls,
+    .app.chat-collapsed .restore-chat{display:inline-flex}
+    .app.chrome-collapsed.chat-collapsed .preview-pane{border-radius:14px}
+    @media(max-width:980px){
+      body{overflow:auto}
+      .app{min-height:100vh;height:auto}
+      .app.chrome-collapsed{height:100vh;min-height:100vh}
+      .workspace{grid-template-columns:1fr;grid-template-rows:minmax(60vh,72vh) minmax(58vh,70vh)}
+      .app.chat-collapsed .workspace{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr)}
+      .topbar{align-items:flex-start;flex-wrap:wrap}
+      .spacer{display:none}
+      .project-pill{max-width:100%}
+      .brand{min-width:160px}
+      .status{min-width:0}
+      .restore-rail{left:12px;right:12px;bottom:12px;justify-content:flex-start;flex-wrap:wrap}
+      .pane-actions{gap:6px;flex-wrap:wrap}
+    }
+  </style>
+  <script>window.__HERMES_CSRF_TOKEN__=__CSRF_TOKEN_JSON__;</script>
+</head>
+<body>
+  <div class="app" data-ui-mode-root>
+    <div class="restore-rail" aria-label="Collapsed UI Mode panels">
+      <button class="restore-controls small-button" data-action="show-controls" type="button">Show controls</button>
+      <button class="restore-chat small-button" data-action="show-chat" type="button">Show chat</button>
+    </div>
+    <header class="topbar" data-chrome-panel>
+      <div class="brand"><strong>UI Mode</strong><span>Live preview + project chat</span></div>
+      <div class="project-pill" data-project-label>Choose a project from Ops to start.</div>
+      <div class="status"><span class="dot" data-status-dot></span><span class="status-text" data-status-text>Idle</span></div>
+      <div class="spacer"></div>
+      <div class="actions">
+        <button class="primary" data-action="start" type="button">Start</button>
+        <button data-action="restart" type="button">Restart</button>
+        <button class="danger" data-action="stop" type="button">Stop</button>
+        <button data-action="refresh" type="button">Refresh status</button>
+        <button class="ghost" data-action="toggle-logs" type="button">Logs</button>
+        <button class="ghost" data-action="toggle-chat" data-chat-toggle type="button" aria-expanded="true">Hide chat</button>
+        <button class="ghost" data-action="toggle-chrome" data-chrome-toggle type="button" aria-expanded="true">Hide controls</button>
+        <button class="ghost" data-action="focus-preview" type="button">Focus preview</button>
+      </div>
+    </header>
+    <div class="workspace" data-workspace>
+      <section class="pane preview-pane" aria-label="Live preview">
+        <div class="pane-body">
+          <iframe title="Project live preview" data-preview-frame sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-downloads allow-modals"></iframe>
+          <div class="empty" data-preview-empty><div class="empty-card"><h2>No live preview yet</h2><p>Start UI Mode to launch the project dev server once. Edits should flow through the app’s normal HMR/live reload instead of rebuilding.</p><button class="primary" data-action="start" type="button">Start UI Mode</button></div></div>
+        </div>
+        <pre class="logs" data-logs></pre>
+      </section>
+      <section class="pane chat-pane" data-chat-pane aria-label="Project chat">
+        <div class="pane-header">
+          <div class="pane-actions chat-preview-actions">
+            <button class="small-button ghost" data-action="toggle-inspect" data-inspect-toggle type="button" aria-pressed="false">Highlight</button>
+            <button class="small-button ghost" data-action="clear-highlights" data-highlight-clear type="button" disabled>Clear highlights</button>
+            <button class="small-button" data-action="reload-preview" type="button">Reload</button>
+          </div>
+          <div class="pane-actions"><button class="small-button ghost" data-action="toggle-chat" data-chat-toggle type="button" aria-expanded="true">Hide chat</button></div>
+        </div>
+        <div class="pane-body">
+          <iframe title="Hermes project chat" data-chat-frame></iframe>
+          <div class="empty" data-chat-empty><div class="empty-card"><h2>Project chat</h2><p>A Hermes chat session for this project appears here so you can ask for UI edits while watching the live preview.</p><button data-action="open-chat" type="button">Open chat</button></div></div>
+        </div>
+      </section>
+    </div>
+    <div class="error-banner" data-error-banner></div>
+  </div>
+  <script src="static/ui-mode.js?v=__WEBUI_VERSION__"></script>
+</body>
+</html>

@@ -40,6 +40,51 @@ def test_webui_ephemeral_prompt_includes_browser_surface_context():
     assert "clear user-facing progress" in prompt
 
 
+
+
+def test_webui_ephemeral_prompt_adds_ui_mode_guidance_only_for_ui_sessions():
+    ui_prompt = _webui_ephemeral_system_prompt(
+        None,
+        surface_context={
+            "source": "webui",
+            "session_id": "ui-session",
+            "workspace": "/tmp/project",
+            "session_mode": "ui_mode",
+            "ui_project_label": "Summons",
+            "ui_project_id": "summons-project",
+            "ui_project_workspace": "/home/ubuntu/cloud-terminal-data/projects/summons",
+            "ui_preview_path": "/app/match",
+            "ui_preview_title": "Summons Match",
+        },
+    )
+
+    assert "Session mode: ui_mode" in ui_prompt
+    assert "UI Mode project: Summons" in ui_prompt
+    assert "UI Mode project ID: summons-project" in ui_prompt
+    assert "UI Mode project source workspace: /home/ubuntu/cloud-terminal-data/projects/summons" in ui_prompt
+    assert "UI Mode current page path: /app/match" in ui_prompt
+    assert "UI Mode current page title: Summons Match" in ui_prompt
+    assert "UI Mode session guidance" in ui_prompt
+    assert "live project preview" in ui_prompt
+    assert "explicitly mention that this is UI Mode" in ui_prompt
+    assert "Fast path for UI edits" in ui_prompt
+    assert "source workspace as the working directory" in ui_prompt
+    assert "do not begin by searching task-metadata folders" in ui_prompt
+    assert "targeted source searches" in ui_prompt
+    assert "Do not run production builds" in ui_prompt
+    assert "routine UI/source edits" in ui_prompt
+    assert "cheapest reliable check first" in ui_prompt
+    assert "Preserve the UI Mode shell/preview workflow" in ui_prompt
+
+    normal_prompt = _webui_ephemeral_system_prompt(
+        None,
+        surface_context={"source": "webui", "session_id": "normal-session"},
+    )
+
+    assert "UI Mode session guidance" not in normal_prompt
+    assert "Session mode:" not in normal_prompt
+
+
 def test_webui_ephemeral_prompt_skips_empty_surface_fields():
     prompt = _webui_ephemeral_system_prompt(
         None,

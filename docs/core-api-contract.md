@@ -131,6 +131,57 @@ UIs must render controls from provider metadata where possible. The Ops Deployme
 
 The Core Play facade delegates to the existing Play pipeline implementation. Legacy Ops Play routes are compatibility wrappers around this facade.
 
+### UI Mode live dev runtime
+
+UI Mode is a project-scoped live-preview runtime for fast UI iteration. It is a Core API domain sibling to Play rather than a direct Hermes-agent integration: project source files remain the source of truth, Core starts a loopback runtime once, and the browser preview updates through the app's own HMR/live-reload behavior when the project uses a dev server. Projects that need Play-equivalent auth, routing, or server behavior may import their Play config so UI Mode runs the same build/start/inspect contract as Play.
+
+| Route | Method | Notes |
+| --- | --- | --- |
+| `/api/core/projects/{projectId}/ui-config-file` | `GET` | Report UI workflow config discovery/validation. Core checks `.hermes/ui.json`, `.cloud-terminal/ui.json`, `project_ui.json`, then package-script auto-detection. A UI config may import `project_play.json` to use Play-equivalent build/start/inspect behavior. |
+| `/api/core/projects/{projectId}/ui/status` | `GET` | Return configured/available/running/ready state, preview URL, allocated loopback port metadata, and user-facing summary. |
+| `/api/core/projects/{projectId}/ui/logs` | `GET` | Return redacted build/runtime logs. |
+| `/api/core/projects/{projectId}/ui/start` | `POST` | Optionally run the configured build stage, then start the project runtime with an auto-allocated loopback port. Optional body fields include `sessionId` for associating the side-by-side chat. |
+| `/api/core/projects/{projectId}/ui/restart` | `POST` | Stop any current UI runtime and start a fresh one. |
+| `/api/core/projects/{projectId}/ui/stop` | `POST` | Stop the UI runtime and keep status/log visibility. |
+| `/ui-project/{projectId}/...` | `GET` / proxied unsafe methods | Same-origin preview proxy for the running dev server. HTML responses receive a small proxy-compat script so absolute fetch, XHR, EventSource, WebSocket, root-relative navigation, preview page-context reporting, and UI element highlighting stay under the preview proxy for HMR, app APIs, and side-by-side chat context. |
+
+UI config files use this minimal shape:
+
+```json
+{
+  "version": 1,
+  "dev": {
+    "command": "npm run dev",
+    "cwd": ".",
+    "env": { "HOST": "127.0.0.1" },
+    "port": {
+      "mode": "auto",
+      "host": "127.0.0.1",
+      "envVar": "PORT",
+      "range": { "min": 30000, "max": 39999 }
+    }
+  },
+  "inspect": {
+    "mode": "proxy",
+    "url": "/",
+    "readyTimeoutMs": 60000
+  }
+}
+```
+
+To keep UI Mode exactly aligned with Play for projects that depend on Play's server/auth/runtime contract, use a Play-source UI config:
+
+```json
+{
+  "version": 1,
+  "source": "project_play.json"
+}
+```
+
+When `source`, `extends`, or `usePlayConfig` points at Play config, UI Mode maps Play `build` to a one-shot build stage, Play `start` to the long-running preview runtime, and Play `inspect` to the iframe preview path/readiness contract. This is the recommended shape when debug-login, server-rendered app shells, or Play-specific environment variables must behave identically to Play.
+
+The runtime must bind to loopback and is exposed to the browser only through the WebUI-owned `/ui-project/{projectId}/...` proxy. Do not expose the dev server directly and do not grant previewed app code access to WebUI admin APIs outside the explicit proxy path.
+
 ### Deployments
 
 | Route | Method | Notes |
@@ -194,6 +245,8 @@ Published local-legacy deployments are served through the native Core proxy at `
 | `/api/core/projects/{projectId}/runtime/inspect/screenshot/latest` | `GET` |
 | `/api/core/projects/{projectId}/runtime/inspect/action` | `POST` |
 | `/api/core/projects/{projectId}/runtime/inspect/action/latest` | `GET` |
+
+`POST /api/core/projects/{projectId}/runtime/inspect/screenshot` accepts the existing screenshot capture body plus optional `includeContent: true`. When set, the immediate response includes `mimeType`, `size`, base64 `content`, and `dataUrl` for the captured image so same-origin UI clients can annotate or attach it without separately reading a filesystem path. The persisted latest-screenshot record remains metadata-only.
 
 ### Session activity
 

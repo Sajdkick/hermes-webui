@@ -263,6 +263,20 @@ def _clarify_timeout_seconds(default: int = 120) -> int:
 _CANCEL_MARKER_PATTERNS = ('task cancelled', 'task canceled', 'response interrupted')
 
 
+_WEBUI_UI_MODE_PROMPT = """
+UI Mode session guidance:
+- This session is attached to a live project preview in the Hermes WebUI UI Mode surface.
+- If the user asks what is happening or where you are, explicitly mention that this is UI Mode and name the UI Mode project when project metadata is present.
+- Fast path for UI edits: use the UI Mode project source workspace as the working directory; do not begin by searching task-metadata folders, generated bundles, or unrelated workspaces when that source workspace is available.
+- Start from the current page path and all selected/highlighted-element descriptors. Use targeted source searches for nearby labels/selectors/components before broad repository scans.
+- Prefer editing source files that the live preview can hot-reload. Do not run production builds, regenerate bundles, or restart/rebuild the preview for routine UI/source edits unless a quick status check proves the preview is serving built output with no hot-reload path.
+- Verify with the cheapest reliable check first: syntax/source assertions and focused tests for the touched component. Use browser/DOM automation only when it materially increases confidence, and do not loop on unavailable runtime tooling.
+- If selected elements are present, treat them as authoritative UI context from the live preview; do not dismiss the selection just because the visible user message is short.
+- When a rebuild, restart, or manual refresh is genuinely required, say so clearly and keep the next step actionable.
+- Preserve the UI Mode shell/preview workflow; do not ask the user to leave UI Mode unless the task cannot be completed from the live preview context.
+""".strip()
+
+
 _WEBUI_PROGRESS_PROMPT = """
 WebUI progress guidance:
 - Match the normal Hermes messaging style; do not add extra status updates solely because this is a browser session.
@@ -300,12 +314,20 @@ def _webui_surface_context_prompt(surface_context: Optional[dict]) -> str:
         ("session_id", "Session ID"),
         ("profile", "Profile"),
         ("workspace", "Workspace"),
+        ("ui_project_label", "UI Mode project"),
+        ("ui_project_id", "UI Mode project ID"),
+        ("ui_project_workspace", "UI Mode project source workspace"),
+        ("ui_preview_path", "UI Mode current page path"),
+        ("ui_preview_title", "UI Mode current page title"),
     )
     for key, label in fields:
         raw = surface_context.get(key)
         value = str(raw).strip() if raw is not None else ""
         if value:
             lines.append(f"- {label}: {value}")
+    mode = str(surface_context.get("session_mode") or "").strip().lower().replace("-", "_")
+    if mode:
+        lines.append(f"- Session mode: {mode}")
     return "\n".join(lines)
 
 
@@ -321,6 +343,11 @@ def _webui_ephemeral_system_prompt(
     surface_prompt = _webui_surface_context_prompt(surface_context)
     if surface_prompt:
         parts.append(surface_prompt)
+    session_mode = ""
+    if isinstance(surface_context, dict):
+        session_mode = str(surface_context.get("session_mode") or "").strip().lower().replace("-", "_")
+    if session_mode in {"ui", "ui_mode"}:
+        parts.append(_WEBUI_UI_MODE_PROMPT)
     parts.append(_WEBUI_PROGRESS_PROMPT)
     delivery_prompt = _webui_delivery_context_prompt(config_data)
     if delivery_prompt:
@@ -5933,6 +5960,12 @@ def _run_agent_streaming(
                     'session_id': session_id,
                     'profile': getattr(s, 'profile', None),
                     'workspace': s.workspace,
+                    'session_mode': getattr(s, 'session_mode', None),
+                    'ui_project_id': getattr(s, 'ui_project_id', None) or getattr(s, 'project_id', None),
+                    'ui_project_label': getattr(s, 'ui_project_label', None),
+                    'ui_project_workspace': (getattr(s, 'ui_project_workspace', None) or s.workspace) if str(getattr(s, 'session_mode', '') or '').lower().replace('-', '_') == 'ui_mode' else None,
+                    'ui_preview_path': getattr(s, 'ui_preview_path', None),
+                    'ui_preview_title': getattr(s, 'ui_preview_title', None),
                 },
                 config_data=_cfg,
             )

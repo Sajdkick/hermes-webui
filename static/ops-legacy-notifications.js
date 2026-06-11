@@ -440,12 +440,37 @@
       )||'').trim();
     }
 
+    function webuiMountPrefix(){
+      const pathname=String(windowRef&&windowRef.location&&windowRef.location.pathname||'');
+      const markers=['/play-project/','/session/','/index.html','/ops'];
+      for(const marker of markers){
+        const index=pathname.indexOf(marker);
+        if(index<=0)continue;
+        if(marker==='/ops'){
+          const after=pathname.charAt(index+marker.length);
+          if(after&&after!=='/')continue;
+        }
+        return pathname.slice(0,index).replace(/\/+$/,'');
+      }
+      return '';
+    }
+
+    function webuiMountedPath(path){
+      const raw=String(path||'').trim();
+      if(!raw.startsWith('/'))return raw;
+      const mount=webuiMountPrefix();
+      if(mount&&raw!==mount&&!raw.startsWith(mount+'/'))return mount+raw;
+      return raw;
+    }
+
     function playProxyInspectUrl(note,inspectUrl){
       const projectId=playNotificationProjectId(note||{});
       if(!projectId)return '';
       try{
         const url=new URL(inspectUrl,windowRef.location.origin);
-        if(url.origin===windowRef.location.origin&&url.pathname.indexOf('/play-project/')===0)return url.href;
+        if(url.origin===windowRef.location.origin&&url.pathname.indexOf('/play-project/')>=0){
+          return new URL(webuiMountedPath(`${url.pathname||'/'}${url.search||''}${url.hash||''}`),windowRef.location.origin).href;
+        }
         if(url.protocol!=='http:'&&url.protocol!=='https:')return '';
         if(!isLoopbackPlayHost(url.hostname))return '';
         const mode=String(note&&(
@@ -457,7 +482,7 @@
         if(mode!=='proxy'&&!playNotificationHasProxyPort(note))return '';
         const path=`${url.pathname||'/'}${url.search||''}${url.hash||''}`;
         const proxyPath=`/play-project/${encodeURIComponent(projectId)}${path.charAt(0)==='/'?path:`/${path}`}`;
-        return new URL(proxyPath,windowRef.location.origin).href;
+        return new URL(webuiMountedPath(proxyPath),windowRef.location.origin).href;
       }catch(_error){
         return '';
       }

@@ -153,12 +153,16 @@ def test_phase7_runtime_inspect_routes_wrap_hermes_runtime(monkeypatch, tmp_path
     assert reset_payload["kind"] == "reset-state"
     assert "Reset debug state" in reset_payload["summary"]
 
-    screenshot = _FakeHandler({"url": "/app/editor", "selector": "canvas", "fileName": "frame-check"})
+    screenshot = _FakeHandler({"url": "/app/editor", "selector": "canvas", "fileName": "frame-check", "includeContent": True})
     assert handle_post(screenshot, urlparse(f"http://example.com/api/ops/projects/{project_id}/runtime/inspect/screenshot")) is True
     screenshot_payload = _response_json(screenshot)["screenshot"]
     assert screenshot.status == 201
     assert screenshot_payload["absolutePath"] == str(screenshot_path)
     assert screenshot_payload["capture"]["selector"] == "canvas"
+    assert screenshot_payload["mimeType"] == "image/png"
+    assert screenshot_payload["content"] == "cG5nLWRhdGE="
+    assert screenshot_payload["dataUrl"] == "data:image/png;base64,cG5nLWRhdGE="
+    assert screenshot_payload["size"] == len(b"png-data")
 
     action = _FakeHandler(
         {
@@ -185,7 +189,10 @@ def test_phase7_runtime_inspect_routes_wrap_hermes_runtime(monkeypatch, tmp_path
 
     latest_screenshot = _FakeHandler()
     assert handle_get(latest_screenshot, urlparse(f"http://example.com/api/ops/projects/{project_id}/runtime/inspect/screenshot/latest")) is True
-    assert _response_json(latest_screenshot)["screenshot"]["absolutePath"] == str(screenshot_path)
+    latest_screenshot_payload = _response_json(latest_screenshot)["screenshot"]
+    assert latest_screenshot_payload["absolutePath"] == str(screenshot_path)
+    assert "content" not in latest_screenshot_payload
+    assert "dataUrl" not in latest_screenshot_payload
 
     latest_action = _FakeHandler()
     assert handle_get(latest_action, urlparse(f"http://example.com/api/ops/projects/{project_id}/runtime/inspect/action/latest")) is True

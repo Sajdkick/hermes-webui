@@ -67,6 +67,8 @@ The existing Ops routes are unchanged.  They now call `api.core_play` internally
 | `POST` | `/api/ops/projects/{projectId}/play/stop` | `{ ok: true, stopped: true, status, message }`. If the core stop returns `None`, the route fetches current status, preserving historical behavior. |
 | `GET/POST/...` | `/play-project/{projectId}/{path}` | Proxies to the active ready Play target. |
 
+The injected Play session overlay may render a project-scoped **Feedback** control when the proxy context includes a project id. That control captures the current Play page through `/api/core/projects/{projectId}/runtime/inspect/screenshot` with `includeContent: true`, lets the user skip or annotate the screenshot with a red marker, then saves the wrapped feedback text as a new project task under the `User Feedback` epic and attaches the screenshot through the Core task image route. The screenshot capture URL includes `hermesPlayFeedbackCapture=1` so the overlay does not recursively appear in its own capture.
+
 Error responses retain the existing JSON helper shape:
 
 ```json

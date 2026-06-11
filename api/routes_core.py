@@ -14,6 +14,7 @@ from api import (
     core_host,
     core_play,
     core_projects,
+    core_ui,
     core_runtime_tools,
     core_session_assets,
 )
@@ -53,6 +54,12 @@ _PLAY_LOGS_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/play/logs/?$")
 _PLAY_START_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/play/start/?$")
 _PLAY_RESTART_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/play/restart/?$")
 _PLAY_STOP_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/play/stop/?$")
+_UI_CONFIG_FILE_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/ui-config-file/?$")
+_UI_STATUS_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/ui/status/?$")
+_UI_LOGS_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/ui/logs/?$")
+_UI_START_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/ui/start/?$")
+_UI_RESTART_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/ui/restart/?$")
+_UI_STOP_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/ui/stop/?$")
 _DEPLOYMENT_PROVIDERS_RE = re.compile(r"^/api/core/deployments/providers/?$")
 _PROJECT_DEPLOYMENT_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/deployment/?$")
 _PROJECT_DEPLOYMENT_LOGS_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/deployment/logs/?$")
@@ -156,6 +163,18 @@ def handle_get(handler, parsed) -> bool:
         match = _PLAY_LOGS_RE.match(parsed.path)
         if match:
             j(handler, core_play.get_project_play_logs(unquote(match.group(1)), _q(parsed, "limit", "")))
+            return True
+        match = _UI_CONFIG_FILE_RE.match(parsed.path)
+        if match:
+            j(handler, core_ui.get_project_ui_config_file_info(unquote(match.group(1))))
+            return True
+        match = _UI_STATUS_RE.match(parsed.path)
+        if match:
+            j(handler, core_ui.build_project_ui_status(unquote(match.group(1))))
+            return True
+        match = _UI_LOGS_RE.match(parsed.path)
+        if match:
+            j(handler, core_ui.build_project_ui_logs(unquote(match.group(1)), _q(parsed, "limit", "")))
             return True
         if _DEPLOYMENT_PROVIDERS_RE.match(parsed.path):
             j(handler, core_deployments.provider_registry())
@@ -322,6 +341,22 @@ def handle_post(handler, parsed, body: dict) -> bool:
             project_id = unquote(match.group(1))
             status = core_play.stop_project_play(project_id) or core_play.get_project_play_status(project_id)
             j(handler, {"ok": True, "stopped": True, "status": status, "message": "Play pipeline stopped."})
+            return True
+        match = _UI_START_RE.match(parsed.path)
+        if match:
+            status = core_ui.start_project_ui_runtime(unquote(match.group(1)), body)
+            j(handler, {"ok": True, "started": True, "status": status, "message": "UI runtime started."})
+            return True
+        match = _UI_RESTART_RE.match(parsed.path)
+        if match:
+            status = core_ui.restart_project_ui_runtime(unquote(match.group(1)), body)
+            j(handler, {"ok": True, "restarted": True, "status": status, "message": "UI runtime restarted."})
+            return True
+        match = _UI_STOP_RE.match(parsed.path)
+        if match:
+            project_id = unquote(match.group(1))
+            status = core_ui.stop_project_ui_runtime(project_id) or core_ui.build_project_ui_status(project_id)
+            j(handler, {"ok": True, "stopped": True, "status": status, "message": "UI runtime stopped."})
             return True
         match = _PROJECT_DEPLOYMENT_RE.match(parsed.path)
         if match:

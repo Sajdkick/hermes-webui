@@ -25,7 +25,7 @@ import ipaddress
 import re
 from pathlib import Path
 from contextlib import closing
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlsplit, unquote
 from api.agent_sessions import (
     MESSAGING_SOURCES,
     is_cli_session_row,
@@ -2949,8 +2949,86 @@ from api.models import (
     ensure_cron_project,
     is_cron_session,
     is_safe_session_id,
+    _normalize_session_mode,
+    _clean_ui_mode_session_text,
 )
 from api import session_sidecars
+
+
+def _ui_mode_metadata_from_body(body: dict, *, fallback_project_id: str | None = None) -> dict:
+    """Extract short UI Mode metadata from a browser request body."""
+    if not isinstance(body, dict):
+        body = {}
+    project_id = (
+        body.get("ui_project_id")
+        or body.get("uiProjectId")
+        or body.get("project_id")
+        or body.get("projectId")
+        or fallback_project_id
+    )
+    return {
+        "ui_project_id": _clean_ui_mode_session_text(project_id, 160),
+        "ui_project_label": _clean_ui_mode_session_text(body.get("ui_project_label") or body.get("uiProjectLabel"), 240),
+        "ui_project_workspace": _clean_ui_mode_session_text(
+            body.get("ui_project_workspace")
+            or body.get("uiProjectWorkspace")
+            or body.get("ui_project_source_workspace")
+            or body.get("uiProjectSourceWorkspace"),
+            1200,
+        ),
+        "ui_preview_path": _clean_ui_mode_session_text(body.get("ui_preview_path") or body.get("uiPreviewPath"), 800),
+        "ui_preview_url": _clean_ui_mode_session_text(body.get("ui_preview_url") or body.get("uiPreviewUrl"), 1200),
+        "ui_preview_title": _clean_ui_mode_session_text(body.get("ui_preview_title") or body.get("uiPreviewTitle"), 240),
+    }
+
+
+def _apply_ui_mode_metadata_to_session(session, metadata: dict) -> bool:
+    """Apply non-empty UI Mode metadata to a session object."""
+    changed = False
+    if not isinstance(metadata, dict):
+        return False
+    for key, value in metadata.items():
+        if not value:
+            continue
+        if getattr(session, key, None) != value:
+            setattr(session, key, value)
+            changed = True
+    return changed
+
+
+def _ui_mode_project_workspace(session, body: dict | None = None) -> str | None:
+    """Return the authoritative project source workspace for a UI Mode chat turn.
+
+    UI Mode sidecars can outlive their original URL/session metadata.  If the
+    browser sends a stale workspace (for example a task metadata directory),
+    prefer the Ops project's source path whenever the UI project id is known.
+    """
+    body = body if isinstance(body, dict) else {}
+    project_id = (
+        body.get("ui_project_id")
+        or body.get("uiProjectId")
+        or getattr(session, "ui_project_id", None)
+        or body.get("project_id")
+        or body.get("projectId")
+        or getattr(session, "project_id", None)
+    )
+    project_key = str(project_id or "").strip()
+    if not project_key:
+        return None
+    try:
+        from api import ops_projects as _ops_projects
+        from api.core_contracts import project_root as _project_root
+
+        project = _ops_projects.get_ops_project(project_key)
+        workspace = str(resolve_trusted_workspace(str(_project_root(project))))
+        return workspace
+    except Exception:
+        logger.debug(
+            "Failed to resolve UI Mode project workspace for %s",
+            project_key,
+            exc_info=True,
+        )
+        return None
 
 
 def _session_lineage_resolution_enabled(query: dict) -> bool:
@@ -4875,6 +4953,14 @@ def handle_get(handler, parsed) -> bool:
         except Exception as exc:
             return _serve_shell_unavailable(handler, exc)
 
+    try:
+        from api import core_ui
+
+        if core_ui.redirect_ui_project_referer_navigation(handler, parsed, method="GET"):
+            return True
+    except Exception:
+        logger.debug("UI project referer navigation redirect did not handle %s", parsed.path, exc_info=True)
+
     if parsed.path == "/login":
         _settings = load_settings()
         _bn = _html.escape(_settings.get("bot_name") or "Hermes")
@@ -5037,6 +5123,23 @@ def handle_get(handler, parsed) -> bool:
             return True
     except Exception:
         logger.debug("deployment compatibility GET proxy did not handle %s", parsed.path, exc_info=True)
+
+    if parsed.path in ("/ui-mode", "/ui-mode/"):
+        from api import core_ui
+
+        return core_ui.serve_ui_mode_shell(handler)
+
+    if parsed.path.startswith("/ui-project/"):
+        from api import core_ui
+
+        tail = parsed.path[len("/ui-project/"):]
+        project_id, _, remainder = tail.partition("/")
+        if not project_id:
+            j(handler, {"error": "UI project target not found"}, status=404)
+            return True
+        target_path = f"/{remainder}" if remainder else "/"
+        core_ui.handle_ui_proxy_request(handler, unquote(project_id), target_path, parsed, method="GET")
+        return True
 
     if parsed.path.startswith("/api/core"):
         from api.routes_core import handle_get as handle_core_get
@@ -6443,6 +6546,30 @@ def handle_post(handler, parsed) -> bool:
     except Exception:
         logger.debug("deployment compatibility POST proxy did not handle %s", parsed.path, exc_info=True)
 
+    try:
+        from api import core_ui
+
+        if core_ui.redirect_ui_project_referer_navigation(handler, parsed, method="POST"):
+            if diag:
+                diag.stage("ui_project_referer_redirect")
+            return True
+    except Exception:
+        logger.debug("UI project referer POST redirect did not handle %s", parsed.path, exc_info=True)
+
+    if parsed.path.startswith("/ui-project/"):
+        if diag:
+            diag.stage("ui_project_proxy")
+        from api import core_ui
+
+        tail = parsed.path[len("/ui-project/"):]
+        project_id, _, remainder = tail.partition("/")
+        if not project_id:
+            j(handler, {"error": "UI project target not found"}, status=404)
+            return True
+        target_path = f"/{remainder}" if remainder else "/"
+        core_ui.handle_ui_proxy_request(handler, unquote(project_id), target_path, parsed, method="POST")
+        return True
+
     # CSRF: reject cross-origin or tokenless authenticated browser requests.
     # /api/auth/login has no authenticated session token yet, and /api/csp-report
     # is intentionally unauthenticated for browser-generated violation reports.
@@ -6597,6 +6724,11 @@ def handle_post(handler, parsed) -> bool:
         raw_project_id = body.get("project_id") or body.get("ops_project_id") or body.get("projectId") or None
         project_id = str(raw_project_id).strip() or None
         profile = requested_profile
+        session_mode = _normalize_session_mode(
+            body.get("session_mode")
+            or body.get("sessionMode")
+            or body.get("surface")
+        )
         if project_id:
             target_project = next(
                 (
@@ -6642,6 +6774,16 @@ def handle_post(handler, parsed) -> bool:
                         )
                     profile = project_profile
                     model, model_provider = ops_sessions_mod.project_session_defaults(ops_project)
+        ui_metadata = _ui_mode_metadata_from_body(body, fallback_project_id=project_id) if session_mode == "ui_mode" else None
+        if session_mode == "ui_mode":
+            ui_source_workspace = _ui_mode_project_workspace(
+                type("_UiModeProjectRef", (), {"ui_project_id": project_id, "project_id": project_id})(),
+                body,
+            )
+            if ui_source_workspace:
+                workspace = ui_source_workspace
+                if isinstance(ui_metadata, dict):
+                    ui_metadata["ui_project_workspace"] = ui_source_workspace
         s = new_session(
             workspace=workspace,
             model=model,
@@ -6649,6 +6791,8 @@ def handle_post(handler, parsed) -> bool:
             profile=profile,
             project_id=project_id,
             worktree_info=worktree_info,
+            session_mode=session_mode,
+            ui_metadata=ui_metadata,
         )
         if worktree_info:
             publish_session_list_changed("session_new", profile=getattr(s, "profile", None))
@@ -6688,6 +6832,13 @@ def handle_post(handler, parsed) -> bool:
                 archived=False,
                 project_id=session.project_id,
                 profile=session.profile,
+                session_mode=getattr(session, "session_mode", None),
+                ui_project_id=getattr(session, "ui_project_id", None),
+                ui_project_label=getattr(session, "ui_project_label", None),
+                ui_project_workspace=getattr(session, "ui_project_workspace", None),
+                ui_preview_path=getattr(session, "ui_preview_path", None),
+                ui_preview_url=getattr(session, "ui_preview_url", None),
+                ui_preview_title=getattr(session, "ui_preview_title", None),
                 input_tokens=session.input_tokens,
                 output_tokens=session.output_tokens,
                 estimated_cost=session.estimated_cost,
@@ -11608,14 +11759,30 @@ def _handle_chat_start(handler, body, diag=None):
                 # profile-owned before their first message and must not retag.
                 s.profile = requested_profile
         diag.stage("normalize_message") if diag else None
+        request_session_mode = _normalize_session_mode(
+            body.get("session_mode")
+            or body.get("sessionMode")
+            or body.get("surface")
+        )
+        if request_session_mode and getattr(s, "session_mode", None) != request_session_mode:
+            s.session_mode = request_session_mode
+        if (request_session_mode or getattr(s, "session_mode", None)) == "ui_mode":
+            _apply_ui_mode_metadata_to_session(
+                s,
+                _ui_mode_metadata_from_body(body, fallback_project_id=getattr(s, "project_id", None)),
+            )
         msg = str(body.get("message", "")).strip()
         if not msg:
             return bad(handler, "message is required")
         diag.stage("normalize_attachments") if diag else None
         attachments = _normalize_chat_attachments(body.get("attachments") or [])[:20]
         diag.stage("resolve_workspace") if diag else None
+        ui_mode_active = (request_session_mode or getattr(s, "session_mode", None)) == "ui_mode"
+        ui_project_workspace = _ui_mode_project_workspace(s, body) if ui_mode_active else None
+        if ui_project_workspace and getattr(s, "ui_project_workspace", None) != ui_project_workspace:
+            s.ui_project_workspace = ui_project_workspace
         try:
-            workspace = _resolve_chat_workspace_with_recovery(s, body.get("workspace"))
+            workspace = ui_project_workspace or _resolve_chat_workspace_with_recovery(s, body.get("workspace"))
         except ValueError as e:
             return bad(handler, str(e))
         if _session_profile_retag_locked(s):

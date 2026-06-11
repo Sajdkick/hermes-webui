@@ -260,7 +260,15 @@ def test_gateway_chat_worker_translates_sse_and_persists_session(tmp_path, monke
     monkeypatch.setattr(streaming, "_prefill_messages_with_webui_context", lambda ctx, cfg: list(ctx["messages"]) + [{"role": "user", "content": "webui session context"}])
     monkeypatch.setattr(gateway_chat.urllib.request, "urlopen", fake_urlopen)
 
-    s = new_session()
+    s = new_session(
+        workspace=str(tmp_path / "task-metadata"),
+        session_mode="ui_mode",
+        ui_metadata={
+            "ui_project_id": "summons-project",
+            "ui_project_label": "Summons",
+            "ui_project_workspace": str(tmp_path / "summons-source"),
+        },
+    )
     stream_id = "stream-gateway-test"
     s.active_stream_id = stream_id
     s.pending_user_message = "Say hello"
@@ -302,6 +310,15 @@ def test_gateway_chat_worker_translates_sse_and_persists_session(tmp_path, monke
     assert system_msg["role"] == "system"
     assert "Final visible assistant replies" in system_msg["content"]
     assert "Need script" in system_msg["content"]
+    assert "UI Mode session guidance" in system_msg["content"]
+    assert "live project preview" in system_msg["content"]
+    assert "UI Mode project source workspace" in system_msg["content"]
+    assert str(tmp_path / "summons-source") in system_msg["content"]
+    assert "Fast path for UI edits" in system_msg["content"]
+    assert "source workspace as the working directory" in system_msg["content"]
+    assert "do not begin by searching task-metadata folders" in system_msg["content"]
+    assert "Do not run production builds" in system_msg["content"]
+    assert "cheapest reliable check first" in system_msg["content"]
     # The moved session/delivery context must be present in the system prompt.
     assert "Connected Platforms:" in system_msg["content"]
     assert "Delivery options for scheduled tasks:" in system_msg["content"]

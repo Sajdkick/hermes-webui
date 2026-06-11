@@ -379,6 +379,126 @@ function applySessionTitleUpdate(sid, titleText, options={}){
   return true;
 }
 
+let _uiModeContextText='';
+
+function _normalizeUiModeContextText(value){
+  const text=String(value||'').replace(/\r\n?/g,'\n').trim();
+  if(!text)return '';
+  return text.startsWith('[UI Mode context]')?text:`[UI Mode context]\n${text}`;
+}
+
+function _uiModeSearchParam(){
+  try{return new URLSearchParams(window.location.search||'');}
+  catch(_){return new URLSearchParams('');}
+}
+
+function _uiModeParam(params,...names){
+  for(const name of names){
+    const value=String(params.get(name)||'').trim();
+    if(value)return value;
+  }
+  return '';
+}
+
+function _uiModeFallbackContextText(){
+  const params=_uiModeSearchParam();
+  const projectId=_uiModeParam(params,'uiProjectId','ui_project_id','projectId','project_id');
+  const projectLabel=_uiModeParam(params,'uiProjectLabel','ui_project_label')||projectId||'Unknown project';
+  const previewPath=_uiModeParam(params,'uiPreviewPath','ui_preview_path')||'Unknown';
+  const previewTitle=_uiModeParam(params,'uiPreviewTitle','ui_preview_title');
+  const previewUrl=_uiModeParam(params,'uiPreviewUrl','ui_preview_url');
+  const projectWorkspace=_uiModeParam(params,'uiProjectWorkspace','ui_project_workspace','ui_project_source_workspace');
+  const lines=['[UI Mode context]','Mode: UI Mode live preview',`Project: ${projectLabel}`];
+  if(projectId)lines.push(`Project ID: ${projectId}`);
+  if(projectWorkspace)lines.push(`Project source workspace: ${projectWorkspace}`);
+  lines.push(`Current page path: ${previewPath}`);
+  if(previewTitle)lines.push(`Current page title: ${previewTitle}`);
+  if(previewUrl)lines.push(`Preview URL: ${previewUrl}`);
+  lines.push('Highlighted/selected elements: none');
+  return lines.join('\n');
+}
+
+function _uiModeContextForOutgoingText(){
+  const liveContext=_normalizeUiModeContextText(_uiModeContextText);
+  if(liveContext)return liveContext;
+  return _isUiModeChatSession()?_uiModeFallbackContextText():'';
+}
+
+function _uiModeTurnMetadata(){
+  const params=_uiModeSearchParam();
+  const liveContext=_normalizeUiModeContextText(_uiModeContextText);
+  const metadata={
+    projectId:_uiModeParam(params,'uiProjectId','ui_project_id','projectId','project_id'),
+    projectLabel:_uiModeParam(params,'uiProjectLabel','ui_project_label'),
+    previewPath:_uiModeParam(params,'uiPreviewPath','ui_preview_path'),
+    previewUrl:_uiModeParam(params,'uiPreviewUrl','ui_preview_url'),
+    previewTitle:_uiModeParam(params,'uiPreviewTitle','ui_preview_title'),
+    projectWorkspace:_uiModeParam(params,'uiProjectWorkspace','ui_project_workspace','ui_project_source_workspace')
+  };
+  if(liveContext){
+    for(const rawLine of liveContext.split('\n')){
+      const line=String(rawLine||'').trim();
+      const idx=line.indexOf(':');
+      if(idx<0)continue;
+      const key=line.slice(0,idx).trim().toLowerCase();
+      const value=line.slice(idx+1).trim();
+      if(!value)continue;
+      if(key==='project'&&!metadata.projectLabel)metadata.projectLabel=value;
+      else if(key==='project id'&&!metadata.projectId)metadata.projectId=value;
+      else if((key==='project source workspace'||key==='ui mode project source workspace')&&!metadata.projectWorkspace)metadata.projectWorkspace=value;
+      else if(key==='current page path')metadata.previewPath=value;
+      else if(key==='preview url')metadata.previewUrl=value;
+      else if(key==='current page title')metadata.previewTitle=value;
+    }
+  }
+  return metadata;
+}
+
+function _appendUiModeContextToComposer(text){
+  const context=_normalizeUiModeContextText(text);
+  if(!context)return false;
+  const composer=$('msg');
+  if(!composer)return false;
+  const current=String(composer.value||'');
+  composer.value=current.trim()?`${current.replace(/\s+$/,'')}\n\n${context}\n\n`:`${context}\n\n`;
+  composer.focus();
+  composer.dispatchEvent(new Event('input',{bubbles:true}));
+  if(typeof autoResize==='function')autoResize();
+  if(typeof updateSendBtn==='function')updateSendBtn();
+  if(typeof showToast==='function')showToast('UI context inserted into composer',1600);
+  return true;
+}
+
+function _appendUiModeContextToOutgoingText(text){
+  const base=String(text||'').trim();
+  const context=_uiModeContextForOutgoingText();
+  if(!base||!context)return base;
+  if(base.indexOf('[UI Mode context]')>=0)return base;
+  return `${base}\n\n${context}`;
+}
+function _isUiModeChatSession(){
+  try{
+    const params=new URLSearchParams(window.location.search||'');
+    const mode=String(params.get('sessionMode')||params.get('session_mode')||params.get('surface')||'').trim().toLowerCase().replace(/-/g,'_');
+    if(mode==='ui'||mode==='ui_mode')return true;
+  }catch(_){ }
+  return !!_normalizeUiModeContextText(_uiModeContextText);
+}
+window.addEventListener('message', event=>{
+  if(event.origin!==window.location.origin)return;
+  const data=event.data||{};
+  if(!data||data.hermesUiMode!==1)return;
+  if(data.type==='hermes-ui-mode-context-update'){
+    _uiModeContextText=_normalizeUiModeContextText(data.context||'');
+  }else if(data.type==='hermes-ui-mode-compose-context'){
+    const context=_normalizeUiModeContextText(data.text||data.context||_uiModeContextText||'');
+    if(context){
+      _uiModeContextText=context;
+      _appendUiModeContextToComposer(context);
+    }
+  }
+});
+
 async function send(){
   // Reject concurrent invocations early — before any await yields control.
   // If a send is already in-flight (e.g. queue drain), re-queue the message
@@ -573,6 +693,7 @@ async function send(){
   let msgText=text;
   if(uploaded.length&&!msgText)msgText=`I've uploaded ${uploaded.length} file(s): ${uploadedPaths.join(', ')}`;
   else if(uploaded.length)msgText=`${text}\n\n[Attached files: ${uploadedPaths.join(', ')}]`;
+  msgText=_appendUiModeContextToOutgoingText(msgText);
   if(!msgText){setComposerStatus('Nothing to send');return;}
 
   $('msg').value='';autoResize();
@@ -650,13 +771,22 @@ async function send(){
   let streamId;
   try{
     const _modelState=_chatPayloadModelState();
+    const _uiModeMetadata=_isUiModeChatSession()?_uiModeTurnMetadata():{};
     const startData=await api('/api/chat/start',{method:'POST',body:JSON.stringify({
       session_id:activeSid,message:msgText,
       // S.session.model remains authoritative; the helper only resolves a
       // matching provider fallback for the same outgoing model.
-      model:_modelState.model,workspace:S.session.workspace,
+      model:_modelState.model,workspace:_uiModeMetadata.projectWorkspace||S.session.workspace,
       model_provider:_modelState.model_provider,
       profile:turnProfile,
+      session_mode:_isUiModeChatSession()?'ui_mode':undefined,
+      surface:_isUiModeChatSession()?'ui_mode':undefined,
+      ui_project_id:_uiModeMetadata.projectId||undefined,
+      ui_project_label:_uiModeMetadata.projectLabel||undefined,
+      ui_project_workspace:_uiModeMetadata.projectWorkspace||undefined,
+      ui_preview_path:_uiModeMetadata.previewPath||undefined,
+      ui_preview_url:_uiModeMetadata.previewUrl||undefined,
+      ui_preview_title:_uiModeMetadata.previewTitle||undefined,
       attachments:uploaded.length?uploaded:undefined
     })});
 
