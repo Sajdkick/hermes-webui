@@ -2143,6 +2143,29 @@ def get_effective_default_model(config_data: dict | None = None) -> str:
 VALID_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
 
 
+def normalize_reasoning_effort_value(effort, *, allow_default: bool = False) -> str:
+    """Validate and normalize a reasoning-effort value.
+
+    Returns ``""`` only when ``allow_default`` is true and the caller asks to
+    inherit the profile/default setting. Raises ``ValueError`` for invalid
+    mutating values so API routes can return 400 instead of silently falling
+    back to an unexpected level.
+    """
+    raw = str(effort or "").strip().lower()
+    if raw in {"default", "inherit", "profile", "profile-default", "global"}:
+        raw = ""
+    if not raw:
+        if allow_default:
+            return ""
+        raise ValueError("effort is required")
+    if raw != "none" and raw not in VALID_REASONING_EFFORTS:
+        raise ValueError(
+            f"Unknown reasoning effort '{effort}'. "
+            f"Valid: default, none, {', '.join(VALID_REASONING_EFFORTS)}."
+        )
+    return raw
+
+
 def parse_reasoning_effort(effort):
     """Parse an effort level into the dict the agent expects.
 
@@ -2468,19 +2491,36 @@ def get_reasoning_status(
     model_id: str | None = None,
     provider_id: str | None = None,
     base_url: str | None = None,
+    session_effort: str | None = None,
 ) -> dict:
-    """Return current reasoning configuration from the active profile's
-    config.yaml — the same source of truth the CLI reads from.
+    """Return current reasoning configuration.
+
+    Profile display/effort values still come from the active profile's
+    ``config.yaml`` for CLI parity. ``session_effort`` optionally overlays a
+    WebUI session-local effort for the effective value returned to the browser.
 
     Keys:
       - show_reasoning: bool — from ``display.show_reasoning`` (default True)
-      - reasoning_effort: str — from ``agent.reasoning_effort`` ('' = default)
+      - reasoning_effort: str — effective session/profile effort ('' = default)
+      - profile_reasoning_effort: str — from ``agent.reasoning_effort``
+      - session_reasoning_effort: str — persisted session override, if any
+      - reasoning_scope: ``session`` when the effective effort is session-local,
+        otherwise ``profile``.
     """
     config_data = _load_yaml_config_file(_get_config_path())
     display_cfg = config_data.get("display") or {}
     agent_cfg = config_data.get("agent") or {}
     show_raw = display_cfg.get("show_reasoning") if isinstance(display_cfg, dict) else None
     effort_raw = agent_cfg.get("reasoning_effort") if isinstance(agent_cfg, dict) else None
+    profile_effort = str(effort_raw or "").strip().lower()
+    try:
+        session_effort_norm = normalize_reasoning_effort_value(
+            session_effort,
+            allow_default=True,
+        )
+    except ValueError:
+        session_effort_norm = ""
+    effective_effort = session_effort_norm or profile_effort
 
     resolve_model = model_id
     resolve_provider = provider_id
@@ -2492,7 +2532,7 @@ def get_reasoning_status(
             if not resolve_provider and model_cfg.get("provider"):
                 resolve_provider = str(model_cfg["provider"]).strip()
             if not resolve_base_url and model_cfg.get("base_url"):
-                resolve_base_url = str(model_cfg["base_url"]).strip()
+                resolve_base_url = str(model_cfg.get("base_url") or "").strip()
 
     supported_efforts = resolve_model_reasoning_efforts(
         resolve_model,
@@ -2502,7 +2542,10 @@ def get_reasoning_status(
     return {
         # Match CLI default (True if unset in config.yaml)
         "show_reasoning": bool(show_raw) if isinstance(show_raw, bool) else True,
-        "reasoning_effort": str(effort_raw or "").strip().lower(),
+        "reasoning_effort": effective_effort,
+        "profile_reasoning_effort": profile_effort,
+        "session_reasoning_effort": session_effort_norm,
+        "reasoning_scope": "session" if session_effort_norm else "profile",
         "supported_efforts": supported_efforts,
         "supports_reasoning_effort": bool(supported_efforts),
     }
@@ -2535,14 +2578,7 @@ def set_reasoning_effort(effort: str) -> dict:
     (``none`` | ``minimal`` | ``low`` | ``medium`` | ``high`` | ``xhigh``).
     Raises ``ValueError`` on an unrecognised level so callers can return 400.
     """
-    raw = str(effort or "").strip().lower()
-    if not raw:
-        raise ValueError("effort is required")
-    if raw != "none" and raw not in VALID_REASONING_EFFORTS:
-        raise ValueError(
-            f"Unknown reasoning effort '{effort}'. "
-            f"Valid: none, {', '.join(VALID_REASONING_EFFORTS)}."
-        )
+    raw = normalize_reasoning_effort_value(effort)
     config_path = _get_config_path()
     with _cfg_lock:
         config_data = _load_yaml_config_file(config_path)

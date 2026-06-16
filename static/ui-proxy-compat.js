@@ -333,6 +333,82 @@
     postParent('hermes-ui-inspector-state',{enabled:!!inspectorEnabled,selectionCount:inspectorSelectedTargets.length});
   }
 
+  var previewPatches=[];
+  var previewPatchTimer=null;
+  var applyingPreviewPatches=false;
+
+  function restorePreviewPatchedElements(){
+    document.querySelectorAll('[data-hermes-ui-preview-patch]').forEach(function(el){
+      var oldDisplay=el.getAttribute('data-hermes-ui-preview-patch-display');
+      if(oldDisplay===null)oldDisplay='';
+      try{el.style.display=oldDisplay;}catch(_){/* best effort */}
+      el.removeAttribute('data-hermes-ui-preview-patch');
+      el.removeAttribute('data-hermes-ui-preview-patch-display');
+    });
+  }
+
+  function patchElementMatchesDescriptor(el,descriptor){
+    if(!el||!descriptor)return false;
+    var expectedText=normalizedText(descriptor.text||'',220).toLowerCase();
+    if(expectedText){
+      var actualText=normalizedText((el.innerText)||(el.textContent)||'',220).toLowerCase();
+      if(actualText&&actualText.indexOf(expectedText)<0&&expectedText.indexOf(actualText)<0)return false;
+    }
+    var expectedTag=String(descriptor.tag||'').toLowerCase();
+    if(expectedTag&&String(el.tagName||'').toLowerCase()!==expectedTag)return false;
+    return true;
+  }
+
+  function hidePreviewPatchElement(el,patchId){
+    if(!el||el.nodeType!==1)return false;
+    if(!el.hasAttribute('data-hermes-ui-preview-patch-display')){
+      el.setAttribute('data-hermes-ui-preview-patch-display',el.style&&el.style.display||'');
+    }
+    el.setAttribute('data-hermes-ui-preview-patch',String(patchId||'preview'));
+    try{el.style.display='none';}catch(_){return false;}
+    return true;
+  }
+
+  function applyPreviewPatches(){
+    if(applyingPreviewPatches)return;
+    applyingPreviewPatches=true;
+    var applied=0;
+    try{
+      restorePreviewPatchedElements();
+      previewPatches.forEach(function(patch){
+        if(!patch||String(patch.action||patch.operation||'hide')!=='hide')return;
+        var elements=Array.isArray(patch.elements)?patch.elements:[];
+        elements.forEach(function(descriptor){
+          var selector=String(descriptor&&descriptor.selector||'').trim();
+          if(!selector)return;
+          var matches=[];
+          try{matches=Array.prototype.slice.call(document.querySelectorAll(selector));}catch(_){matches=[];}
+          matches.forEach(function(el){
+            if(patchElementMatchesDescriptor(el,descriptor)&&hidePreviewPatchElement(el,patch.id))applied++;
+          });
+        });
+      });
+    }finally{
+      applyingPreviewPatches=false;
+    }
+    postParent('hermes-ui-preview-patches-applied',{count:applied,patchCount:previewPatches.length});
+  }
+
+  function scheduleApplyPreviewPatches(){
+    if(!previewPatches.length)return;
+    if(previewPatchTimer)clearTimeout(previewPatchTimer);
+    previewPatchTimer=setTimeout(function(){previewPatchTimer=null;applyPreviewPatches();},40);
+  }
+
+  function setPreviewPatches(patches){
+    previewPatches=Array.isArray(patches)?patches.filter(Boolean):[];
+    if(previewPatches.length)applyPreviewPatches();
+    else{
+      restorePreviewPatchedElements();
+      postParent('hermes-ui-preview-patches-applied',{count:0,patchCount:0});
+    }
+  }
+
   function clearInspectorSelections(){
     inspectorSelectedTargets=[];
     hideSelectedOverlays();
@@ -401,6 +477,8 @@
     if(data.type==='hermes-ui-inspector-toggle')setInspectorEnabled(!!data.enabled);
     else if(data.type==='hermes-ui-clear-highlights')clearInspectorSelections();
     else if(data.type==='hermes-ui-request-context')emitPageContext('request');
+    else if(data.type==='hermes-ui-preview-apply-patches')setPreviewPatches(data.patches||[]);
+    else if(data.type==='hermes-ui-preview-clear-patches')setPreviewPatches([]);
   });
 
   window.addEventListener('popstate',function(){schedulePageContext('popstate');});
@@ -413,6 +491,7 @@
     if(titleEl){
       try{new MutationObserver(function(){schedulePageContext('title');}).observe(titleEl,{childList:true,characterData:true,subtree:true});}catch(_){/* best effort */}
     }
+    try{new MutationObserver(function(){scheduleApplyPreviewPatches();}).observe(document.documentElement,{childList:true,subtree:true});}catch(_){/* best effort */}
   }
 
   if(window.XMLHttpRequest&&typeof window.XMLHttpRequest.prototype.open==='function'){

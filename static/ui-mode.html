@@ -114,8 +114,10 @@
     }
     .pane-heading{min-width:0;display:flex;align-items:baseline;gap:10px;flex:1}
     .pane-title{font-weight:700;white-space:nowrap}
-    .pane-actions{display:flex;align-items:center;gap:8px}
+    .pane-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
     .chat-preview-actions{flex:1;justify-content:flex-start}
+    .preview-patch-status{font-size:12px;color:#bae6fd;border:1px solid rgba(56,189,248,.35);border-radius:999px;padding:5px 8px;background:rgba(14,116,144,.24);white-space:nowrap}
+    .preview-patch-status[hidden]{display:none}
     .pane-body{min-height:0;position:relative;background:var(--panel-2)}
     iframe{width:100%;height:100%;border:0;background:white}
     .app.inspect-active .preview-pane{border-color:rgba(56,189,248,.7)}
@@ -205,6 +207,7 @@
         <button class="danger" data-action="stop" type="button">Stop</button>
         <button data-action="refresh" type="button">Refresh status</button>
         <button class="ghost" data-action="toggle-logs" type="button">Logs</button>
+        <button class="ghost danger" data-action="reset-chat" type="button">Reset chat</button>
         <button class="ghost" data-action="toggle-chat" data-chat-toggle type="button" aria-expanded="true">Hide chat</button>
         <button class="ghost" data-action="toggle-chrome" data-chrome-toggle type="button" aria-expanded="true">Hide controls</button>
         <button class="ghost" data-action="focus-preview" type="button">Focus preview</button>
@@ -224,6 +227,9 @@
             <button class="small-button ghost" data-action="toggle-inspect" data-inspect-toggle type="button" aria-pressed="false">Highlight</button>
             <button class="small-button ghost" data-action="clear-highlights" data-highlight-clear type="button" disabled>Clear highlights</button>
             <button class="small-button" data-action="reload-preview" type="button">Reload</button>
+            <span class="preview-patch-status" data-preview-patch-status hidden>0 preview patches</span>
+            <button class="small-button" data-action="apply-preview-patches" data-preview-patch-apply type="button" disabled>Apply to source</button>
+            <button class="small-button ghost danger" data-action="discard-preview-patches" data-preview-patch-discard type="button" disabled>Discard</button>
           </div>
           <div class="pane-actions"><button class="small-button ghost" data-action="toggle-chat" data-chat-toggle type="button" aria-expanded="true">Hide chat</button></div>
         </div>

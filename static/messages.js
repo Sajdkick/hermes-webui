@@ -381,6 +381,94 @@ function applySessionTitleUpdate(sid, titleText, options={}){
 
 let _uiModeContextText='';
 
+function _uiModeStripPreviewPatchDirectives(text){
+  if(typeof window!=='undefined'&&typeof window._stripUiModePreviewPatchDirectives==='function'){
+    return window._stripUiModePreviewPatchDirectives(text);
+  }
+  return String(text||'')
+    .replace(/<!--\s*hermes-ui-preview-patch[\s\S]*?-->/gi,'')
+    .replace(/```hermes-ui-preview-patch[\s\S]*?```/gi,'')
+    .trim();
+}
+
+function _uiModeParsePreviewPatchPayload(raw){
+  let text=String(raw||'').trim();
+  if(!text)return null;
+  if(text.charAt(0)===':')text=text.slice(1).trim();
+  try{
+    const parsed=JSON.parse(text);
+    if(Array.isArray(parsed))return {actions:parsed};
+    return parsed&&typeof parsed==='object'?parsed:null;
+  }catch(_){return null;}
+}
+
+function _uiModePreviewPatchDirectivesFromText(text){
+  const raw=String(text||'');
+  const directives=[];
+  const patterns=[
+    /<!--\s*hermes-ui-preview-patch\s*([\s\S]*?)-->/gi,
+    /```hermes-ui-preview-patch\s*([\s\S]*?)```/gi,
+  ];
+  for(const pattern of patterns){
+    let match;
+    while((match=pattern.exec(raw))){
+      const directive=_uiModeParsePreviewPatchPayload(match[1]||'');
+      if(directive)directives.push(directive);
+    }
+  }
+  return directives.slice(0,8);
+}
+
+function _uiModeRawMessageText(message){
+  if(!message)return '';
+  const content=message.content;
+  if(Array.isArray(content)){
+    return content.filter(part=>part&&part.type==='text').map(part=>part.text||'').join('\n');
+  }
+  return String(content||'');
+}
+
+function _uiModeDispatchPreviewPatchDirectives(text){
+  if(!_isUiModeChatSession())return false;
+  if(!window.parent||window.parent===window)return false;
+  const directives=_uiModePreviewPatchDirectivesFromText(text);
+  if(!directives.length)return false;
+  const visible=_uiModeStripPreviewPatchDirectives(text).slice(0,500);
+  directives.forEach((directive)=>{
+    try{
+      window.parent.postMessage({
+        hermesUiMode:1,
+        type:'hermes-ui-preview-patch-request',
+        directive,
+        assistantText:visible,
+      },window.location.origin);
+    }catch(_){}
+  });
+  return true;
+}
+
+function _uiModeSetComposerText(text){
+  const value=String(text||'').trim();
+  const composer=$('msg');
+  if(!value||!composer)return false;
+  composer.value=value;
+  composer.focus();
+  composer.dispatchEvent(new Event('input',{bubbles:true}));
+  if(typeof autoResize==='function')autoResize();
+  if(typeof updateSendBtn==='function')updateSendBtn();
+  return true;
+}
+
+function _uiModeSendShellText(text){
+  if(!_isUiModeChatSession())return false;
+  if(!_uiModeSetComposerText(text))return false;
+  if(typeof send==='function'){
+    send();
+    return true;
+  }
+  return false;
+}
+
 function _normalizeUiModeContextText(value){
   const text=String(value||'').replace(/\r\n?/g,'\n').trim();
   if(!text)return '';
@@ -408,13 +496,29 @@ function _uiModeFallbackContextText(){
   const previewTitle=_uiModeParam(params,'uiPreviewTitle','ui_preview_title');
   const previewUrl=_uiModeParam(params,'uiPreviewUrl','ui_preview_url');
   const projectWorkspace=_uiModeParam(params,'uiProjectWorkspace','ui_project_workspace','ui_project_source_workspace');
+  const fastWorkspace=_uiModeParam(params,'uiFastWorkspace','ui_fast_workspace','ui_session_workspace');
+  const contextPath=_uiModeParam(params,'uiContextPath','ui_context_path');
   const workflowSource=_uiModeParam(params,'uiWorkflowSource','ui_workflow_source');
+  const iterationMode=_uiModeParam(params,'uiIterationMode','ui_iteration_mode');
   const statusSummary=_uiModeParam(params,'uiStatusSummary','ui_status_summary');
+  const buildCommand=_uiModeParam(params,'uiBuildCommand','ui_build_command');
+  const runtimeCommand=_uiModeParam(params,'uiRuntimeCommand','ui_runtime_command');
+  const buildPolicy=_uiModeParam(params,'uiBuildPolicy','ui_build_policy')||'explicit-user-approval';
+  const parityAvailable=_uiModeParam(params,'uiParityAvailable','ui_parity_available');
+  const parityWorkflowSource=_uiModeParam(params,'uiParityWorkflowSource','ui_parity_workflow_source');
+  const parityConfigPath=_uiModeParam(params,'uiParityConfigPath','ui_parity_config_path');
   const lines=['[UI Mode context]','Mode: UI Mode live preview',`Project: ${projectLabel}`];
   if(projectId)lines.push(`Project ID: ${projectId}`);
   if(projectWorkspace)lines.push(`Project source workspace: ${projectWorkspace}`);
+  if(fastWorkspace)lines.push(`UI Mode fast workspace: ${fastWorkspace}`);
+  if(contextPath)lines.push(`UI Mode context file: ${contextPath}`);
   if(workflowSource)lines.push(`Runtime workflow source: ${workflowSource}`);
+  if(iterationMode)lines.push(`Runtime iteration mode: ${iterationMode}`);
+  if(parityAvailable)lines.push(`Play parity available: ${parityWorkflowSource||'play-config'}${parityConfigPath?` at ${parityConfigPath}`:''}`);
   if(statusSummary)lines.push(`Runtime status: ${statusSummary}`);
+  if(buildCommand)lines.push(`Runtime build command: ${buildCommand}`);
+  if(runtimeCommand)lines.push(`Runtime start command: ${runtimeCommand}`);
+  lines.push(`Runtime build policy: ${buildPolicy} — full deploy/static/production builds are explicit user-approval only for routine UI-only edits; stop after source/test verification and offer Rebuild preview now / Leave source-only / Temporary preview patch.`);
   lines.push(`Current page path: ${previewPath}`);
   if(previewTitle)lines.push(`Current page title: ${previewTitle}`);
   if(previewUrl)lines.push(`Preview URL: ${previewUrl}`);
@@ -438,10 +542,17 @@ function _uiModeTurnMetadata(){
     previewUrl:_uiModeParam(params,'uiPreviewUrl','ui_preview_url'),
     previewTitle:_uiModeParam(params,'uiPreviewTitle','ui_preview_title'),
     projectWorkspace:_uiModeParam(params,'uiProjectWorkspace','ui_project_workspace','ui_project_source_workspace'),
+    fastWorkspace:_uiModeParam(params,'uiFastWorkspace','ui_fast_workspace','ui_session_workspace'),
+    contextPath:_uiModeParam(params,'uiContextPath','ui_context_path'),
     workflowSource:_uiModeParam(params,'uiWorkflowSource','ui_workflow_source'),
+    iterationMode:_uiModeParam(params,'uiIterationMode','ui_iteration_mode'),
     statusSummary:_uiModeParam(params,'uiStatusSummary','ui_status_summary'),
-    buildCommand:'',
-    runtimeCommand:''
+    buildCommand:_uiModeParam(params,'uiBuildCommand','ui_build_command'),
+    runtimeCommand:_uiModeParam(params,'uiRuntimeCommand','ui_runtime_command'),
+    buildPolicy:_uiModeParam(params,'uiBuildPolicy','ui_build_policy')||'explicit-user-approval',
+    parityAvailable:_uiModeParam(params,'uiParityAvailable','ui_parity_available'),
+    parityWorkflowSource:_uiModeParam(params,'uiParityWorkflowSource','ui_parity_workflow_source'),
+    parityConfigPath:_uiModeParam(params,'uiParityConfigPath','ui_parity_config_path')
   };
   if(liveContext){
     for(const rawLine of liveContext.split('\n')){
@@ -454,10 +565,20 @@ function _uiModeTurnMetadata(){
       if(key==='project'&&!metadata.projectLabel)metadata.projectLabel=value;
       else if(key==='project id'&&!metadata.projectId)metadata.projectId=value;
       else if((key==='project source workspace'||key==='ui mode project source workspace')&&!metadata.projectWorkspace)metadata.projectWorkspace=value;
+      else if((key==='ui mode fast workspace'||key==='fast workspace'||key==='ui fast workspace')&&!metadata.fastWorkspace)metadata.fastWorkspace=value;
+      else if((key==='ui mode context file'||key==='ui context file'||key==='context file')&&!metadata.contextPath)metadata.contextPath=value;
       else if(key==='runtime workflow source'||key==='ui mode runtime workflow source')metadata.workflowSource=value;
+      else if(key==='runtime iteration mode'||key==='ui mode iteration mode')metadata.iterationMode=value;
+      else if(key==='play parity available'||key==='ui mode play parity available'){
+        metadata.parityAvailable='true';
+        const parts=value.split(' at ');
+        if(parts[0]&&!metadata.parityWorkflowSource)metadata.parityWorkflowSource=parts[0].trim();
+        if(parts.length>1&&!metadata.parityConfigPath)metadata.parityConfigPath=parts.slice(1).join(' at ').trim();
+      }
       else if(key==='runtime status'||key==='ui mode runtime status')metadata.statusSummary=value;
       else if(key==='runtime build command'||key==='ui mode build command')metadata.buildCommand=value;
       else if(key==='runtime start command'||key==='runtime command'||key==='ui mode runtime command')metadata.runtimeCommand=value;
+      else if(key==='runtime build policy'||key==='ui mode build policy')metadata.buildPolicy=value;
       else if(key==='current page path')metadata.previewPath=value;
       else if(key==='preview url')metadata.previewUrl=value;
       else if(key==='current page title')metadata.previewTitle=value;
@@ -507,6 +628,11 @@ window.addEventListener('message', event=>{
     if(context){
       _uiModeContextText=context;
       _appendUiModeContextToComposer(context);
+    }
+  }else if(data.type==='hermes-ui-mode-send-text'){
+    const text=String(data.text||data.message||'').trim();
+    if(text){
+      _uiModeSendShellText(text);
     }
   }
 });
@@ -788,7 +914,7 @@ async function send(){
       session_id:activeSid,message:msgText,
       // S.session.model remains authoritative; the helper only resolves a
       // matching provider fallback for the same outgoing model.
-      model:_modelState.model,workspace:_uiModeMetadata.projectWorkspace||S.session.workspace,
+      model:_modelState.model,workspace:_uiModeMetadata.fastWorkspace||_uiModeMetadata.projectWorkspace||S.session.workspace,
       model_provider:_modelState.model_provider,
       profile:turnProfile,
       session_mode:_isUiModeChatSession()?'ui_mode':undefined,
@@ -796,13 +922,20 @@ async function send(){
       ui_project_id:_uiModeMetadata.projectId||undefined,
       ui_project_label:_uiModeMetadata.projectLabel||undefined,
       ui_project_workspace:_uiModeMetadata.projectWorkspace||undefined,
+      ui_fast_workspace:_uiModeMetadata.fastWorkspace||undefined,
+      ui_context_path:_uiModeMetadata.contextPath||undefined,
       ui_preview_path:_uiModeMetadata.previewPath||undefined,
       ui_preview_url:_uiModeMetadata.previewUrl||undefined,
       ui_preview_title:_uiModeMetadata.previewTitle||undefined,
       ui_workflow_source:_uiModeMetadata.workflowSource||undefined,
+      ui_iteration_mode:_uiModeMetadata.iterationMode||undefined,
       ui_status_summary:_uiModeMetadata.statusSummary||undefined,
       ui_build_command:_uiModeMetadata.buildCommand||undefined,
       ui_runtime_command:_uiModeMetadata.runtimeCommand||undefined,
+      ui_build_policy:_uiModeMetadata.buildPolicy||undefined,
+      ui_parity_available:_uiModeMetadata.parityAvailable||undefined,
+      ui_parity_workflow_source:_uiModeMetadata.parityWorkflowSource||undefined,
+      ui_parity_config_path:_uiModeMetadata.parityConfigPath||undefined,
       attachments:uploaded.length?uploaded:undefined
     })});
 
@@ -1491,7 +1624,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
     return s.trim();
   }
   function _streamDisplay(){
-    const raw=_stripXmlToolCalls(assistantText);
+    const raw=_uiModeStripPreviewPatchDirectives(_stripXmlToolCalls(assistantText));
     // Always run think-block stripping even when reasoningText is populated.
     // Some providers emit reasoning content via on_reasoning AND wrap it in
     // <think> tags in the token stream — the early-return caused the thinking
@@ -1516,7 +1649,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
     return raw;
   }
   function _parseStreamState(){
-    const raw=_stripXmlToolCalls(assistantText);
+    const raw=_uiModeStripPreviewPatchDirectives(_stripXmlToolCalls(assistantText));
     if(reasoningText){
       return {thinkingText:liveReasoningText, displayText:_streamDisplay(), inThinking:false};
     }
@@ -2499,6 +2632,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
           }
           // Stamp _ts on the last assistant message if it has no timestamp
           if(lastAsst&&!lastAsst._ts&&!lastAsst.timestamp) lastAsst._ts=Date.now()/1000;
+          if(lastAsst) _uiModeDispatchPreviewPatchDirectives(_uiModeRawMessageText(lastAsst)||assistantText);
           if(d.usage){
             S.lastUsage=d.usage;_syncCtxIndicator(d.usage);
             // #503 — compute per-turn cost delta and attach to last assistant message

@@ -5364,7 +5364,10 @@ function _restoreOptimisticSessionRemoval(snapshot){
   if(!snapshot)return;
   _allSessions=Array.isArray(snapshot.previousSessions)?snapshot.previousSessions:[];
   _contentSearchResults=Array.isArray(snapshot.previousContentResults)?snapshot.previousContentResults:[];
-  if(snapshot.previousSelected instanceof Set)_selectedSessions=snapshot.previousSelected;
+  if(snapshot.previousSelected instanceof Set){
+    _selectedSessions.clear();
+    snapshot.previousSelected.forEach(sid=>_selectedSessions.add(sid));
+  }
   renderSessionListFromCache();
 }
 

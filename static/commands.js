@@ -29,7 +29,7 @@ const COMMANDS=[
   {name:'background',desc:t('cmd_background'),fn:cmdBackground,arg:'prompt',  noEcho:true},
   {name:'status',    desc:t('cmd_status'),   fn:cmdStatus},
   {name:'voice',     desc:t('cmd_voice'),    fn:cmdVoice,     noEcho:true},
-  {name:'reasoning', desc:t('cmd_reasoning'), fn:cmdReasoning, arg:'show|hide|none|minimal|low|medium|high|xhigh|max', subArgs:['show','hide','none','minimal','low','medium','high','xhigh','max'], noEcho:true},
+  {name:'reasoning', desc:t('cmd_reasoning'), fn:cmdReasoning, arg:'show|hide|default|none|minimal|low|medium|high|xhigh|max|profile <level>', subArgs:['show','hide','default','none','minimal','low','medium','high','xhigh','max','profile','global'], noEcho:true},
   {name:'yolo', desc:t('cmd_yolo'), fn:cmdYolo, noEcho:true},
   {name:'branch', desc:t('cmd_branch'), fn:cmdBranch, arg:'[name]', noEcho:true},
   // Targeted /goal bridge for this fork. Remove once upstream Hermes WebUI ships native /goal support.
@@ -1300,19 +1300,41 @@ function cmdStatus(){
   renderMessages();
 }
 function cmdReasoning(args){
-  const arg=(args||'').trim().toLowerCase();
+  const raw=(args||'').trim();
+  const arg=raw.toLowerCase();
   const BRAIN='\uD83E\uDDE0';
-  // Matches hermes_constants.VALID_REASONING_EFFORTS + 'none' (CLI parity).
-  const EFFORTS=['none','minimal','low','medium','high','xhigh','max'];
+  // Matches hermes_constants.VALID_REASONING_EFFORTS + 'none' (CLI parity),
+  // plus 'default' to clear a WebUI session-local override.
+  const EFFORTS=['default','none','minimal','low','medium','high','xhigh','max'];
+  const SCOPE_WORDS=['session','this','profile','global','all'];
+  function _effLabel(eff){
+    const value=String(eff||'').trim().toLowerCase();
+    if(!value) return 'default';
+    return value;
+  }
   // Shared status renderer used by the no-args branch and as a fallback.
   function _fmtStatus(st){
     const vis=(st && st.show_reasoning===false)?'off':'on';
     const eff=(st && st.reasoning_effort)||'default';
-    return BRAIN+' Reasoning effort: '+eff+' \u00B7 display: '+vis
-      +'  |  /reasoning show|hide|none|minimal|low|medium|high|xhigh|max';
+    const sessionEff=(st && st.session_reasoning_effort)||'';
+    const profileEff=(st && st.profile_reasoning_effort)||'default';
+    const scope=sessionEff?'this session':'profile default';
+    return BRAIN+' Reasoning effort: '+_effLabel(eff)+' ('+scope+') · profile: '+_effLabel(profileEff)+' · display: '+vis
+      +'  |  /reasoning show|hide|default|none|minimal|low|medium|high|xhigh|max|profile <level>';
+  }
+  function _payloadForEffort(effort, scope){
+    if(typeof _reasoningMutationPayload==='function') return _reasoningMutationPayload(effort, scope);
+    const payload={effort:effort};
+    const sid=S&&S.session&&S.session.session_id;
+    if(sid&&scope!=='profile'&&scope!=='global'&&scope!=='all'){
+      payload.session_id=sid;
+      payload.scope='session';
+    }else if(scope){
+      payload.scope=(scope==='global'||scope==='all')?'profile':scope;
+    }
+    return payload;
   }
   if(!arg){
-    // Status — read from the same config.yaml keys the CLI uses.
     const q=(typeof _reasoningEffortQuery==='function')?_reasoningEffortQuery():'';
     api('/api/reasoning'+q).then(function(st){showToast(_fmtStatus(st));})
       .catch(function(){showToast(BRAIN+' /reasoning — status unavailable');});
@@ -1320,35 +1342,46 @@ function cmdReasoning(args){
   }
   if(arg==='show'||arg==='on'||arg==='hide'||arg==='off'){
     const on=(arg==='show'||arg==='on');
-    // Update the UI render gate immediately for responsiveness.
     window._showThinking=on;
     if(typeof renderMessages==='function') renderMessages();
-    // Persist via /api/reasoning → config.yaml display.show_reasoning
-    // (CLI reads the same key).  Also mirror into WebUI settings.json
-    // show_thinking so boot.js picks it up on reload without hitting
-    // /api/reasoning on every page load.
     api('/api/reasoning',{method:'POST',body:JSON.stringify({display:arg})}).catch(function(){});
     api('/api/settings',{method:'POST',body:JSON.stringify({show_thinking:on})}).catch(function(){});
     showToast(BRAIN+' Thinking blocks: '+(on?'on':'off')+' (saved)');
     return true;
   }
-  if(EFFORTS.includes(arg)){
-    // Persist via /api/reasoning → config.yaml agent.reasoning_effort.
-    // Takes effect on the NEXT session/turn (agent re-reads config at
-    // construction time), matching CLI semantics where `/reasoning high`
-    // also forces an agent re-init.
-    api('/api/reasoning',{method:'POST',body:JSON.stringify({effort:arg})})
+  const parts=arg.split(/\s+/).filter(Boolean);
+  let scope='session';
+  let effort=arg;
+  if(parts.length>1&&SCOPE_WORDS.includes(parts[0])){
+    scope=(parts[0]==='global'||parts[0]==='all')?'profile':parts[0];
+    if(scope==='this') scope='session';
+    effort=parts[1];
+  }
+  if(EFFORTS.includes(effort)){
+    if(scope==='profile'&&effort==='default'){
+      showToast(BRAIN+' Profile reasoning default must be a level or none; default only clears this session.');
+      return true;
+    }
+    const payload=_payloadForEffort(effort, scope);
+    api('/api/reasoning',{method:'POST',body:JSON.stringify(payload)})
       .then(function(st){
-        const eff=(st && st.reasoning_effort)||arg;
-        showToast(BRAIN+' Reasoning effort: '+eff+' (saved; applies to next turn)');
+        const eff=(st && st.reasoning_effort)||effort;
+        const sessionEff=(st && st.session_reasoning_effort)||'';
         if(typeof _applyReasoningChip==='function') _applyReasoningChip(eff, st||{});
+        if((st&&st.reasoning_scope)==='session'||sessionEff){
+          showToast(BRAIN+' Reasoning effort: '+_effLabel(sessionEff||eff)+' (this session; applies to next turn)');
+        }else if(effort==='default'){
+          showToast(BRAIN+' Reasoning effort uses profile default');
+        }else{
+          showToast(BRAIN+' Profile reasoning effort: '+_effLabel(eff)+' (saved; applies to next turn)');
+        }
       })
       .catch(function(e){
-        showToast(BRAIN+' Failed to set effort: '+(e && e.message ? e.message : arg));
+        showToast(BRAIN+' Failed to set effort: '+(e && e.message ? e.message : effort));
       });
     return true;
   }
-  showToast('Unknown argument: '+arg+' \u2014 use show|hide|'+EFFORTS.join('|'));
+  showToast('Unknown argument: '+arg+' \u2014 use show|hide|default|'+EFFORTS.filter(e=>e!=='default').join('|')+' or profile <level>');
   return true;
 }
 function cmdVoice(){

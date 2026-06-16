@@ -57,6 +57,9 @@ _PLAY_STOP_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/play/stop/?$")
 _UI_CONFIG_FILE_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/ui-config-file/?$")
 _UI_STATUS_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/ui/status/?$")
 _UI_LOGS_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/ui/logs/?$")
+_UI_SESSION_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/ui/session/?$")
+_UI_SESSION_RESET_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/ui/session/reset/?$")
+_UI_SESSION_PRUNE_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/ui/session/prune/?$")
 _UI_START_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/ui/start/?$")
 _UI_RESTART_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/ui/restart/?$")
 _UI_STOP_RE = re.compile(rf"^/api/core/projects/{_PROJECT_ID}/ui/stop/?$")
@@ -175,6 +178,10 @@ def handle_get(handler, parsed) -> bool:
         match = _UI_LOGS_RE.match(parsed.path)
         if match:
             j(handler, core_ui.build_project_ui_logs(unquote(match.group(1)), _q(parsed, "limit", "")))
+            return True
+        match = _UI_SESSION_RE.match(parsed.path)
+        if match:
+            j(handler, core_ui.get_project_ui_session(unquote(match.group(1))))
             return True
         if _DEPLOYMENT_PROVIDERS_RE.match(parsed.path):
             j(handler, core_deployments.provider_registry())
@@ -357,6 +364,14 @@ def handle_post(handler, parsed, body: dict) -> bool:
             project_id = unquote(match.group(1))
             status = core_ui.stop_project_ui_runtime(project_id) or core_ui.build_project_ui_status(project_id)
             j(handler, {"ok": True, "stopped": True, "status": status, "message": "UI runtime stopped."})
+            return True
+        match = _UI_SESSION_RESET_RE.match(parsed.path)
+        if match:
+            j(handler, core_ui.reset_project_ui_session(unquote(match.group(1)), body))
+            return True
+        match = _UI_SESSION_PRUNE_RE.match(parsed.path)
+        if match:
+            j(handler, core_ui.prune_project_ui_sessions(unquote(match.group(1)), body))
             return True
         match = _PROJECT_DEPLOYMENT_RE.match(parsed.path)
         if match:

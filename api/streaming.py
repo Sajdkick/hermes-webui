@@ -268,10 +268,13 @@ UI Mode session guidance:
 - This session is attached to a live project preview in the Hermes WebUI UI Mode surface.
 - If the user asks what is happening or where you are, explicitly mention that this is UI Mode and name the UI Mode project when project metadata is present.
 - Fast path for UI edits: use the UI Mode project source workspace as the working directory; do not begin by searching task-metadata folders, generated bundles, or unrelated workspaces when that source workspace is available.
-- Start from the current page path, runtime workflow metadata, and all selected/highlighted-element descriptors. Use targeted source searches for nearby labels/selectors/components before broad repository scans.
+- Start from the current page path, runtime workflow metadata, the actual preview DOM context, and all selected/highlighted-element descriptors. Use targeted source searches for nearby labels/selectors/components before broad repository scans.
 - Prefer editing source files that the live preview can hot-reload. Do not run production builds, regenerate bundles, or restart/rebuild a hot-reloadable dev-server preview for routine UI/source edits.
-- If UI Mode context or status says the runtime workflow source is `play-config`, treat the preview as Play-sourced built output rather than a hot-reloading source server. Iframe reload does not rebuild; it can only show updates after the relevant served artifacts on disk have changed. If source changed but the preview is stale, compare source vs built output, run the configured build when required, restart only when the runtime/server bundle or process state requires it, then verify the actual preview DOM before reporting success.
-- Verify with the cheapest reliable check first: syntax/source assertions and focused tests for the touched component. Before claiming a UI removal/change is done, also confirm the served preview or DOM reflects it whenever the runtime serves built output.
+- Build policy hard stop for routine UI-only edits: full deploy/static/production builds are explicit-user-approval only. Do not run configured deploy/build scripts, `npm/pnpm/yarn build`, or artifact regeneration merely because a Play/static-build preview will not show the source edit yet. Stop after source assertions/focused tests/cheap checks and offer the user: **Rebuild preview now**, **Leave source-only**, or **Create/apply a temporary preview patch**. Only run the build after the current user explicitly asks for that build or approves that offered option in this turn.
+- If UI Mode context or status says the runtime workflow source is `play-config`, treat the preview as Play-sourced built output rather than a hot-reloading source server, but still follow the explicit-user-approval build policy. Iframe reload does not rebuild; it can only show updates after the relevant served artifacts on disk have changed. Do not make those artifacts current automatically for routine UI-only edits.
+- Verify with the cheapest reliable check first: syntax/source assertions and focused tests for the touched component. For routine UI-only source edits, do not run deploy/build scripts as a default "done" step; report source/test verification quickly and say whether live-preview visibility still needs an explicit rebuild. Before claiming a UI removal/change is visible in a built-output preview, confirm the served preview or DOM reflects it.
+- If the user explicitly asks for a quick visual scratch edit to highlighted/selected elements, you may request a temporary live-preview patch instead of editing source first. Emit exactly one hidden directive at the end of the assistant message, e.g. `<!-- hermes-ui-preview-patch {"action":"hide-selected","reason":"remove the selected buttons as a scratch preview"} -->`. This only changes the iframe preview and records a pending patch journal; tell the user it is temporary and use Apply to source/migrate-to-source before claiming durability.
+- Do not use preview patches for durable implementation, non-selected broad changes, data/model/API behavior, or anything requiring source truth. For accepted preview patches, migrate the journal back into source files, verify normally, and then ask the user to discard the scratch patch if the live source now matches.
 - If selected elements are present, treat them as authoritative UI context from the live preview; do not dismiss the selection just because the visible user message is short.
 - When a rebuild, restart, or manual refresh is genuinely required, say so clearly and keep the next step actionable.
 - Preserve the UI Mode shell/preview workflow; do not ask the user to leave UI Mode unless the task cannot be completed from the live preview context.
@@ -321,9 +324,14 @@ def _webui_surface_context_prompt(surface_context: Optional[dict]) -> str:
         ("ui_preview_path", "UI Mode current page path"),
         ("ui_preview_title", "UI Mode current page title"),
         ("ui_workflow_source", "UI Mode runtime workflow source"),
+        ("ui_iteration_mode", "UI Mode iteration mode"),
         ("ui_status_summary", "UI Mode runtime status"),
         ("ui_build_command", "UI Mode build command"),
         ("ui_runtime_command", "UI Mode runtime command"),
+        ("ui_build_policy", "UI Mode build policy"),
+        ("ui_parity_available", "UI Mode Play parity available"),
+        ("ui_parity_workflow_source", "UI Mode Play parity workflow source"),
+        ("ui_parity_config_path", "UI Mode Play parity config path"),
     )
     for key, label in fields:
         raw = surface_context.get(key)
@@ -5650,13 +5658,15 @@ def _run_agent_streaming(
             except Exception:
                 _max_tokens_cfg = None
 
-            # CLI-parity reasoning effort: read agent.reasoning_effort from the
-            # active profile's config.yaml (the same key the CLI writes via
-            # `/reasoning <level>`) and hand the parsed dict to AIAgent.  When
-            # the key is absent or invalid, pass None → agent uses its default.
+            # CLI-parity reasoning effort with WebUI session override. The
+            # profile default comes from agent.reasoning_effort, but a WebUI
+            # session may persist its own override so changing one chat does not
+            # affect all other sessions in the same profile.
             try:
                 _effort_cfg = _cfg.get('agent', {}) if isinstance(_cfg, dict) else {}
-                _effort_raw = _effort_cfg.get('reasoning_effort') if isinstance(_effort_cfg, dict) else None
+                _profile_effort_raw = _effort_cfg.get('reasoning_effort') if isinstance(_effort_cfg, dict) else None
+                _session_effort_raw = getattr(s, 'reasoning_effort', None)
+                _effort_raw = _session_effort_raw or _profile_effort_raw
                 _effort = coerce_reasoning_effort_for_model(
                     _effort_raw,
                     resolved_model,
@@ -5972,9 +5982,14 @@ def _run_agent_streaming(
                     'ui_preview_path': getattr(s, 'ui_preview_path', None),
                     'ui_preview_title': getattr(s, 'ui_preview_title', None),
                     'ui_workflow_source': getattr(s, 'ui_workflow_source', None),
+                    'ui_iteration_mode': getattr(s, 'ui_iteration_mode', None),
                     'ui_status_summary': getattr(s, 'ui_status_summary', None),
                     'ui_build_command': getattr(s, 'ui_build_command', None),
                     'ui_runtime_command': getattr(s, 'ui_runtime_command', None),
+                    'ui_build_policy': getattr(s, 'ui_build_policy', None) or ('explicit-user-approval' if str(getattr(s, 'session_mode', '') or '').lower().replace('-', '_') == 'ui_mode' else None),
+                    'ui_parity_available': getattr(s, 'ui_parity_available', None),
+                    'ui_parity_workflow_source': getattr(s, 'ui_parity_workflow_source', None),
+                    'ui_parity_config_path': getattr(s, 'ui_parity_config_path', None),
                 },
                 config_data=_cfg,
             )

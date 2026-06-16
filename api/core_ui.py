@@ -14,6 +14,7 @@ import html
 import json
 import os
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -34,7 +35,9 @@ from api.updates import WEBUI_VERSION
 
 UI_CONFIG_FILE_NAMES = (".hermes/ui.json", ".cloud-terminal/ui.json", "project_ui.json")
 AUTO_DETECTED_SOURCE_KEY = "__uiAutoSource"
+AUTO_DETECTED_PARITY_SOURCE_KEY = "__uiParitySource"
 UI_LOG_LINE_LIMIT = 1000
+UI_MODE_BUILD_POLICY = "explicit-user-approval"
 UI_READY_TIMEOUT_DEFAULT_MS = 60 * 1000
 UI_READY_PATTERN = re.compile(r"(ready|listening|started|compiled|server running|running at|local:)", re.I)
 UI_PROJECT_PROXY_BASE_PATH = "/ui-project"
@@ -65,6 +68,7 @@ _LOCK = threading.RLock()
 _BUILD_LOCK = threading.Lock()
 _RESERVED_PORTS: set[tuple[str, int]] = set()
 _RUNTIMES: dict[str, "UiRuntimeState"] = {}
+UI_SESSION_STATE_VERSION = 1
 
 
 @dataclass
@@ -82,6 +86,8 @@ class UiRuntimeState:
     config_branch: str | None = None
     config_auto_detected: bool = False
     config_auto_source: str | None = None
+    workflow_source: str | None = None
+    play_config_path: str | None = None
     started_at: str | None = None
     ready_at: str | None = None
     finished_at: str | None = None
@@ -129,6 +135,409 @@ def _project_branch(project: dict) -> str:
         return ops_projects.tasks_branch(project)
     except Exception:
         return str(project.get("coreBranch") or "main")
+
+
+def _safe_state_component(value: str) -> str:
+    text = str(value or "").strip()
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", text).strip(".-") or "project"
+    return f"{slug[:72]}-{uuid.uuid5(uuid.NAMESPACE_URL, text or 'project').hex[:8]}"
+
+
+def _ui_mode_state_root() -> Path:
+    from api import config as _config
+
+    return Path(_config.STATE_DIR).expanduser().resolve() / "ui-mode"
+
+
+def _ui_mode_project_state_dir(project_id: str) -> Path:
+    return _ui_mode_state_root() / "projects" / _safe_state_component(project_id)
+
+
+def _ui_mode_session_state_path(project_id: str) -> Path:
+    return _ui_mode_project_state_dir(project_id) / "session.json"
+
+
+def _ui_mode_project_workspaces_dir(project_id: str) -> Path:
+    return _ui_mode_state_root() / "workspaces" / _safe_state_component(project_id)
+
+
+def _ui_mode_fast_workspace(project_id: str, session_id: str) -> Path:
+    return _ui_mode_project_workspaces_dir(project_id) / _safe_state_component(session_id)
+
+
+def _load_ui_mode_session_state(project_id: str) -> dict:
+    path = _ui_mode_session_state_path(project_id)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        return {}
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    tmp.write_text(json.dumps(redact_payload(payload), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _write_ui_mode_session_state(project_id: str, payload: dict) -> None:
+    _write_json_atomic(_ui_mode_session_state_path(project_id), payload)
+
+
+def _current_ui_status_metadata(project_id: str) -> dict:
+    try:
+        status = build_project_ui_status(project_id)
+        return status if isinstance(status, dict) else {}
+    except Exception:
+        return {}
+
+
+def _ui_session_metadata(project_id: str, project: dict, status: dict | None = None) -> dict:
+    status = status if isinstance(status, dict) else {}
+    source_workspace = str(_project_path(project))
+    preview_url = str(status.get("previewUrl") or "").strip()
+    preview_path = str(status.get("previewPath") or status.get("inspectUrl") or "").strip()
+    return {
+        "ui_project_id": project_id,
+        "ui_project_label": _project_label(project),
+        "ui_project_workspace": source_workspace,
+        "ui_preview_path": preview_path,
+        "ui_preview_url": preview_url,
+        "ui_preview_title": str(status.get("previewTitle") or "").strip(),
+        "ui_workflow_source": str(status.get("workflowSource") or status.get("configSource") or "").strip(),
+        "ui_iteration_mode": str(status.get("iterationMode") or "").strip(),
+        "ui_status_summary": str(status.get("statusSummary") or status.get("summary") or "").strip(),
+        "ui_build_command": str(status.get("buildCommand") or "").strip(),
+        "ui_runtime_command": str(status.get("command") or "").strip(),
+        "ui_build_policy": UI_MODE_BUILD_POLICY,
+        "ui_parity_available": "true" if status.get("parityAvailable") is True else "",
+        "ui_parity_workflow_source": str(status.get("parityWorkflowSource") or "").strip(),
+        "ui_parity_config_path": str(status.get("parityConfigPath") or "").strip(),
+    }
+
+
+def _apply_ui_session_metadata(session, metadata: dict, *, workspace: Path) -> bool:
+    changed = False
+    expected_workspace = str(workspace.resolve())
+    if getattr(session, "workspace", None) != expected_workspace:
+        session.workspace = expected_workspace
+        changed = True
+    if getattr(session, "session_mode", None) != "ui_mode":
+        session.session_mode = "ui_mode"
+        changed = True
+    for key, value in (metadata or {}).items():
+        if not value:
+            continue
+        if getattr(session, key, None) != value:
+            setattr(session, key, value)
+            changed = True
+    return changed
+
+
+def _ui_fast_agents_md(project_id: str, project: dict, source_workspace: str, context_path: Path) -> str:
+    label = _project_label(project)
+    return f"""# UI Mode Fast Workspace
+
+You are working in Hermes UI Mode for **{label}** (`{project_id}`).
+
+This generated workspace is intentionally lightweight so UI-only edits are fast.
+Use `{context_path.name}` first for the current preview URL/path, selected elements,
+runtime/HMR status, source workspace, and workflow commands.
+
+## Fast iteration rules
+
+1. Prefer real source edits through `./source` or the `sourceWorkspace` value in
+   `{context_path.name}`. The source workspace is `{source_workspace}`.
+2. Use the warm live preview and HMR/live reload before considering a restart.
+3. Follow a fast verification budget for routine UI-only edits: source assertions,
+   focused component tests, and cheap DOM/served-asset checks first. Do not run
+   deploy/build scripts as the default "done" step.
+4. Build policy: `{UI_MODE_BUILD_POLICY}`. For routine UI-only edits, a full
+   deploy/static/production build is opt-in even when this preview is Play/static
+   build sourced and your source change is not visible in the current iframe yet.
+   Stop after source/test verification and offer the user: **Rebuild preview now**,
+   **Leave source-only**, or **Create/apply a temporary preview patch**. Only run
+   the configured build after the current user explicitly asks for that build or
+   approves that offered option.
+5. Runtime restart is also opt-in for routine UI-only edits. Restart only when
+   dependency/config/server-runtime code changed, process state is broken, or the
+   current user explicitly asks for restart/rebuild verification.
+6. Use preview reload/cache busting before considering a runtime restart.
+7. Keep changes scoped to the user's UI request. Avoid broad generated-bundle or
+   task-metadata searches unless the user explicitly asks for build-output work.
+8. If the preview is Play/static-build sourced, be transparent: report the quick
+   source/test verification promptly and say live-preview visibility still needs
+   an explicit rebuild instead of spending the turn on a full deploy build.
+9. If a quick scratch experiment is useful, record it under `preview-patches/`
+   and migrate accepted changes back to source before claiming the change is durable.
+10. For visual claims, verify against the live preview/DOM state when practical.
+
+## Generated files
+
+- `ui-context.json` — current UI Mode project/runtime context.
+- `source` — symlink/pointer to the real project source tree.
+- `preview-patches/` — session-scoped scratch patch journal location.
+
+Do not treat generated build artifacts as the source of truth.
+"""
+
+
+def _write_ui_fast_workspace(project_id: str, session_id: str, project: dict, status: dict | None = None) -> dict:
+    workspace = _ui_mode_fast_workspace(project_id, session_id)
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "preview-patches").mkdir(parents=True, exist_ok=True)
+    source_workspace = str(_project_path(project))
+    context_path = workspace / "ui-context.json"
+    agents_path = workspace / "AGENTS.md"
+    source_link = workspace / "source"
+    agents_path.write_text(_ui_fast_agents_md(project_id, project, source_workspace, context_path), encoding="utf-8")
+
+    try:
+        if source_link.is_symlink() or (source_link.exists() and not source_link.is_dir()):
+            source_link.unlink()
+        if not source_link.exists():
+            source_link.symlink_to(source_workspace, target_is_directory=True)
+    except Exception:
+        (workspace / "source.txt").write_text(source_workspace + "\n", encoding="utf-8")
+
+    status = status if isinstance(status, dict) else {}
+    context = {
+        "version": 1,
+        "mode": "ui_mode_fast_workspace",
+        "projectId": project_id,
+        "projectLabel": _project_label(project),
+        "sourceWorkspace": source_workspace,
+        "fastWorkspace": str(workspace.resolve()),
+        "previewUrl": status.get("previewUrl") or "",
+        "previewPath": status.get("previewPath") or status.get("inspectUrl") or "",
+        "workflowSource": status.get("workflowSource") or status.get("configSource") or "",
+        "statusSummary": status.get("statusSummary") or status.get("summary") or "",
+        "buildCommand": status.get("buildCommand") or "",
+        "runtimeCommand": status.get("command") or "",
+        "buildPolicy": UI_MODE_BUILD_POLICY,
+        "buildPolicySummary": "Full deploy/static/production builds are explicit user-approval only for routine UI-only edits; stop after source/test verification and offer rebuild/source-only/temporary-preview-patch options.",
+        "updatedAt": now_iso(),
+    }
+    _write_json_atomic(context_path, context)
+    return {
+        "workspace": str(workspace.resolve()),
+        "contextPath": str(context_path.resolve()),
+        "agentsPath": str(agents_path.resolve()),
+        "sourceWorkspace": source_workspace,
+    }
+
+
+def is_ui_mode_fast_workspace(path: str | Path | None, project_id: str | None = None) -> bool:
+    if not path:
+        return False
+    try:
+        candidate = Path(path).expanduser().resolve()
+        root = (
+            _ui_mode_project_workspaces_dir(project_id).resolve()
+            if project_id
+            else (_ui_mode_state_root() / "workspaces").resolve()
+        )
+        candidate.relative_to(root)
+    except Exception:
+        return False
+    return (candidate / "ui-context.json").exists() and (candidate / "AGENTS.md").exists()
+
+
+def _publish_session_change(reason: str, profile: str | None = None) -> None:
+    try:
+        from api.session_events import publish_session_list_changed
+
+        if profile:
+            try:
+                publish_session_list_changed(reason, profile=profile)
+            except TypeError:
+                publish_session_list_changed(reason)
+        else:
+            publish_session_list_changed(reason)
+    except Exception:
+        pass
+
+
+def _ui_session_response(project_id: str, session, workspace_info: dict, *, created: bool, reset: bool = False, previous_session_id: str | None = None, pruned: dict | None = None) -> dict:
+    return {
+        "ok": True,
+        "projectId": project_id,
+        "created": bool(created),
+        "reset": bool(reset),
+        "previousSessionId": previous_session_id or None,
+        "sessionId": getattr(session, "session_id", ""),
+        "session": session.compact() | {"messages": getattr(session, "messages", []) or []},
+        "fastWorkspace": workspace_info.get("workspace") or "",
+        "contextPath": workspace_info.get("contextPath") or "",
+        "agentsPath": workspace_info.get("agentsPath") or "",
+        "sourceWorkspace": workspace_info.get("sourceWorkspace") or "",
+        "pruned": pruned or {},
+    }
+
+
+def _valid_tracked_ui_session(session, project_id: str) -> bool:
+    return bool(
+        session
+        and getattr(session, "session_mode", None) == "ui_mode"
+        and str(getattr(session, "ui_project_id", None) or getattr(session, "project_id", None) or "") == str(project_id)
+        and not getattr(session, "archived", False)
+    )
+
+
+def _get_tracked_ui_session(project_id: str):
+    state = _load_ui_mode_session_state(project_id)
+    session_id = str(state.get("sessionId") or state.get("session_id") or "").strip()
+    if not session_id:
+        return None
+    try:
+        from api.models import get_session
+
+        session = get_session(session_id)
+        if _valid_tracked_ui_session(session, project_id):
+            return session
+    except Exception:
+        return None
+    return None
+
+
+def _create_project_ui_session(project_id: str, project: dict, status: dict | None = None):
+    from api.models import new_session
+
+    status = status if isinstance(status, dict) else _current_ui_status_metadata(project_id)
+    metadata = _ui_session_metadata(project_id, project, status)
+    profile = None
+    model = None
+    model_provider = None
+    try:
+        from api import ops_sessions
+
+        profile = ops_sessions.project_profile(project) or "default"
+        model, model_provider = ops_sessions.project_session_defaults(project)
+    except Exception:
+        profile = str(project.get("profile") or "").strip() or "default"
+    # Create once with a temporary valid workspace, then switch to the generated
+    # workspace after the session id is known.
+    session = new_session(
+        workspace=metadata["ui_project_workspace"],
+        model=model,
+        model_provider=model_provider,
+        profile=profile,
+        project_id=project_id,
+        session_mode="ui_mode",
+        ui_metadata=metadata,
+    )
+    session.title = f"{_project_label(project)}: UI Mode"
+    workspace_info = _write_ui_fast_workspace(project_id, session.session_id, project, status)
+    _apply_ui_session_metadata(session, metadata, workspace=Path(workspace_info["workspace"]))
+    session.save()
+    _publish_session_change("ui_session_new", profile=getattr(session, "profile", None))
+    return session, workspace_info
+
+
+def get_project_ui_session(project_id: str, *, create: bool = True) -> dict:
+    """Return or create the project-owned UI Mode chat session."""
+    project = _get_project(project_id)
+    status = _current_ui_status_metadata(project_id)
+    with _LOCK:
+        session = _get_tracked_ui_session(project_id)
+        created = False
+        if session is None:
+            if not create:
+                raise UiRuntimeError("No UI Mode chat session is tracked for this project.", status=404, code="UI_SESSION_NOT_FOUND")
+            session, workspace_info = _create_project_ui_session(project_id, project, status)
+            created = True
+        else:
+            workspace_info = _write_ui_fast_workspace(project_id, session.session_id, project, status)
+            metadata = _ui_session_metadata(project_id, project, status)
+            if _apply_ui_session_metadata(session, metadata, workspace=Path(workspace_info["workspace"])):
+                session.save()
+        _write_ui_mode_session_state(
+            project_id,
+            {
+                "version": UI_SESSION_STATE_VERSION,
+                "projectId": project_id,
+                "sessionId": session.session_id,
+                "fastWorkspace": workspace_info.get("workspace"),
+                "sourceWorkspace": workspace_info.get("sourceWorkspace"),
+                "contextPath": workspace_info.get("contextPath"),
+                "updatedAt": now_iso(),
+            },
+        )
+        return _ui_session_response(project_id, session, workspace_info, created=created)
+
+
+def _retire_ui_session(session_id: str) -> bool:
+    sid = str(session_id or "").strip()
+    if not sid:
+        return False
+    try:
+        from api.models import get_session
+        from api.config import _evict_session_agent
+
+        session = get_session(sid)
+        if getattr(session, "active_stream_id", None):
+            raise UiRuntimeError("UI Mode chat is currently running. Stop or wait for it before resetting.", status=409, code="UI_SESSION_ACTIVE")
+        if not getattr(session, "archived", False):
+            session.archived = True
+            session.save()
+        _evict_session_agent(sid)
+        _publish_session_change("ui_session_reset", profile=getattr(session, "profile", None))
+        return True
+    except UiRuntimeError:
+        raise
+    except Exception:
+        return False
+
+
+def reset_project_ui_session(project_id: str, body: dict | None = None) -> dict:
+    """Archive the tracked UI Mode chat and create a fresh fast-workspace session."""
+    project = _get_project(project_id)
+    status = _current_ui_status_metadata(project_id)
+    with _LOCK:
+        state = _load_ui_mode_session_state(project_id)
+        previous_session_id = str((body or {}).get("sessionId") or state.get("sessionId") or "").strip()
+        if previous_session_id:
+            _retire_ui_session(previous_session_id)
+        session, workspace_info = _create_project_ui_session(project_id, project, status)
+        _write_ui_mode_session_state(
+            project_id,
+            {
+                "version": UI_SESSION_STATE_VERSION,
+                "projectId": project_id,
+                "sessionId": session.session_id,
+                "previousSessionId": previous_session_id or None,
+                "fastWorkspace": workspace_info.get("workspace"),
+                "sourceWorkspace": workspace_info.get("sourceWorkspace"),
+                "contextPath": workspace_info.get("contextPath"),
+                "updatedAt": now_iso(),
+            },
+        )
+        return _ui_session_response(project_id, session, workspace_info, created=True, reset=True, previous_session_id=previous_session_id or None)
+
+
+def prune_project_ui_sessions(project_id: str, body: dict | None = None) -> dict:
+    """Remove generated UI fast workspaces that are no longer the tracked session."""
+    body = body if isinstance(body, dict) else {}
+    keep_current = body.get("keepCurrent") is not False
+    state = _load_ui_mode_session_state(project_id)
+    current_id = str(state.get("sessionId") or "").strip() if keep_current else ""
+    current_dir = _safe_state_component(current_id) if current_id else ""
+    root = _ui_mode_project_workspaces_dir(project_id)
+    removed = 0
+    kept = 0
+    if root.exists():
+        for child in root.iterdir():
+            if not child.is_dir():
+                continue
+            if current_dir and child.name == current_dir:
+                kept += 1
+                continue
+            shutil.rmtree(child, ignore_errors=True)
+            removed += 1
+    return {"ok": True, "projectId": project_id, "removedWorkspaces": removed, "keptWorkspaces": kept}
 
 
 def _append_log(state: UiRuntimeState, *, stage: str = "system", stream: str = "system", message: str = "") -> None:
@@ -301,12 +710,33 @@ def _auto_detected_source(auto_config: dict | None) -> str:
     return "package.json"
 
 
+def _normalize_workflow_source_label(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "ui-config"
+    # Keep this as a status/contract label, not a path or command escape hatch.
+    # The actual command and cwd fields are normalized independently.
+    if not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,96}", text):
+        return "ui-config"
+    if text.lower() == "play-config":
+        return "ui-config"
+    return text
+
+
 def _package_manager_for_project(project_path: Path) -> str:
     if (project_path / "pnpm-lock.yaml").exists():
         return "pnpm"
     if (project_path / "yarn.lock").exists():
         return "yarn"
     if (project_path / "bun.lockb").exists() or (project_path / "bun.lock").exists():
+        return "bun"
+    payload = _read_json_object(project_path / "package.json")
+    package_manager = str((payload or {}).get("packageManager") or "").strip().lower()
+    if package_manager.startswith("pnpm"):
+        return "pnpm"
+    if package_manager.startswith("yarn"):
+        return "yarn"
+    if package_manager.startswith("bun"):
         return "bun"
     return "npm"
 
@@ -317,18 +747,114 @@ def _package_script_command(package_manager: str, script: str) -> str:
     return f"{package_manager} run {script}"
 
 
-def _auto_detect_ui_config(project_path: Path) -> dict | None:
+def _read_json_object(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8") or "{}")
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _play_config_runtime_env(project_path: Path) -> dict[str, str]:
+    play_path = _existing_play_config_path(project_path)
+    if play_path is None:
+        return {}
+    payload = _read_json_object(play_path)
+    if not payload:
+        return {}
+    start_raw = payload.get("start")
+    start_section = start_raw if isinstance(start_raw, dict) else {}
+    env = _normalize_env(start_section.get("env"))
+    selected: dict[str, str] = {}
+    for key in ("MONOREPO_ACTIVE_APP", "MONOREPO_DEFAULT_APP", "ACTIVE_APPS"):
+        value = str(env.get(key) or "").strip()
+        if value:
+            selected[key] = value
+    return selected
+
+
+def _auto_detect_monorepo_template_ui_config(project_path: Path) -> dict | None:
+    """Detect the standardized generated-app monorepo template fast UI lane.
+
+    Older Cloud Terminal/Hermes projects use a root deployment Play config for
+    production parity, while the fast browser UI is served by the Vite client in
+    ``packages/client``. The root package often has no ``dev`` script, so a
+    generic root-package heuristic would either miss the project entirely or fall
+    back to the slow Play/static build lane.
+    """
+
+    root_package_json = project_path / "package.json"
+    client_package_json = project_path / "packages" / "client" / "package.json"
+    if not root_package_json.exists() or not client_package_json.exists():
+        return None
+    root_payload = _read_json_object(root_package_json)
+    client_payload = _read_json_object(client_package_json)
+    if not root_payload or not client_payload:
+        return None
+    scripts_raw = client_payload.get("scripts")
+    scripts: dict[str, Any] = scripts_raw if isinstance(scripts_raw, dict) else {}
+    if not scripts.get("dev"):
+        return None
+
+    template_markers = [
+        project_path / "packages" / "apps" / "package.json",
+        project_path / "packages" / "server" / "package.json",
+        project_path / "packages" / "schemas" / "package.json",
+        project_path / "scripts" / "active-app.sh",
+    ]
+    if not any(path.exists() for path in template_markers):
+        return None
+
+    package_manager = _package_manager_for_project(project_path)
+    root_scripts_raw = root_payload.get("scripts")
+    root_scripts: dict[str, Any] = root_scripts_raw if isinstance(root_scripts_raw, dict) else {}
+    ui_dev_script = project_path / "scripts" / "ui-dev.sh"
+    if root_scripts.get("ui:dev"):
+        command = _package_script_command(package_manager, "ui:dev")
+        auto_source = "monorepo-template:ui-dev"
+    elif ui_dev_script.exists():
+        command = "bash ./scripts/ui-dev.sh"
+        auto_source = "monorepo-template:ui-dev"
+    else:
+        command = f"{package_manager} --filter ./packages/client run dev -- --host 127.0.0.1 --port ${{PORT}} --strictPort"
+        auto_source = "monorepo-template:packages/client"
+    env = {
+        "HOST": "127.0.0.1",
+        "VITE_HOST": "127.0.0.1",
+        "NO_PROXY": os.environ.get("NO_PROXY", "localhost,127.0.0.1"),
+        "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
+        "NPM_CONFIG_STORE_DIR": ".cache/pnpm-store",
+        "npm_config_store_dir": ".cache/pnpm-store",
+        **_play_config_runtime_env(project_path),
+    }
+    config: dict[str, Any] = {
+        "version": 1,
+        AUTO_DETECTED_SOURCE_KEY: auto_source,
+        "dev": {
+            "command": command,
+            "cwd": ".",
+            "env": env,
+            "port": {
+                "mode": "auto",
+                "host": "127.0.0.1",
+                "envVar": "PORT",
+                "range": {"min": 30000, "max": 39999},
+            },
+        },
+        "inspect": {"mode": "proxy", "url": "/", "readyTimeoutMs": UI_READY_TIMEOUT_DEFAULT_MS},
+    }
     play_path = _existing_play_config_path(project_path)
     if play_path is not None:
-        source = _relative_config_path(project_path, play_path)
-        return {"version": 1, "source": source, AUTO_DETECTED_SOURCE_KEY: source}
+        config[AUTO_DETECTED_PARITY_SOURCE_KEY] = _relative_config_path(project_path, play_path)
+    return config
 
+
+def _auto_detect_package_ui_config(project_path: Path) -> dict | None:
     package_json = project_path / "package.json"
     if not package_json.exists():
         return None
-    try:
-        payload = json.loads(package_json.read_text(encoding="utf-8") or "{}")
-    except json.JSONDecodeError:
+    payload = _read_json_object(package_json)
+    if not payload:
         return None
     scripts_raw = payload.get("scripts") if isinstance(payload, dict) else {}
     scripts: dict[str, Any] = scripts_raw if isinstance(scripts_raw, dict) else {}
@@ -352,6 +878,32 @@ def _auto_detect_ui_config(project_path: Path) -> dict | None:
         },
         "inspect": {"mode": "proxy", "url": "/", "readyTimeoutMs": UI_READY_TIMEOUT_DEFAULT_MS},
     }
+
+
+def _auto_detect_play_ui_config(project_path: Path) -> dict | None:
+    play_path = _existing_play_config_path(project_path)
+    if play_path is None:
+        return None
+    source = _relative_config_path(project_path, play_path)
+    return {"version": 1, "source": source, AUTO_DETECTED_SOURCE_KEY: source}
+
+
+def _auto_detect_ui_config(project_path: Path) -> dict | None:
+    monorepo_template_config = _auto_detect_monorepo_template_ui_config(project_path)
+    if monorepo_template_config is not None:
+        return monorepo_template_config
+    package_config = _auto_detect_package_ui_config(project_path)
+    if package_config is not None:
+        play_path = _existing_play_config_path(project_path)
+        if play_path is not None:
+            package_config[AUTO_DETECTED_PARITY_SOURCE_KEY] = _relative_config_path(project_path, play_path)
+        return package_config
+    return _auto_detect_play_ui_config(project_path)
+
+
+def _is_play_parity_request(value: Any) -> bool:
+    text = str(value or "").strip().lower().replace("_", "-")
+    return text in {"play", "play-config", "play-parity", "parity", "production", "prod", "build"}
 
 
 def _play_source_request(source: dict[str, Any]) -> str:
@@ -481,9 +1033,10 @@ def normalize_ui_config(payload: dict, project_path: Path) -> dict:
     if inspect_mode != "proxy":
         inspect_mode = "proxy"
 
+    workflow_source = _normalize_workflow_source_label(source.get("workflowSource") or source.get("uiWorkflowSource"))
     config = {
         "version": int(source.get("version") or 1),
-        "source": "ui-config",
+        "source": workflow_source,
         "build": {
             "command": build_command,
             "cwd": _normalize_relative_cwd(build_section.get("cwd") or source.get("buildCwd")),
@@ -518,7 +1071,7 @@ def normalize_ui_config(payload: dict, project_path: Path) -> dict:
         _resolve_cwd(project_path, config["dev"]["cwd"])
     except CoreApiError as exc:
         errors.append(str(exc))
-    return {"valid": not missing and not errors, "missing": missing, "errors": errors, "config": config, "source": "ui-config"}
+    return {"valid": not missing and not errors, "missing": missing, "errors": errors, "config": config, "source": workflow_source}
 
 
 def get_project_ui_config_file_info(project_id: str) -> dict:
@@ -541,6 +1094,9 @@ def get_project_ui_config_file_info(project_id: str) -> dict:
         "autoSource": "",
         "source": "",
         "playConfigPath": "",
+        "parityAvailable": False,
+        "parityWorkflowSource": "",
+        "parityConfigPath": "",
     }
     if not selected.exists():
         auto_config = _auto_detect_ui_config(project_path)
@@ -555,6 +1111,11 @@ def get_project_ui_config_file_info(project_id: str) -> dict:
         payload["autoSource"] = _auto_detected_source(auto_config)
         payload["source"] = normalized.get("source") or "auto"
         payload["playConfigPath"] = normalized.get("playConfigPath") or ""
+        parity_source = str(auto_config.get(AUTO_DETECTED_PARITY_SOURCE_KEY) or "").strip() if isinstance(auto_config, dict) else ""
+        if parity_source and payload["source"] != "play-config":
+            payload["parityAvailable"] = True
+            payload["parityWorkflowSource"] = "play-config"
+            payload["parityConfigPath"] = str((project_path / parity_source).resolve())
         return payload
     try:
         raw = json.loads(selected.read_text(encoding="utf-8") or "{}")
@@ -568,12 +1129,39 @@ def get_project_ui_config_file_info(project_id: str) -> dict:
     payload["errors"] = normalized["errors"]
     payload["source"] = normalized.get("source") or "ui-config"
     payload["playConfigPath"] = normalized.get("playConfigPath") or ""
+    play_path = _existing_play_config_path(project_path)
+    if play_path is not None and payload["source"] != "play-config":
+        payload["parityAvailable"] = True
+        payload["parityWorkflowSource"] = "play-config"
+        payload["parityConfigPath"] = str(play_path.resolve())
     return payload
 
 
-def get_project_ui_config(project_id: str) -> dict:
+def get_project_ui_config(project_id: str, *, workflow: Any = "") -> dict:
     project = _get_project(project_id)
     project_path = _project_path(project)
+    if _is_play_parity_request(workflow):
+        auto_config = _auto_detect_play_ui_config(project_path)
+        if not auto_config:
+            raise UiRuntimeError("Play parity config not found for this project.", status=404, code="UI_PLAY_CONFIG_NOT_FOUND")
+        normalized = normalize_ui_config(auto_config, project_path)
+        if not normalized["valid"]:
+            missing = ", ".join(normalized["missing"])
+            errors = ", ".join(normalized["errors"])
+            details = "; ".join(part for part in (f"Missing: {missing}" if missing else "", errors) if part)
+            raise UiRuntimeError(f"Play parity UI config is invalid. {details}".strip(), code="UI_CONFIG_INVALID")
+        info = get_project_ui_config_file_info(project_id)
+        return {
+            "project": project,
+            "projectPath": project_path,
+            "path": info["path"],
+            "branch": info["branch"],
+            "config": normalized["config"],
+            "autoDetected": True,
+            "autoSource": _auto_detected_source(auto_config),
+            "source": normalized.get("source") or "play-config",
+            "playConfigPath": normalized.get("playConfigPath") or "",
+        }
     info = get_project_ui_config_file_info(project_id)
     if not info["exists"]:
         auto_config = _auto_detect_ui_config(project_path)
@@ -588,7 +1176,7 @@ def get_project_ui_config(project_id: str) -> dict:
                     "config": normalized["config"],
                     "autoDetected": True,
                     "autoSource": _auto_detected_source(auto_config),
-                    "source": normalized.get("source") or "auto",
+                    "source": _auto_detected_source(auto_config) if (normalized.get("source") or "") == "ui-config" else (normalized.get("source") or "auto"),
                     "playConfigPath": normalized.get("playConfigPath") or "",
                 }
             missing = ", ".join(normalized["missing"])
@@ -899,15 +1487,18 @@ def _runtime_worker(ui_config: dict, state: UiRuntimeState) -> None:
     proc: subprocess.Popen | None = None
     threads: list[threading.Thread] = []
     try:
+        build_ran = False
         if _normalize_command((config.get("build") or {}).get("command")):
             with _BUILD_LOCK:
                 if state.stop_requested:
                     return
                 _mark_state(state, "building", running=True, ready=False, message="Starting UI build stage...")
                 _run_build_stage(project_path, config, state)
+                build_ran = True
         if state.stop_requested:
             return
-        _mark_state(state, "starting", running=True, ready=False, message="Build complete. Starting UI runtime...")
+        start_message = "Build complete. Starting UI runtime..." if build_ran else "Starting UI runtime..."
+        _mark_state(state, "starting", running=True, ready=False, message=start_message)
         runtime = _prepare_dev_runtime(state.project_id, config, state)
         dev_config = runtime["config"]["dev"]
         command = dev_config["command"]
@@ -977,7 +1568,8 @@ def _runtime_worker(ui_config: dict, state: UiRuntimeState) -> None:
 
 def start_project_ui_runtime(project_id: str, body: dict | None = None) -> dict:
     payload = body if isinstance(body, dict) else {}
-    ui_config = get_project_ui_config(project_id)
+    workflow = payload.get("workflow") or payload.get("uiWorkflow") or payload.get("workflowSource") or payload.get("uiWorkflowSource")
+    ui_config = get_project_ui_config(project_id, workflow=workflow)
     stop_project_ui_runtime(project_id, purge=True)
     state = UiRuntimeState(
         project_id=project_id,
@@ -985,6 +1577,8 @@ def start_project_ui_runtime(project_id: str, body: dict | None = None) -> dict:
         config_branch=ui_config["branch"],
         config_auto_detected=ui_config.get("autoDetected") is True,
         config_auto_source=str(ui_config.get("autoSource") or "") or None,
+        workflow_source=str(ui_config.get("source") or "").strip() or None,
+        play_config_path=str(ui_config.get("playConfigPath") or "").strip() or None,
         session_id=str(payload.get("sessionId") or payload.get("session_id") or "").strip() or None,
     )
     _mark_state(state, "starting", running=True, ready=False, set_started_at=True, message="Starting UI runtime...")
@@ -1048,7 +1642,16 @@ def _ui_status_summary(config_info: dict, snapshot: dict) -> str:
         return f"Play-sourced UI config is incomplete. {detail}".strip()
     if config_info.get("exists") is not True and config_info.get("autoDetected") is True:
         if config_info.get("valid") is True:
-            return "Auto-detected UI workflow from package.json. Start UI Mode to inspect the live app."
+            auto_source = str(config_info.get("autoSource") or "").strip()
+            if auto_source == "monorepo-template:ui-dev":
+                source_label = "the monorepo template ui:dev contract"
+            elif auto_source == "monorepo-template:packages/client":
+                source_label = "the monorepo template packages/client dev lane"
+            else:
+                source_label = auto_source or "package.json"
+            if config_info.get("parityAvailable") is True:
+                return f"Auto-detected fast UI workflow from {source_label}. Play parity is available explicitly."
+            return f"Auto-detected UI workflow from {source_label}. Start UI Mode to inspect the live app."
         missing = config_info.get("missing") or []
         return f"Auto-detected UI workflow is incomplete. Missing: {', '.join(str(part) for part in missing)}"
     if config_info.get("exists") is not True:
@@ -1071,6 +1674,8 @@ def _ui_runtime_available(config_info: dict) -> bool:
 
 def _ui_workflow_source(config_info: dict) -> str:
     source = str(config_info.get("source") or "").strip()
+    if config_info.get("autoDetected") is True and source in {"", "ui-config"}:
+        return str(config_info.get("autoSource") or "auto").strip() or "auto"
     if source:
         return source
     if config_info.get("autoDetected") is True:
@@ -1088,7 +1693,9 @@ def build_project_ui_status(project_id: str) -> dict:
     state_name = str(snapshot.get("status") or "idle").lower()
     summary = _ui_status_summary(config_info, snapshot)
     runtime_available = _ui_runtime_available(config_info)
-    workflow_source = _ui_workflow_source(config_info)
+    workflow_source = str(snapshot.get("workflow_source") or "").strip() or _ui_workflow_source(config_info)
+    play_config_path = str(snapshot.get("play_config_path") or config_info.get("playConfigPath") or "").strip()
+    iteration_mode = "play-parity" if workflow_source == "play-config" else ("fast-dev" if runtime_available else "")
     label_by_state = {
         "idle": "UI ready" if runtime_available else "UI unavailable",
         "building": "UI building",
@@ -1110,11 +1717,16 @@ def build_project_ui_status(project_id: str) -> dict:
         "canStart": runtime_available,
         "unavailableReason": "" if runtime_available else summary,
         "workflowSource": workflow_source,
+        "iterationMode": iteration_mode,
+        "buildPolicy": UI_MODE_BUILD_POLICY,
         "configExists": config_info.get("exists") is True,
         "configAvailable": runtime_available or config_info.get("exists") is True or config_info.get("autoDetected") is True,
         "configValid": config_info.get("valid") is True,
-        "configSource": config_info.get("source") or workflow_source,
-        "playConfigPath": config_info.get("playConfigPath") or "",
+        "configSource": workflow_source or config_info.get("source"),
+        "playConfigPath": play_config_path,
+        "parityAvailable": config_info.get("parityAvailable") is True and workflow_source != "play-config",
+        "parityWorkflowSource": config_info.get("parityWorkflowSource") or "",
+        "parityConfigPath": config_info.get("parityConfigPath") or "",
         "configAutoDetected": config_info.get("autoDetected") is True,
         "configAutoSource": config_info.get("autoSource") or "",
         "configPath": config_info.get("path"),

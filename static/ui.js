@@ -1923,6 +1923,9 @@ window.addEventListener('resize',()=>{
 // ── Reasoning effort chip ────────────────────────────────────────────────────
 let _currentReasoningEffort=null;
 let _currentReasoningEffortsSupported=null;
+let _currentReasoningScope='profile';
+let _currentReasoningSessionEffort='';
+let _currentReasoningProfileEffort='';
 
 function _normalizeReasoningEffort(eff){
   return String(eff||'').trim().toLowerCase();
@@ -1942,10 +1945,25 @@ function _reasoningEffortQuery(){
     provider=_modelStateForSelect(sel, model).model_provider||'';
   }
   const params=new URLSearchParams();
+  const sid=(S&&S.session&&S.session.session_id)||'';
+  if(sid) params.set('session_id', sid);
   if(model) params.set('model', model);
   if(provider) params.set('provider', provider);
   const qs=params.toString();
   return qs?('?'+qs):'';
+}
+
+function _reasoningMutationPayload(effort, scope){
+  const payload={effort:String(effort||'default')};
+  const sid=(S&&S.session&&S.session.session_id)||'';
+  const requestedScope=String(scope||'').trim().toLowerCase();
+  if(sid && requestedScope!=='profile' && requestedScope!=='global' && requestedScope!=='all'){
+    payload.session_id=sid;
+    payload.scope='session';
+  }else if(requestedScope){
+    payload.scope=(requestedScope==='global'||requestedScope==='all')?'profile':requestedScope;
+  }
+  return payload;
 }
 
 function _applyReasoningOptions(supportedEfforts){
@@ -1953,8 +1971,8 @@ function _applyReasoningOptions(supportedEfforts){
   if(!dd) return;
   const supported=new Set(Array.isArray(supportedEfforts)?supportedEfforts:[]);
   dd.querySelectorAll('.reasoning-option').forEach(function(opt){
-    const effort=opt.dataset.effort;
-    if(effort==='none'){
+    const effort=opt.dataset.effort||'';
+    if(effort===''||effort==='none'){
       opt.style.display='';
       return;
     }
@@ -1970,6 +1988,14 @@ function _applyReasoningChip(eff){
   const meta=arguments[1]||null;
   const effort=_normalizeReasoningEffort(eff);
   _currentReasoningEffort=effort;
+  if(meta){
+    _currentReasoningScope=String(meta.reasoning_scope||'profile').toLowerCase();
+    _currentReasoningSessionEffort=_normalizeReasoningEffort(meta.session_reasoning_effort||'');
+    _currentReasoningProfileEffort=_normalizeReasoningEffort(meta.profile_reasoning_effort||'');
+    if(S&&S.session&&Object.prototype.hasOwnProperty.call(meta,'session_reasoning_effort')){
+      S.session.reasoning_effort=_currentReasoningSessionEffort||null;
+    }
+  }
   if(meta&&Array.isArray(meta.supported_efforts)){
     _currentReasoningEffortsSupported=meta.supported_efforts;
   }
@@ -1999,10 +2025,12 @@ function _applyReasoningChip(eff){
   if(chip){
     const inactive=!effort||effort==='none';
     chip.classList.toggle('inactive',inactive);
-    chip.title='Reasoning effort: '+text;
+    const scopeText=_currentReasoningSessionEffort?'this session':'profile default';
+    const profileText=_currentReasoningProfileEffort?(' · profile default: '+_formatReasoningEffortLabel(_currentReasoningProfileEffort)) : '';
+    chip.title='Reasoning effort: '+text+' ('+scopeText+')'+profileText;
   }
   if(mobileAction) mobileAction.classList.toggle('inactive',!effort||effort==='none');
-  _highlightReasoningOption(effort);
+  _highlightReasoningOption(_currentReasoningSessionEffort||'');
 }
 
 function fetchReasoningChip(){
@@ -2033,7 +2061,7 @@ function toggleReasoningDropdown(){
   if(typeof closeWsDropdown==='function') closeWsDropdown();
   closeModelDropdown();
   if(typeof closeToolsetsDropdown==='function') closeToolsetsDropdown();
-  _highlightReasoningOption(_currentReasoningEffort);
+  _highlightReasoningOption(_currentReasoningSessionEffort||'');
   dd.classList.add('open');
   _positionReasoningDropdown();
   chip.classList.add('active');
@@ -2074,12 +2102,20 @@ document.addEventListener('click',function(e){
   ) closeReasoningDropdown();
   if(e.target.closest('.reasoning-option')){
     const opt=e.target.closest('.reasoning-option');
-    const effort=opt&&opt.dataset.effort;
-    if(effort){
-      api('/api/reasoning',{method:'POST',body:JSON.stringify({effort:effort})})
+    if(opt&&opt.hasAttribute('data-effort')){
+      const effort=opt.dataset.effort||'';
+      const payload=(typeof _reasoningMutationPayload==='function')
+        ?_reasoningMutationPayload(effort||'default','session')
+        :{effort:effort||'default'};
+      api('/api/reasoning',{method:'POST',body:JSON.stringify(payload)})
         .then(function(st){
-          _applyReasoningChip((st&&st.reasoning_effort)||effort, st||{});
-          showToast('🧠 Reasoning effort set to '+((st&&st.reasoning_effort)||effort));
+          const effective=(st&&st.reasoning_effort)||effort||'';
+          const sessionEffort=(st&&st.session_reasoning_effort)||'';
+          _applyReasoningChip(effective, st||{});
+          const msg=sessionEffort
+            ?('🧠 Reasoning effort set to '+_formatReasoningEffortLabel(sessionEffort)+' for this session')
+            :('🧠 Reasoning effort uses profile default');
+          showToast(msg);
         })
         .catch(function(){showToast('🧠 Failed to set effort');});
       closeReasoningDropdown();
@@ -5976,11 +6012,21 @@ function syncTopbar(){
   if(profileLabel) profileLabel.textContent=(typeof displayProfileForCurrentSession==='function'?displayProfileForCurrentSession():((S&&S.activeProfile)||'default'));
 }
 
+function _stripUiModePreviewPatchDirectives(text){
+  // Agent-directed UI Mode preview scratch commands are transported as hidden
+  // assistant HTML comments. They are command metadata, not transcript prose.
+  return String(text||'')
+    .replace(/<!--\s*hermes-ui-preview-patch[\s\S]*?-->/gi,'')
+    .replace(/```hermes-ui-preview-patch[\s\S]*?```/gi,'')
+    .trim();
+}
+if(typeof window!=='undefined') window._stripUiModePreviewPatchDirectives=_stripUiModePreviewPatchDirectives;
+
 function msgContent(m){
   // Extract plain text content from a message for filtering
   let c=m.content||'';
   if(Array.isArray(c))c=c.filter(p=>p&&p.type==='text').map(p=>p.text||'').join('').trim();
-  return String(c).trim();
+  return _stripUiModePreviewPatchDirectives(String(c));
 }
 
 function _isRecoveryControlMessageText(text){

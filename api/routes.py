@@ -7,6 +7,7 @@ import html as _html
 import copy
 import io
 import gzip
+import inspect
 import json
 import logging
 import os
@@ -1099,6 +1100,7 @@ from api.config import (
     get_reasoning_status,
     set_reasoning_display,
     set_reasoning_effort,
+    normalize_reasoning_effort_value,
     create_stream_channel,
     get_webui_session_save_mode,
     STREAM_GOAL_RELATED,
@@ -2951,6 +2953,7 @@ from api.models import (
     is_safe_session_id,
     _normalize_session_mode,
     _clean_ui_mode_session_text,
+    UI_MODE_DEFAULT_REASONING_EFFORT,
 )
 from api import session_sidecars
 
@@ -2980,9 +2983,14 @@ def _ui_mode_metadata_from_body(body: dict, *, fallback_project_id: str | None =
         "ui_preview_url": _clean_ui_mode_session_text(body.get("ui_preview_url") or body.get("uiPreviewUrl"), 1200),
         "ui_preview_title": _clean_ui_mode_session_text(body.get("ui_preview_title") or body.get("uiPreviewTitle"), 240),
         "ui_workflow_source": _clean_ui_mode_session_text(body.get("ui_workflow_source") or body.get("uiWorkflowSource"), 120),
+        "ui_iteration_mode": _clean_ui_mode_session_text(body.get("ui_iteration_mode") or body.get("uiIterationMode"), 80),
         "ui_status_summary": _clean_ui_mode_session_text(body.get("ui_status_summary") or body.get("uiStatusSummary"), 600),
         "ui_build_command": _clean_ui_mode_session_text(body.get("ui_build_command") or body.get("uiBuildCommand"), 1200),
         "ui_runtime_command": _clean_ui_mode_session_text(body.get("ui_runtime_command") or body.get("uiRuntimeCommand"), 1200),
+        "ui_build_policy": _clean_ui_mode_session_text(body.get("ui_build_policy") or body.get("uiBuildPolicy"), 240),
+        "ui_parity_available": _clean_ui_mode_session_text(body.get("ui_parity_available") or body.get("uiParityAvailable"), 20),
+        "ui_parity_workflow_source": _clean_ui_mode_session_text(body.get("ui_parity_workflow_source") or body.get("uiParityWorkflowSource"), 120),
+        "ui_parity_config_path": _clean_ui_mode_session_text(body.get("ui_parity_config_path") or body.get("uiParityConfigPath"), 1200),
     }
 
 
@@ -3001,11 +3009,12 @@ def _apply_ui_mode_metadata_to_session(session, metadata: dict) -> bool:
 
 
 def _ui_mode_project_workspace(session, body: dict | None = None) -> str | None:
-    """Return the authoritative project source workspace for a UI Mode chat turn.
+    """Return the execution workspace for a UI Mode chat turn.
 
-    UI Mode sidecars can outlive their original URL/session metadata.  If the
-    browser sends a stale workspace (for example a task metadata directory),
-    prefer the Ops project's source path whenever the UI project id is known.
+    New Core UI sessions run from a generated fast workspace so its lightweight
+    AGENTS.md and ui-context.json are loaded. Legacy/stale sidecars can still
+    send task-metadata or missing workspaces; those fall back to the Ops project
+    source path whenever the UI project id is known.
     """
     body = body if isinstance(body, dict) else {}
     project_id = (
@@ -3017,6 +3026,26 @@ def _ui_mode_project_workspace(session, body: dict | None = None) -> str | None:
         or getattr(session, "project_id", None)
     )
     project_key = str(project_id or "").strip()
+    requested_workspace = (
+        body.get("ui_fast_workspace")
+        or body.get("uiFastWorkspace")
+        or body.get("ui_session_workspace")
+        or body.get("uiSessionWorkspace")
+        or body.get("workspace")
+        or getattr(session, "workspace", None)
+    )
+    if requested_workspace:
+        try:
+            from api import core_ui as _core_ui
+
+            if _core_ui.is_ui_mode_fast_workspace(requested_workspace, project_key or None):
+                return str(resolve_trusted_workspace(requested_workspace))
+        except Exception:
+            logger.debug(
+                "Failed to validate UI Mode fast workspace for %s",
+                project_key or requested_workspace,
+                exc_info=True,
+            )
     if not project_key:
         return None
     try:
@@ -5232,21 +5261,30 @@ def handle_get(handler, parsed) -> bool:
         return j(handler, settings)
 
     if parsed.path == "/api/reasoning":
-        # Current reasoning config (shared source of truth with the CLI —
-        # reads display.show_reasoning and agent.reasoning_effort from
-        # the active profile's config.yaml).
+        # Current reasoning config. Display and profile defaults still read from
+        # the active profile's config.yaml for CLI parity; when session_id is
+        # supplied, overlay that session's local effort override.
         query = parse_qs(parsed.query)
         model_id = (query.get("model", [""])[0] or "").strip() or None
         provider_id = (query.get("provider", [""])[0] or "").strip() or None
         base_url = (query.get("base_url", [""])[0] or "").strip() or None
-        return j(
-            handler,
-            get_reasoning_status(
-                model_id=model_id,
-                provider_id=provider_id,
-                base_url=base_url,
-            ),
+        sid = (query.get("session_id", [""])[0] or "").strip()
+        session_effort = None
+        if sid:
+            try:
+                _reasoning_session = get_session(sid, metadata_only=True)
+                session_effort = getattr(_reasoning_session, "reasoning_effort", None)
+            except KeyError:
+                return bad(handler, "Session not found", status=404)
+        status = get_reasoning_status(
+            model_id=model_id,
+            provider_id=provider_id,
+            base_url=base_url,
+            session_effort=session_effort,
         )
+        if sid:
+            status["session_id"] = sid
+        return j(handler, status)
 
     if parsed.path == "/api/onboarding/status":
         return j(handler, get_onboarding_status())
@@ -6780,10 +6818,20 @@ def handle_post(handler, parsed) -> bool:
                     model, model_provider = ops_sessions_mod.project_session_defaults(ops_project)
         ui_metadata = _ui_mode_metadata_from_body(body, fallback_project_id=project_id) if session_mode == "ui_mode" else None
         if session_mode == "ui_mode":
-            ui_source_workspace = _ui_mode_project_workspace(
-                type("_UiModeProjectRef", (), {"ui_project_id": project_id, "project_id": project_id})(),
-                body,
-            )
+            ui_source_workspace = str((ui_metadata or {}).get("ui_project_workspace") or "").strip()
+            if ui_source_workspace:
+                try:
+                    ui_source_workspace = str(resolve_trusted_workspace(ui_source_workspace))
+                except Exception:
+                    ui_source_workspace = ""
+            if not ui_source_workspace and project_id:
+                try:
+                    from api import ops_projects as _ops_projects
+                    from api.core_contracts import project_root as _project_root
+
+                    ui_source_workspace = str(resolve_trusted_workspace(str(_project_root(_ops_projects.get_ops_project(project_id)))))
+                except Exception:
+                    ui_source_workspace = ""
             if ui_source_workspace:
                 workspace = ui_source_workspace
                 if isinstance(ui_metadata, dict):
@@ -6797,6 +6845,7 @@ def handle_post(handler, parsed) -> bool:
             worktree_info=worktree_info,
             session_mode=session_mode,
             ui_metadata=ui_metadata,
+            reasoning_effort=body.get("reasoning_effort") or body.get("reasoningEffort"),
         )
         if worktree_info:
             publish_session_list_changed("session_new", profile=getattr(s, "profile", None))
@@ -6827,6 +6876,7 @@ def handle_post(handler, parsed) -> bool:
                 workspace=session.workspace,
                 model=session.model,
                 model_provider=session.model_provider,
+                reasoning_effort=getattr(session, "reasoning_effort", None),
                 messages=copy.deepcopy(session.messages),
                 tool_calls=copy.deepcopy(session.tool_calls),
                 # Reset ephemeral / per-session-instance flags. Duplicating an
@@ -6951,16 +7001,17 @@ def handle_post(handler, parsed) -> bool:
         return j(handler, {"ok": True, "provider": provider_id})
 
     if parsed.path == "/api/reasoning":
-        # CLI-parity /reasoning handler — writes to the same config.yaml keys
-        # the CLI uses (display.show_reasoning, agent.reasoning_effort) so a
-        # preference set via WebUI is honoured in the terminal REPL and vice
-        # versa.  Body is one of:
-        #   {"display": "show"|"hide"|"on"|"off"}   → display.show_reasoning
-        #   {"effort":  "none"|"minimal"|"low"|"medium"|"high"|"xhigh"}
-        #                                            → agent.reasoning_effort
+        # Reasoning display remains profile-wide for CLI parity. Reasoning effort
+        # can be session-local in WebUI chats; callers opt into profile/global
+        # writes with scope="profile"/"global".
         try:
             display = body.get("display")
             effort = body.get("effort")
+            sid = str(body.get("session_id") or "").strip()
+            requested_scope = str(body.get("scope") or "").strip().lower()
+            scope = requested_scope or ("session" if sid else "profile")
+            if scope in {"global", "all"}:
+                scope = "profile"
             if display is not None:
                 flag = str(display).strip().lower()
                 if flag in ("show", "on", "true", "1"):
@@ -6969,7 +7020,47 @@ def handle_post(handler, parsed) -> bool:
                     return j(handler, set_reasoning_display(False))
                 return bad(handler, f"display must be show|hide|on|off (got '{display}')")
             if effort is not None:
-                return j(handler, set_reasoning_effort(effort))
+                model_id = str(body.get("model") or "").strip() or None
+                provider_id = str(body.get("provider") or "").strip() or None
+                base_url = str(body.get("base_url") or "").strip() or None
+                if scope == "session":
+                    if not sid:
+                        return bad(handler, "session_id is required for session-scoped reasoning effort")
+                    normalized = normalize_reasoning_effort_value(effort, allow_default=True)
+                    try:
+                        with _get_session_agent_lock(sid):
+                            s = get_session(sid)
+                            s = _ensure_full_session_before_mutation(sid, s)
+                            s.reasoning_effort = normalized or None
+                            s.save(touch_updated_at=False)
+                    except KeyError:
+                        return bad(handler, "Session not found", 404)
+                    status = get_reasoning_status(
+                        model_id=model_id,
+                        provider_id=provider_id,
+                        base_url=base_url,
+                        session_effort=getattr(s, "reasoning_effort", None),
+                    )
+                    status["session_id"] = sid
+                    return j(handler, status)
+                if scope != "profile":
+                    return bad(handler, "scope must be session|profile|global")
+                set_reasoning_effort(effort)
+                session_effort = None
+                if sid:
+                    try:
+                        session_effort = getattr(get_session(sid, metadata_only=True), "reasoning_effort", None)
+                    except KeyError:
+                        session_effort = None
+                status = get_reasoning_status(
+                    model_id=model_id,
+                    provider_id=provider_id,
+                    base_url=base_url,
+                    session_effort=session_effort,
+                )
+                if sid:
+                    status["session_id"] = sid
+                return j(handler, status)
             return bad(handler, "reasoning: must supply 'display' or 'effort'")
         except ValueError as e:
             return bad(handler, str(e))
@@ -11775,6 +11866,8 @@ def _handle_chat_start(handler, body, diag=None):
                 s,
                 _ui_mode_metadata_from_body(body, fallback_project_id=getattr(s, "project_id", None)),
             )
+            if not getattr(s, "reasoning_effort", None):
+                s.reasoning_effort = UI_MODE_DEFAULT_REASONING_EFFORT
         msg = str(body.get("message", "")).strip()
         if not msg:
             return bad(handler, "message is required")
@@ -11782,11 +11875,21 @@ def _handle_chat_start(handler, body, diag=None):
         attachments = _normalize_chat_attachments(body.get("attachments") or [])[:20]
         diag.stage("resolve_workspace") if diag else None
         ui_mode_active = (request_session_mode or getattr(s, "session_mode", None)) == "ui_mode"
-        ui_project_workspace = _ui_mode_project_workspace(s, body) if ui_mode_active else None
-        if ui_project_workspace and getattr(s, "ui_project_workspace", None) != ui_project_workspace:
-            s.ui_project_workspace = ui_project_workspace
+        ui_execution_workspace = _ui_mode_project_workspace(s, body) if ui_mode_active else None
+        if ui_execution_workspace:
+            try:
+                from api import core_ui as _core_ui
+
+                is_fast_ui_workspace = _core_ui.is_ui_mode_fast_workspace(
+                    ui_execution_workspace,
+                    str(body.get("ui_project_id") or body.get("uiProjectId") or getattr(s, "ui_project_id", None) or getattr(s, "project_id", None) or "") or None,
+                )
+            except Exception:
+                is_fast_ui_workspace = False
+            if not is_fast_ui_workspace and getattr(s, "ui_project_workspace", None) != ui_execution_workspace:
+                s.ui_project_workspace = ui_execution_workspace
         try:
-            workspace = ui_project_workspace or _resolve_chat_workspace_with_recovery(s, body.get("workspace"))
+            workspace = ui_execution_workspace or _resolve_chat_workspace_with_recovery(s, body.get("workspace"))
         except ValueError as e:
             return bad(handler, str(e))
         if _session_profile_retag_locked(s):
@@ -11956,6 +12059,9 @@ def _handle_chat_sync(handler, body):
             from api.config import (
                 resolve_model_provider,
                 resolve_custom_provider_connection,
+                parse_reasoning_effort,
+                coerce_reasoning_effort_for_model,
+                get_config,
             )
 
             _model, _provider, _base_url = resolve_model_provider(
@@ -11988,7 +12094,21 @@ def _handle_chat_sync(handler, body):
                     _api_key = _cp_key
                 if not _base_url and _cp_base:
                     _base_url = _cp_base
-            agent = AIAgent(
+            _cfg = get_config()
+            try:
+                _agent_cfg = _cfg.get('agent', {}) if isinstance(_cfg, dict) else {}
+                _profile_effort_raw = _agent_cfg.get('reasoning_effort') if isinstance(_agent_cfg, dict) else None
+                _effort_raw = getattr(s, 'reasoning_effort', None) or _profile_effort_raw
+                _effort = coerce_reasoning_effort_for_model(
+                    _effort_raw,
+                    _model,
+                    provider_id=_provider,
+                    base_url=_base_url,
+                )
+                _reasoning_config = parse_reasoning_effort(_effort)
+            except Exception:
+                _reasoning_config = None
+            _agent_kwargs = dict(
                 model=_model,
                 provider=_provider,
                 base_url=_base_url,
@@ -12000,6 +12120,13 @@ def _handle_chat_sync(handler, body):
                 enabled_toolsets=_resolve_cli_toolsets(),
                 session_id=s.session_id,
             )
+            try:
+                _agent_params = set(inspect.signature(AIAgent.__init__).parameters)
+            except Exception:
+                _agent_params = set()
+            if 'reasoning_config' in _agent_params and _reasoning_config is not None:
+                _agent_kwargs['reasoning_config'] = _reasoning_config
+            agent = AIAgent(**_agent_kwargs)
             from api.streaming import (
                 _WEBUI_PROGRESS_PROMPT,
                 _dedupe_replayed_context_messages,

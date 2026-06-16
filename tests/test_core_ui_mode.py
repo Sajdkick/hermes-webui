@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from api import core_contracts, core_ui, models, routes, routes_core
+from api import config, core_contracts, core_ui, models, routes, routes_core
 from api.models import Session, _normalize_session_mode
 
 
@@ -132,10 +132,98 @@ def _write_tiny_play_sourced_ui_project(project_path: Path) -> None:
     )
 
 
+def _write_monorepo_template_project(project_path: Path) -> None:
+    (project_path / "packages" / "client").mkdir(parents=True, exist_ok=True)
+    (project_path / "packages" / "apps").mkdir(parents=True, exist_ok=True)
+    (project_path / "packages" / "server").mkdir(parents=True, exist_ok=True)
+    (project_path / "packages" / "schemas").mkdir(parents=True, exist_ok=True)
+    (project_path / "scripts").mkdir(parents=True, exist_ok=True)
+    (project_path / "scripts" / "active-app.sh").write_text("# template active app helper\n", encoding="utf-8")
+    (project_path / "package.json").write_text(
+        json.dumps({"packageManager": "pnpm@10.12.4", "scripts": {"test": "jest"}}),
+        encoding="utf-8",
+    )
+    (project_path / "packages" / "client" / "package.json").write_text(
+        json.dumps(
+            {
+                "scripts": {
+                    "predev": "node ./scripts/generate-app-modules.cjs && pnpm --filter @monorepo/schemas run build",
+                    "dev": "vite",
+                    "build": "node ./scripts/generate-app-modules.cjs && vite build",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    for rel in ("packages/apps/package.json", "packages/server/package.json", "packages/schemas/package.json"):
+        (project_path / rel).write_text(json.dumps({"name": rel.split("/")[1]}), encoding="utf-8")
+    (project_path / "project_play.json").write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "build": {
+                    "command": "bash ./scripts/deploy-build.sh model-builder",
+                    "cwd": ".",
+                    "env": {"CI": "true", "MONOREPO_ACTIVE_APP": "model-builder"},
+                },
+                "start": {
+                    "command": "node -r ./scripts/register-runtime-paths.cjs packages/server/dist/packages/server/index.js",
+                    "cwd": ".",
+                    "env": {
+                        "AUTH_DEBUG_LOGIN": "true",
+                        "MONOREPO_ACTIVE_APP": "model-builder",
+                        "SERVE_CLIENT_BUILD": "true",
+                        "NO_PROXY": "localhost,127.0.0.1",
+                    },
+                    "port": {"mode": "auto", "host": "127.0.0.1", "envVar": "PORT", "range": {"min": 20000, "max": 29999}},
+                },
+                "inspect": {"mode": "proxy", "url": "/app", "readyPattern": "Server listening", "readyTimeoutMs": 120000},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _add_monorepo_template_ui_dev_contract(project_path: Path) -> None:
+    root_payload = json.loads((project_path / "package.json").read_text(encoding="utf-8"))
+    scripts = root_payload.setdefault("scripts", {})
+    scripts["ui:dev"] = "bash ./scripts/ui-dev.sh"
+    (project_path / "package.json").write_text(json.dumps(root_payload), encoding="utf-8")
+    (project_path / "scripts" / "ui-dev.sh").write_text("#!/usr/bin/env bash\npnpm --filter ./packages/client run dev\n", encoding="utf-8")
+
+
+def _write_monorepo_template_ui_config(project_path: Path) -> None:
+    (project_path / "project_ui.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "workflowSource": "monorepo-template:ui-dev",
+                "dev": {
+                    "command": "pnpm run ui:dev",
+                    "cwd": ".",
+                    "env": {
+                        "HOST": "127.0.0.1",
+                        "NO_PROXY": "localhost,127.0.0.1",
+                        "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
+                        "NPM_CONFIG_STORE_DIR": ".cache/pnpm-store",
+                        "npm_config_store_dir": ".cache/pnpm-store",
+                    },
+                    "port": {"mode": "auto", "host": "127.0.0.1", "envVar": "PORT", "range": {"min": 30000, "max": 39999}},
+                },
+                "inspect": {"mode": "proxy", "url": "/", "readyPattern": "Local:", "readyTimeoutMs": 60000},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_core_contract_exposes_ui_domain():
     route_map = core_contracts.public_route_map()
     assert "ui" in route_map["domains"]
     assert "GET /projects/{projectId}/ui/status" in route_map["domains"]["ui"]
+    assert "GET /projects/{projectId}/ui/session" in route_map["domains"]["ui"]
+    assert "POST /projects/{projectId}/ui/session/reset" in route_map["domains"]["ui"]
+    assert "POST /projects/{projectId}/ui/session/prune" in route_map["domains"]["ui"]
     assert "POST /projects/{projectId}/ui/start" in route_map["domains"]["ui"]
     caps = core_contracts.capabilities()
     assert caps["domains"]["ui"]["available"] is True
@@ -161,9 +249,14 @@ def test_session_mode_normalizes_persists_and_compacts(tmp_path, monkeypatch):
         ui_preview_path="/app",
         ui_preview_title="Summons Arena",
         ui_workflow_source="play-config",
+        ui_iteration_mode="play-parity",
         ui_status_summary="UI runtime is ready at /ui-project/summons/app.",
         ui_build_command="bash ./scripts/deploy-build.sh summons",
         ui_runtime_command="node packages/server/dist/index.js",
+        ui_build_policy="explicit-user-approval",
+        ui_parity_available="true",
+        ui_parity_workflow_source="play-config",
+        ui_parity_config_path="/tmp/project_play.json",
     )
 
     assert session.session_mode == "ui_mode"
@@ -174,9 +267,15 @@ def test_session_mode_normalizes_persists_and_compacts(tmp_path, monkeypatch):
     assert compact["ui_preview_path"] == "/app"
     assert compact["ui_preview_title"] == "Summons Arena"
     assert compact["ui_workflow_source"] == "play-config"
+    assert compact["ui_iteration_mode"] == "play-parity"
     assert compact["ui_status_summary"] == "UI runtime is ready at /ui-project/summons/app."
     assert compact["ui_build_command"] == "bash ./scripts/deploy-build.sh summons"
     assert compact["ui_runtime_command"] == "node packages/server/dist/index.js"
+    assert compact["ui_build_policy"] == "explicit-user-approval"
+    assert compact["ui_parity_available"] == "true"
+    assert compact["ui_parity_workflow_source"] == "play-config"
+    assert compact["ui_parity_config_path"] == "/tmp/project_play.json"
+    assert compact["reasoning_effort"] is None
 
     session.save(skip_index=True)
     loaded = Session.load("ui-mode-session")
@@ -188,10 +287,34 @@ def test_session_mode_normalizes_persists_and_compacts(tmp_path, monkeypatch):
     assert loaded.ui_preview_path == "/app"
     assert loaded.ui_preview_title == "Summons Arena"
     assert loaded.ui_workflow_source == "play-config"
+    assert loaded.ui_iteration_mode == "play-parity"
     assert loaded.ui_status_summary == "UI runtime is ready at /ui-project/summons/app."
     assert loaded.ui_build_command == "bash ./scripts/deploy-build.sh summons"
     assert loaded.ui_runtime_command == "node packages/server/dist/index.js"
+    assert loaded.ui_build_policy == "explicit-user-approval"
+    assert loaded.ui_parity_available == "true"
+    assert loaded.ui_parity_workflow_source == "play-config"
+    assert loaded.ui_parity_config_path == "/tmp/project_play.json"
     assert loaded.compact()["session_mode"] == "ui_mode"
+
+
+def test_new_ui_mode_sessions_default_to_medium_reasoning(tmp_path, monkeypatch):
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    monkeypatch.setattr(models, "SESSION_DIR", session_dir)
+    monkeypatch.setattr(models, "SESSION_INDEX_FILE", session_dir / "_index.json")
+
+    regular = models.new_session(workspace=str(tmp_path / "regular"))
+    ui_mode = models.new_session(workspace=str(tmp_path / "ui"), session_mode="ui_mode")
+    explicit = models.new_session(workspace=str(tmp_path / "explicit"), session_mode="ui_mode", reasoning_effort="low")
+    inherited = models.new_session(workspace=str(tmp_path / "inherit"), session_mode="ui_mode", reasoning_effort="default")
+
+    assert regular.reasoning_effort is None
+    assert ui_mode.session_mode == "ui_mode"
+    assert ui_mode.reasoning_effort == models.UI_MODE_DEFAULT_REASONING_EFFORT == "medium"
+    assert ui_mode.compact()["reasoning_effort"] == "medium"
+    assert explicit.reasoning_effort == "low"
+    assert inherited.reasoning_effort == "medium"
 
 
 def test_core_ui_routes_delegate_to_core_ui(monkeypatch):
@@ -199,6 +322,9 @@ def test_core_ui_routes_delegate_to_core_ui(monkeypatch):
     monkeypatch.setattr(core_ui, "get_project_ui_config_file_info", lambda project_id: calls.append(("config", project_id)) or {"projectId": project_id, "valid": True})
     monkeypatch.setattr(core_ui, "build_project_ui_status", lambda project_id: calls.append(("status", project_id)) or {"projectId": project_id, "status": "ready"})
     monkeypatch.setattr(core_ui, "build_project_ui_logs", lambda project_id, limit: calls.append(("logs", project_id, limit)) or {"projectId": project_id, "logs": []})
+    monkeypatch.setattr(core_ui, "get_project_ui_session", lambda project_id: calls.append(("session", project_id)) or {"projectId": project_id, "sessionId": "ui-session"})
+    monkeypatch.setattr(core_ui, "reset_project_ui_session", lambda project_id, body: calls.append(("reset-session", project_id, body)) or {"projectId": project_id, "sessionId": "ui-session-2", "reset": True})
+    monkeypatch.setattr(core_ui, "prune_project_ui_sessions", lambda project_id, body: calls.append(("prune-session", project_id, body)) or {"projectId": project_id, "removedWorkspaces": 1})
     monkeypatch.setattr(core_ui, "start_project_ui_runtime", lambda project_id, body: calls.append(("start", project_id, body)) or {"projectId": project_id, "status": "starting"})
     monkeypatch.setattr(core_ui, "restart_project_ui_runtime", lambda project_id, body: calls.append(("restart", project_id, body)) or {"projectId": project_id, "status": "starting"})
     monkeypatch.setattr(core_ui, "stop_project_ui_runtime", lambda project_id: calls.append(("stop", project_id)) or {"projectId": project_id, "status": "stopped"})
@@ -215,7 +341,19 @@ def test_core_ui_routes_delegate_to_core_ui(monkeypatch):
     assert routes_core.handle_get(handler, urlparse("/api/core/projects/project%201/ui-config-file")) is True
     assert handler.json_payload() == {"projectId": "project 1", "valid": True}
 
+    handler = DummyHandler("GET")
+    assert routes_core.handle_get(handler, urlparse("/api/core/projects/project%201/ui/session")) is True
+    assert handler.json_payload()["sessionId"] == "ui-session"
+
     body = {"sessionId": "abc123"}
+    handler = DummyHandler("POST")
+    assert routes_core.handle_post(handler, urlparse("/api/core/projects/project%201/ui/session/reset"), body) is True
+    assert handler.json_payload()["reset"] is True
+
+    handler = DummyHandler("POST")
+    assert routes_core.handle_post(handler, urlparse("/api/core/projects/project%201/ui/session/prune"), {"keepCurrent": True}) is True
+    assert handler.json_payload()["removedWorkspaces"] == 1
+
     handler = DummyHandler("POST")
     assert routes_core.handle_post(handler, urlparse("/api/core/projects/project%201/ui/start"), body) is True
     assert handler.json_payload()["status"] == {"projectId": "project 1", "status": "starting"}
@@ -232,10 +370,154 @@ def test_core_ui_routes_delegate_to_core_ui(monkeypatch):
         ("status", "project 1"),
         ("logs", "project 1", "25"),
         ("config", "project 1"),
+        ("session", "project 1"),
+        ("reset-session", "project 1", body),
+        ("prune-session", "project 1", {"keepCurrent": True}),
         ("start", "project 1", body),
         ("restart", "project 1", body),
         ("stop", "project 1"),
     ]
+
+
+def test_core_ui_project_session_reuses_resets_and_prunes_fast_workspace(tmp_path, monkeypatch):
+    project_id = "ui-fast-project"
+    project_path = tmp_path / "source-project"
+    project_path.mkdir()
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    state_dir = tmp_path / "state"
+
+    monkeypatch.setattr(config, "STATE_DIR", state_dir)
+    monkeypatch.setattr(models, "SESSION_DIR", session_dir)
+    monkeypatch.setattr(models, "SESSION_INDEX_FILE", session_dir / "_index.json")
+    monkeypatch.setattr(core_ui, "_publish_session_change", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        core_ui,
+        "_get_project",
+        lambda requested_id: {
+            "id": requested_id,
+            "name": "Tiny UI",
+            "fullName": "Tiny UI Project",
+            "path": str(project_path),
+            "coreBranch": "main",
+        },
+    )
+    monkeypatch.setattr(
+        core_ui,
+        "build_project_ui_status",
+        lambda requested_id: {
+            "projectId": requested_id,
+            "previewUrl": f"/ui-project/{requested_id}/app",
+            "previewPath": "/app",
+            "workflowSource": "dev-config",
+            "statusSummary": "Ready for HMR",
+            "buildCommand": "npm run build",
+            "command": "npm run dev",
+        },
+    )
+
+    first = core_ui.get_project_ui_session(project_id)
+    assert first["created"] is True
+    first_session_id = first["sessionId"]
+    first_workspace = Path(first["fastWorkspace"])
+    assert first_workspace.exists()
+    agents_text = (first_workspace / "AGENTS.md").read_text(encoding="utf-8")
+    assert agents_text.startswith("# UI Mode Fast Workspace")
+    assert "fast verification budget" in agents_text
+    assert "Do not run" in agents_text and "deploy/build scripts as the default" in agents_text
+    assert "Build policy: `explicit-user-approval`" in agents_text
+    assert "full" in agents_text and "build is opt-in" in agents_text
+    assert "Only run" in agents_text and "explicitly asks" in agents_text
+    assert "live-preview visibility still needs" in agents_text and "explicit rebuild" in agents_text
+    context = json.loads((first_workspace / "ui-context.json").read_text(encoding="utf-8"))
+    assert context["sourceWorkspace"] == str(project_path.resolve())
+    assert context["fastWorkspace"] == str(first_workspace.resolve())
+    assert context["buildPolicy"] == "explicit-user-approval"
+    assert "explicit user-approval" in context["buildPolicySummary"]
+    assert (first_workspace / "preview-patches").is_dir()
+    assert (first_workspace / "source").exists() or (first_workspace / "source.txt").read_text(encoding="utf-8").strip() == str(project_path.resolve())
+
+    saved = Session.load(first_session_id)
+    assert saved is not None
+    assert saved.session_mode == "ui_mode"
+    assert saved.workspace == str(first_workspace.resolve())
+    assert saved.ui_project_workspace == str(project_path.resolve())
+    assert saved.ui_build_policy == "explicit-user-approval"
+
+    reused = core_ui.get_project_ui_session(project_id)
+    assert reused["created"] is False
+    assert reused["sessionId"] == first_session_id
+
+    stale_workspace = first_workspace.parent / "stale-ui-session"
+    stale_workspace.mkdir(parents=True)
+    reset = core_ui.reset_project_ui_session(project_id, {"sessionId": first_session_id})
+    assert reset["reset"] is True
+    assert reset["previousSessionId"] == first_session_id
+    assert reset["sessionId"] != first_session_id
+    retired = Session.load(first_session_id)
+    assert retired is not None
+    assert retired.archived is True
+
+    pruned = core_ui.prune_project_ui_sessions(project_id, {"keepCurrent": True})
+    assert pruned["removedWorkspaces"] >= 1
+    assert not stale_workspace.exists()
+    assert Path(reset["fastWorkspace"]).exists()
+
+
+def test_ui_mode_chat_start_uses_fast_workspace_without_overwriting_source_metadata(tmp_path, monkeypatch):
+    project_id = "ui-fast-chat"
+    source_workspace = tmp_path / "source-project"
+    fast_workspace = tmp_path / "state" / "ui-mode" / "workspaces" / "project" / "session"
+    source_workspace.mkdir(parents=True)
+    fast_workspace.mkdir(parents=True)
+    (fast_workspace / "AGENTS.md").write_text("# UI Mode Fast Workspace\n", encoding="utf-8")
+    (fast_workspace / "ui-context.json").write_text(json.dumps({"sourceWorkspace": str(source_workspace)}), encoding="utf-8")
+
+    monkeypatch.setattr(routes, "resolve_trusted_workspace", lambda path=None: Path(path or source_workspace).expanduser().resolve())
+    monkeypatch.setattr(routes, "set_last_workspace", lambda workspace: None)
+    monkeypatch.setattr(routes, "_resolve_compatible_session_model_state", lambda model, provider: (model or "test/model", provider, False))
+    monkeypatch.setattr(core_ui, "is_ui_mode_fast_workspace", lambda path, project_id=None: Path(path).resolve() == fast_workspace.resolve())
+
+    session = Session(
+        session_id="ui-mode-fast",
+        workspace=str(fast_workspace),
+        model="test/model",
+        session_mode="ui_mode",
+        project_id=project_id,
+        ui_project_id=project_id,
+        ui_project_workspace=str(source_workspace),
+    )
+    monkeypatch.setattr(routes, "get_session", lambda session_id: session if session_id == session.session_id else (_ for _ in ()).throw(KeyError(session_id)))
+    captured = {}
+
+    def fake_start_chat_stream(s, **kwargs):
+        captured.update(kwargs)
+        s.workspace = kwargs["workspace"]
+        return {"stream_id": "stream-1", "pending_started_at": 1.0}
+
+    monkeypatch.setattr(routes, "_start_chat_stream_for_session", fake_start_chat_stream)
+
+    handler = DummyHandler("POST")
+    result = routes._handle_chat_start(
+        handler,
+        {
+            "session_id": session.session_id,
+            "message": "Tighten the selected button spacing",
+            "workspace": str(fast_workspace),
+            "session_mode": "ui_mode",
+            "ui_project_id": project_id,
+            "ui_project_workspace": str(source_workspace),
+            "ui_fast_workspace": str(fast_workspace),
+            "ui_build_policy": "explicit-user-approval",
+        },
+    )
+
+    assert result in (True, None)
+    assert handler.status == 200
+    assert captured["workspace"] == str(fast_workspace.resolve())
+    assert session.workspace == str(fast_workspace.resolve())
+    assert session.ui_project_workspace == str(source_workspace)
+    assert session.ui_build_policy == "explicit-user-approval"
 
 
 def test_ui_mode_shell_and_static_sources_are_present():
@@ -244,6 +526,7 @@ def test_ui_mode_shell_and_static_sources_are_present():
     js = (root / "static" / "ui-mode.js").read_text(encoding="utf-8")
     compat = (root / "static" / "ui-proxy-compat.js").read_text(encoding="utf-8")
     messages = (root / "static" / "messages.js").read_text(encoding="utf-8")
+    ui_src = (root / "static" / "ui.js").read_text(encoding="utf-8")
     ops_detail = (root / "static" / "ops-legacy-project-detail.js").read_text(encoding="utf-8")
 
     assert "data-preview-frame" in html
@@ -272,18 +555,27 @@ def test_ui_mode_shell_and_static_sources_are_present():
     assert "data-highlight-clear" in html
     assert "Clear highlights" in html
     assert html.count('data-action="reload-preview"') == 1
+    assert html.count('data-action="apply-preview-patches"') == 1
+    assert html.count('data-action="discard-preview-patches"') == 1
+    assert "data-preview-patch-status" in html
+    assert "Apply to source" in html
+    assert "Discard" in html
     assert html.count('data-action="focus-preview"') == 1
     assert "Refresh status" in html
     assert "__CSRF_TOKEN_JSON__" in html
     assert "api/core/projects/" in js
-    assert "api/session/new" in js
-    assert "session_mode:'ui_mode'" in js
-    assert "surface:'ui_mode'" in js
+    assert "ui/session" in js
+    assert "api/session/new" not in js
+    assert "api/session?session_id=" not in js
+    assert "data-action=\"reset-chat\"" in html
+    assert "resetChatSession" in js
+    assert "Opening project UI chat…" in js
+    assert "uiFastWorkspace" in js
+    assert "uiContextPath" in js
+    assert "UI Mode fast workspace" in js
+    assert "UI Mode context file" in js
     assert "chatUrl.searchParams.set('sessionMode','ui_mode')" in js
     assert "sessionVerified:false" in js
-    assert "api/session?session_id=" in js
-    assert "clearChatSessionFromUrl" in js
-    assert "Recreating session…" in js
     assert "uiProjectLabel" in js
     assert "uiProjectWorkspace" in js
     assert "projectSourceWorkspace" in js
@@ -304,6 +596,14 @@ def test_ui_mode_shell_and_static_sources_are_present():
     assert "clearHighlights" in js
     assert "hermes-ui-clear-highlights" in js
     assert "[data-highlight-clear]" in js
+    assert "previewPatches:[]" in js
+    assert "handlePreviewPatchRequest" in js
+    assert "postPreviewPatches" in js
+    assert "previewPatchJournalPrompt" in js
+    assert "hermes-ui-preview-patch-request" in js
+    assert "hermes-ui-preview-apply-patches" in js
+    assert "hermes-ui-preview-clear-patches" in js
+    assert "hermes-ui-mode-send-text" in js
     assert "hermes-ui-preview-context" in js
     assert "hermes-ui-mode-context-update" in js
     assert "sendContextToChat" not in js
@@ -312,6 +612,16 @@ def test_ui_mode_shell_and_static_sources_are_present():
     assert "Click preview element to highlight" in js
     assert "schedulePoll(status)" in js
     assert "value==='starting'||value==='building'" in js
+    assert "lastPreviewAppPath:''" in js
+    assert "previewRuntimeReady:false" in js
+    assert "hermes-ui-mode-preview-route-v1:" in js
+    assert "rememberPreviewRoute(state.pageContext.appPath)" in js
+    assert "currentPreviewReloadUrl" in js
+    assert "attachPreviewForStatus(status)" in js
+    assert "!state.previewRuntimeReady" in js
+    assert "setFrameSource(els.previewFrame,target,state.cacheToken)" in js
+    assert "params.delete('__hermesUiModeTs')" in js
+    assert "previewProxyPrefixFromPath" in js
     assert "data-hermes-ui-proxy-prefix" in compat
     assert "rewriteNavigationUrl" in compat
     assert "history.pushState" in compat
@@ -327,23 +637,48 @@ def test_ui_mode_shell_and_static_sources_are_present():
     assert "data-hermes-ui-inspector-overlay^=\"selected\"" in compat
     assert "data-hermes-ui-inspector-overlay" in compat
     assert "createSelector" in compat
+    assert "hermes-ui-preview-apply-patches" in compat
+    assert "data-hermes-ui-preview-patch" in compat
+    assert "applyPreviewPatches" in compat
+    assert "hermes-ui-preview-patches-applied" in compat
     assert "hermes-ui-mode-context-update" in messages
+    assert "hermes-ui-preview-patch" in messages
+    assert "_uiModeDispatchPreviewPatchDirectives" in messages
+    assert "hermes-ui-preview-patch-request" in messages
+    assert "_uiModeSendShellText" in messages
+    assert "hermes-ui-mode-send-text" in messages
     assert "_appendUiModeContextToOutgoingText" in messages
     assert "_uiModeFallbackContextText" in messages
     assert "_uiModeContextForOutgoingText" in messages
+    assert "_stripUiModePreviewPatchDirectives" in ui_src
+    assert "hermes-ui-preview-patch" in ui_src
     assert "Highlighted/selected elements: none" in messages
     assert "_isUiModeChatSession" in messages
     assert "session_mode:_isUiModeChatSession()?'ui_mode':undefined" in messages
     assert "surface:_isUiModeChatSession()?'ui_mode':undefined" in messages
     assert "ui_project_label:_uiModeMetadata.projectLabel||undefined" in messages
     assert "ui_project_workspace:_uiModeMetadata.projectWorkspace||undefined" in messages
-    assert "workspace:_uiModeMetadata.projectWorkspace||S.session.workspace" in messages
+    assert "ui_fast_workspace:_uiModeMetadata.fastWorkspace||undefined" in messages
+    assert "ui_context_path:_uiModeMetadata.contextPath||undefined" in messages
+    assert "workspace:_uiModeMetadata.fastWorkspace||_uiModeMetadata.projectWorkspace||S.session.workspace" in messages
     assert "Project source workspace" in messages
     assert "Runtime workflow source" in js
+    assert "Runtime iteration mode" in js
+    assert "Play parity available" in js
     assert "Runtime build command" in js
     assert "Runtime start command" in js
-    assert "ui_workflow_source:meta.workflowSource" in js
+    assert "Runtime build policy" in js
+    assert "explicit-user-approval" in js
+    assert "uiBuildPolicy" in js
+    assert "workflowSource:meta.workflowSource" in js
+    assert "iterationMode:meta.iterationMode" in js
+    assert "uiIterationMode" in js
+    assert "uiParityAvailable" in js
     assert "ui_workflow_source:_uiModeMetadata.workflowSource||undefined" in messages
+    assert "ui_iteration_mode:_uiModeMetadata.iterationMode||undefined" in messages
+    assert "ui_parity_available:_uiModeMetadata.parityAvailable||undefined" in messages
+    assert "ui_build_policy:_uiModeMetadata.buildPolicy||undefined" in messages
+    assert "Runtime build policy" in messages
     assert "runtime workflow source" in messages
     assert "ui_preview_path:_uiModeMetadata.previewPath||undefined" in messages
     assert "ui-mode?projectId=" in ops_detail
@@ -351,20 +686,34 @@ def test_ui_mode_shell_and_static_sources_are_present():
     streaming_src = (root / "api" / "streaming.py").read_text(encoding="utf-8")
     gateway_src = (root / "api" / "gateway_chat.py").read_text(encoding="utf-8")
     assert "_ui_mode_project_workspace" in routes_src
-    assert "ui_project_workspace = _ui_mode_project_workspace" in routes_src
+    assert "ui_execution_workspace = _ui_mode_project_workspace" in routes_src
+    assert "is_ui_mode_fast_workspace" in routes_src
     assert "UI Mode project source workspace" in streaming_src
     assert "UI Mode runtime workflow source" in streaming_src
+    assert "UI Mode iteration mode" in streaming_src
+    assert "UI Mode Play parity available" in streaming_src
     assert "Fast path for UI edits" in streaming_src
     assert "source workspace as the working directory" in streaming_src
     assert "Do not run production builds" in streaming_src
+    assert "Build policy hard stop" in streaming_src
+    assert "explicit-user-approval only" in streaming_src
+    assert "Do not run configured deploy/build scripts" in streaming_src
+    assert "Rebuild preview now" in streaming_src
+    assert "deploy/build scripts as a default" in streaming_src
     assert "Iframe reload does not rebuild" in streaming_src
-    assert "served artifacts on disk have changed" in streaming_src
-    assert "restart only when the runtime/server bundle" in streaming_src
+    assert "Do not make those artifacts current automatically" in streaming_src
     assert "actual preview DOM" in streaming_src
     assert "all selected/highlighted-element descriptors" in streaming_src
+    assert "temporary live-preview patch" in streaming_src
+    assert "hermes-ui-preview-patch" in streaming_src
+    assert "selected elements" in streaming_src
+    assert "migrate the journal back into source files" in streaming_src
     assert '"ui_project_workspace"' in gateway_src
     assert '"ui_workflow_source"' in gateway_src
+    assert '"ui_iteration_mode"' in gateway_src
+    assert '"ui_parity_available"' in gateway_src
     assert '"ui_build_command"' in gateway_src
+    assert '"ui_build_policy"' in gateway_src
 
 
 def test_ui_mode_chat_start_uses_project_source_workspace_for_stale_sidecar_session(tmp_path, monkeypatch):
@@ -440,8 +789,8 @@ def test_ui_mode_can_import_project_play_config(tmp_path):
     assert config["inspect"]["url"] == "/app"
 
 
-def test_ui_mode_auto_detects_project_play_config_before_package_scripts(tmp_path, monkeypatch):
-    project_id = "play-first-ui"
+def test_ui_mode_auto_detects_package_dev_before_project_play_config(tmp_path, monkeypatch):
+    project_id = "fast-first-ui"
     registry_dir = tmp_path / "registry"
     project_path = tmp_path / "project"
     project_path.mkdir()
@@ -455,25 +804,261 @@ def test_ui_mode_auto_detects_project_play_config_before_package_scripts(tmp_pat
 
     assert config_info["exists"] is False
     assert config_info["autoDetected"] is True
-    assert config_info["autoSource"] == "project_play.json"
-    assert config_info["source"] == "play-config"
+    assert config_info["autoSource"] == "package.json"
+    assert config_info["source"] == "ui-config"
     assert config_info["valid"] is True
-    assert config_info["playConfigPath"].endswith("project_play.json")
+    assert config_info["playConfigPath"] == ""
+    assert config_info["parityAvailable"] is True
+    assert config_info["parityWorkflowSource"] == "play-config"
+    assert config_info["parityConfigPath"].endswith("project_play.json")
 
     resolved = core_ui.get_project_ui_config(project_id)
     assert resolved["autoDetected"] is True
-    assert resolved["autoSource"] == "project_play.json"
-    assert resolved["source"] == "play-config"
-    assert resolved["config"]["dev"]["command"] == "python3 -u server.py"
-    assert "vite" not in resolved["config"]["dev"]["command"]
-    assert resolved["config"]["inspect"]["url"] == "/app"
+    assert resolved["autoSource"] == "package.json"
+    assert resolved["source"] == "package.json"
+    assert resolved["config"]["build"]["command"] == ""
+    assert resolved["config"]["dev"]["command"] == "npm run dev"
+    assert resolved["config"]["inspect"]["url"] == "/"
+
+    parity = core_ui.get_project_ui_config(project_id, workflow="play-config")
+    assert parity["autoDetected"] is True
+    assert parity["autoSource"] == "project_play.json"
+    assert parity["source"] == "play-config"
+    assert parity["config"]["build"]["command"].startswith("python3 -c")
+    assert parity["config"]["dev"]["command"] == "python3 -u server.py"
+    assert parity["config"]["inspect"]["url"] == "/app"
 
     status = core_ui.build_project_ui_status(project_id)
     assert status["canStart"] is True
-    assert status["workflowSource"] == "play-config"
+    assert status["workflowSource"] == "package.json"
+    assert status["iterationMode"] == "fast-dev"
+    assert status["buildPolicy"] == "explicit-user-approval"
+    assert status["parityAvailable"] is True
+    assert status["parityWorkflowSource"] == "play-config"
     assert status["configAutoDetected"] is True
-    assert status["configAutoSource"] == "project_play.json"
-    assert "same app runtime as Play" in status["statusSummary"]
+    assert status["configAutoSource"] == "package.json"
+    assert "fast UI workflow" in status["statusSummary"]
+
+
+def test_ui_mode_auto_detects_monorepo_template_client_dev_with_play_parity(tmp_path, monkeypatch):
+    project_id = "monorepo-template-ui"
+    registry_dir = tmp_path / "registry"
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+    _write_project_registry(registry_dir, project_id, project_path)
+    _write_monorepo_template_project(project_path)
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(registry_dir))
+
+    config_info = core_ui.get_project_ui_config_file_info(project_id)
+
+    assert config_info["exists"] is False
+    assert config_info["autoDetected"] is True
+    assert config_info["autoSource"] == "monorepo-template:packages/client"
+    assert config_info["source"] == "ui-config"
+    assert config_info["valid"] is True
+    assert config_info["parityAvailable"] is True
+    assert config_info["parityWorkflowSource"] == "play-config"
+    assert config_info["parityConfigPath"].endswith("project_play.json")
+
+    resolved = core_ui.get_project_ui_config(project_id)
+    assert resolved["autoDetected"] is True
+    assert resolved["autoSource"] == "monorepo-template:packages/client"
+    assert resolved["source"] == "monorepo-template:packages/client"
+    assert resolved["config"]["build"]["command"] == ""
+    dev = resolved["config"]["dev"]
+    assert dev["cwd"] == "."
+    assert dev["command"] == "pnpm --filter ./packages/client run dev -- --host 127.0.0.1 --port ${PORT} --strictPort"
+    assert dev["env"]["MONOREPO_ACTIVE_APP"] == "model-builder"
+    assert dev["env"]["COREPACK_ENABLE_DOWNLOAD_PROMPT"] == "0"
+    assert dev["env"]["NPM_CONFIG_STORE_DIR"] == ".cache/pnpm-store"
+    assert "SERVE_CLIENT_BUILD" not in dev["env"]
+    assert resolved["config"]["inspect"]["url"] == "/"
+
+    parity = core_ui.get_project_ui_config(project_id, workflow="play-config")
+    assert parity["source"] == "play-config"
+    assert parity["config"]["build"]["command"] == "bash ./scripts/deploy-build.sh model-builder"
+    assert parity["config"]["dev"]["env"]["SERVE_CLIENT_BUILD"] == "true"
+    assert parity["config"]["inspect"]["url"] == "/app"
+
+    status = core_ui.build_project_ui_status(project_id)
+    assert status["canStart"] is True
+    assert status["workflowSource"] == "monorepo-template:packages/client"
+    assert status["iterationMode"] == "fast-dev"
+    assert status["buildPolicy"] == "explicit-user-approval"
+    assert status["parityAvailable"] is True
+    assert status["configAutoSource"] == "monorepo-template:packages/client"
+    assert "fast UI workflow" in status["statusSummary"]
+    assert "monorepo template packages/client dev lane" in status["statusSummary"]
+
+
+def test_ui_mode_auto_detects_monorepo_template_ui_dev_contract_before_client_fallback(tmp_path, monkeypatch):
+    project_id = "monorepo-template-ui-dev"
+    registry_dir = tmp_path / "registry"
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+    _write_project_registry(registry_dir, project_id, project_path)
+    _write_monorepo_template_project(project_path)
+    _add_monorepo_template_ui_dev_contract(project_path)
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(registry_dir))
+
+    config_info = core_ui.get_project_ui_config_file_info(project_id)
+
+    assert config_info["exists"] is False
+    assert config_info["autoDetected"] is True
+    assert config_info["autoSource"] == "monorepo-template:ui-dev"
+    assert config_info["valid"] is True
+    assert config_info["parityAvailable"] is True
+
+    resolved = core_ui.get_project_ui_config(project_id)
+    assert resolved["autoDetected"] is True
+    assert resolved["autoSource"] == "monorepo-template:ui-dev"
+    assert resolved["source"] == "monorepo-template:ui-dev"
+    dev = resolved["config"]["dev"]
+    assert dev["command"] == "pnpm run ui:dev"
+    assert dev["env"]["MONOREPO_ACTIVE_APP"] == "model-builder"
+    assert "SERVE_CLIENT_BUILD" not in dev["env"]
+
+    status = core_ui.build_project_ui_status(project_id)
+    assert status["workflowSource"] == "monorepo-template:ui-dev"
+    assert status["iterationMode"] == "fast-dev"
+    assert status["configAutoDetected"] is True
+    assert status["configAutoSource"] == "monorepo-template:ui-dev"
+    assert "monorepo template ui:dev contract" in status["statusSummary"]
+
+
+def test_ui_mode_uses_tracked_monorepo_template_project_ui_contract(tmp_path, monkeypatch):
+    project_id = "monorepo-template-project-ui"
+    registry_dir = tmp_path / "registry"
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+    _write_project_registry(registry_dir, project_id, project_path)
+    _write_monorepo_template_project(project_path)
+    _add_monorepo_template_ui_dev_contract(project_path)
+    _write_monorepo_template_ui_config(project_path)
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(registry_dir))
+
+    config_info = core_ui.get_project_ui_config_file_info(project_id)
+
+    assert config_info["exists"] is True
+    assert config_info["autoDetected"] is False
+    assert config_info["source"] == "monorepo-template:ui-dev"
+    assert config_info["valid"] is True
+    assert config_info["parityAvailable"] is True
+    assert config_info["parityWorkflowSource"] == "play-config"
+    assert config_info["parityConfigPath"].endswith("project_play.json")
+
+    resolved = core_ui.get_project_ui_config(project_id)
+    assert resolved.get("autoDetected") is not True
+    assert resolved["source"] == "monorepo-template:ui-dev"
+    assert resolved["config"]["dev"]["command"] == "pnpm run ui:dev"
+    assert resolved["config"]["dev"]["env"]["COREPACK_ENABLE_DOWNLOAD_PROMPT"] == "0"
+    assert "SERVE_CLIENT_BUILD" not in resolved["config"]["dev"]["env"]
+
+    status = core_ui.build_project_ui_status(project_id)
+    assert status["workflowSource"] == "monorepo-template:ui-dev"
+    assert status["iterationMode"] == "fast-dev"
+    assert status["parityAvailable"] is True
+    assert status["configAutoDetected"] is False
+    assert status["configAutoSource"] == ""
+    assert status["statusSummary"] == "UI workflow is ready. Start UI Mode to inspect the live app."
+
+
+def test_ui_mode_default_start_uses_fast_package_dev_not_play_build(tmp_path, monkeypatch):
+    project_id = "fast-start-ui"
+    registry_dir = tmp_path / "registry"
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+    _write_project_registry(registry_dir, project_id, project_path)
+    _write_tiny_play_sourced_ui_project(project_path)
+    (project_path / ".hermes" / "ui.json").unlink()
+    (project_path / "package.json").write_text(json.dumps({"scripts": {"dev": "python3 -u server.py"}}), encoding="utf-8")
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(registry_dir))
+
+    captured = {}
+
+    def fake_runtime_worker(ui_config, state):
+        captured["ui_config"] = ui_config
+        core_ui._mark_state(
+            state,
+            "ready",
+            running=True,
+            ready=True,
+            preview_url=f"/ui-project/{project_id}/",
+            inspect_url=f"/ui-project/{project_id}/",
+            set_ready_at=True,
+            message="fake ready",
+        )
+
+    monkeypatch.setattr(core_ui, "_runtime_worker", fake_runtime_worker)
+    try:
+        started = core_ui.start_project_ui_runtime(project_id, {"sessionId": "session-1"})
+        assert started["status"] in {"starting", "ready"}
+        deadline = time.time() + 2
+        while time.time() < deadline and "ui_config" not in captured:
+            time.sleep(0.02)
+
+        ui_config = captured["ui_config"]
+        assert ui_config["source"] == "package.json"
+        assert ui_config["config"]["build"]["command"] == ""
+        assert ui_config["config"]["dev"]["command"] == "npm run dev"
+        assert not (project_path / "built.txt").exists()
+
+        status = core_ui.build_project_ui_status(project_id)
+        assert status["ready"] is True
+        assert status["workflowSource"] == "package.json"
+        assert status["iterationMode"] == "fast-dev"
+        assert status["parityAvailable"] is True
+        assert status["buildCommand"] in (None, "")
+    finally:
+        core_ui.stop_project_ui_runtime(project_id, purge=True)
+
+
+def test_ui_mode_explicit_start_can_use_play_parity_build(tmp_path, monkeypatch):
+    project_id = "parity-start-ui"
+    registry_dir = tmp_path / "registry"
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+    _write_project_registry(registry_dir, project_id, project_path)
+    _write_tiny_play_sourced_ui_project(project_path)
+    (project_path / ".hermes" / "ui.json").unlink()
+    (project_path / "package.json").write_text(json.dumps({"scripts": {"dev": "python3 -u server.py"}}), encoding="utf-8")
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(registry_dir))
+
+    captured = {}
+
+    def fake_runtime_worker(ui_config, state):
+        captured["ui_config"] = ui_config
+        core_ui._mark_state(
+            state,
+            "ready",
+            running=True,
+            ready=True,
+            preview_url=f"/ui-project/{project_id}/app",
+            inspect_url=f"/ui-project/{project_id}/app",
+            set_ready_at=True,
+            message="fake parity ready",
+        )
+
+    monkeypatch.setattr(core_ui, "_runtime_worker", fake_runtime_worker)
+    try:
+        started = core_ui.start_project_ui_runtime(project_id, {"sessionId": "session-1", "workflow": "play-config"})
+        assert started["status"] in {"starting", "ready"}
+        deadline = time.time() + 2
+        while time.time() < deadline and "ui_config" not in captured:
+            time.sleep(0.02)
+
+        ui_config = captured["ui_config"]
+        assert ui_config["source"] == "play-config"
+        assert ui_config["config"]["build"]["command"].startswith("python3 -c")
+        assert ui_config["config"]["dev"]["command"] == "python3 -u server.py"
+
+        status = core_ui.build_project_ui_status(project_id)
+        assert status["ready"] is True
+        assert status["workflowSource"] == "play-config"
+        assert status["iterationMode"] == "play-parity"
+        assert status["parityAvailable"] is False
+    finally:
+        core_ui.stop_project_ui_runtime(project_id, purge=True)
 
 
 def test_ui_mode_shell_cache_busts_script_by_file_mtime():

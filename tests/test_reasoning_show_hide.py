@@ -10,14 +10,40 @@ Covers:
   - show|hide present as subArgs in COMMANDS entry
 """
 
+import io
+import json
 import pathlib
 import re
+from urllib.parse import urlparse
 
 REPO = pathlib.Path(__file__).parent.parent
 
 
 def read(rel):
     return (REPO / rel).read_text(encoding='utf-8')
+
+
+class DummyHandler:
+    def __init__(self, body: dict | None = None) -> None:
+        self.command = "POST"
+        raw = json.dumps(body or {}).encode('utf-8')
+        self.headers = {'Content-Length': str(len(raw))}
+        self.rfile = io.BytesIO(raw)
+        self.wfile = io.BytesIO()
+        self.status = None
+        self.response_headers = []
+
+    def send_response(self, status: int) -> None:
+        self.status = status
+
+    def send_header(self, key: str, value: str) -> None:
+        self.response_headers.append((key, value))
+
+    def end_headers(self) -> None:
+        pass
+
+    def json_payload(self) -> dict:
+        return json.loads(self.wfile.getvalue().decode('utf-8'))
 
 
 # ── api/config.py ─────────────────────────────────────────────────────────────
@@ -209,25 +235,50 @@ class TestReasoningCommand:
             )
 
     def test_cmd_reasoning_routes_effort_through_api_reasoning(self):
-        """Effort levels (none|minimal|low|medium|high|xhigh) must POST to
-        /api/reasoning so the agent's config.yaml agent.reasoning_effort is
-        updated — the same key the CLI writes via `/reasoning <level>`.
-        Previous design stored in a dead client variable, which did nothing."""
+        """Effort levels POST to /api/reasoning. In WebUI chats they default
+        to a session-local override; explicit profile/global scope updates the
+        profile default."""
         src = read('static/commands.js')
         m = re.search(r'function cmdReasoning\(.*?\n\}', src, re.DOTALL)
         assert m
         fn = m.group(0)
         assert "api('/api/reasoning'" in fn, (
-            "cmdReasoning must POST effort levels to /api/reasoning so "
-            "config.yaml agent.reasoning_effort is updated (CLI parity)"
+            "cmdReasoning must POST effort levels to /api/reasoning"
         )
-        assert "'effort:'" in fn or 'effort:arg' in fn or 'effort: arg' in fn, (
-            "effort-level branch must send {effort: arg} to /api/reasoning"
+        assert 'effort:effort' in fn or 'effort: effort' in fn or '_payloadForEffort(effort' in fn, (
+            "effort-level branch must send {effort: <level>} to /api/reasoning"
         )
-        # Must NOT still hold a dead local-only variable for effort.
+        assert "payload.scope='session'" in fn or "scope:'session'" in fn, (
+            "/reasoning <level> must default to a session-scoped override when a session is active"
+        )
+        assert "profile <level>" in fn, (
+            "/reasoning profile <level> must remain available for profile-wide defaults"
+        )
         assert '_reasoningEffort=' not in fn, (
             "cmdReasoning must not keep a dead client-side _reasoningEffort "
-            "(effort now round-trips through /api/reasoning → config.yaml)"
+            "(effort now round-trips through /api/reasoning)"
+        )
+
+    def test_cmd_reasoning_supports_session_default_clear(self):
+        src = read('static/commands.js')
+        assert "'default'" in src, (
+            "/reasoning default must clear the current session override back to the profile default"
+        )
+        assert "default only clears this session" in src
+
+    def test_composer_reasoning_chip_posts_session_scope(self):
+        src = read('static/ui.js')
+        assert "params.set('session_id'" in src, (
+            "reasoning status GET must include session_id so the chip shows the session override"
+        )
+        assert 'function _reasoningMutationPayload' in src
+        assert "payload.scope='session'" in src, (
+            "composer reasoning dropdown must POST session-scoped effort by default"
+        )
+        assert "session_reasoning_effort" in src and "profile_reasoning_effort" in src
+        html = read('static/index.html')
+        assert 'data-effort=""' in html and 'Use profile default' in html, (
+            "dropdown must expose a way to clear the session override"
         )
 
     def test_cmd_reasoning_routes_display_through_api_reasoning(self):
@@ -346,16 +397,47 @@ class TestReasoningConfigHelpers:
         st = cfg.get_reasoning_status()
         assert st['show_reasoning'] is True
         assert st['reasoning_effort'] == ''
+        assert st['profile_reasoning_effort'] == ''
+        assert st['session_reasoning_effort'] == ''
+        assert st['reasoning_scope'] == 'profile'
+
+    def test_get_reasoning_status_overlays_session_effort(self, tmp_path, monkeypatch):
+        import yaml as _yaml
+        import api.config as cfg
+        cfgfile = tmp_path / 'config.yaml'
+        cfgfile.write_text(_yaml.safe_dump({'agent': {'reasoning_effort': 'xhigh'}}), encoding='utf-8')
+        monkeypatch.setattr(cfg, '_get_config_path', lambda: cfgfile)
+
+        st = cfg.get_reasoning_status(session_effort='low')
+        assert st['reasoning_effort'] == 'low'
+        assert st['profile_reasoning_effort'] == 'xhigh'
+        assert st['session_reasoning_effort'] == 'low'
+        assert st['reasoning_scope'] == 'session'
+
+        inherited = cfg.get_reasoning_status(session_effort='default')
+        assert inherited['reasoning_effort'] == 'xhigh'
+        assert inherited['session_reasoning_effort'] == ''
+        assert inherited['reasoning_scope'] == 'profile'
+
+    def test_normalize_reasoning_effort_value_allows_session_default(self):
+        import pytest as _pt
+        from api.config import normalize_reasoning_effort_value
+        assert normalize_reasoning_effort_value('DEFAULT', allow_default=True) == ''
+        assert normalize_reasoning_effort_value(' high ') == 'high'
+        assert normalize_reasoning_effort_value('none') == 'none'
+        with _pt.raises(ValueError):
+            normalize_reasoning_effort_value('default')
+        with _pt.raises(ValueError):
+            normalize_reasoning_effort_value('bogus', allow_default=True)
 
 
 # ── api/streaming.py — AIAgent receives reasoning_config ──────────────────────
 
 class TestStreamingReasoningWiring:
-    """Confirm api/streaming.py reads agent.reasoning_effort from config and
-    passes parsed reasoning_config to AIAgent (so effort changes take effect
-    on the next session)."""
+    """Confirm api/streaming.py reads profile/session reasoning effort and
+    passes parsed reasoning_config to AIAgent."""
 
-    def test_streaming_reads_reasoning_effort_from_config(self):
+    def test_streaming_reads_reasoning_effort_from_session_or_config(self):
         src = read('api/streaming.py')
         assert 'parse_reasoning_effort' in src, (
             "api/streaming.py must import parse_reasoning_effort to translate "
@@ -364,6 +446,10 @@ class TestStreamingReasoningWiring:
         assert 'coerce_reasoning_effort_for_model' in src, (
             "api/streaming.py must clamp/drop unsupported model-specific effort "
             "levels before sending reasoning_config to the provider"
+        )
+        assert "getattr(s, 'reasoning_effort', None)" in src, (
+            "streaming must prefer a persisted per-session reasoning override "
+            "before falling back to profile config"
         )
         assert "reasoning_config" in src and "'reasoning_config' in _agent_params" in src, (
             "api/streaming.py must guard the reasoning_config kwarg with "
@@ -396,6 +482,58 @@ class TestReasoningRoutes:
     def test_post_api_reasoning_accepts_effort(self):
         src = read('api/routes.py')
         assert 'set_reasoning_effort' in src, (
-            "POST /api/reasoning must route effort changes through "
-            "set_reasoning_effort"
+            "POST /api/reasoning must still support profile/global effort changes"
         )
+        assert 'scope == "session"' in src, (
+            "POST /api/reasoning must support session-scoped reasoning effort"
+        )
+        assert 's.reasoning_effort = normalized or None' in src, (
+            "session-scoped default must clear the persisted session override"
+        )
+        assert 'normalize_reasoning_effort_value(effort, allow_default=True)' in src
+
+    def test_post_api_reasoning_session_effort_does_not_mutate_profile(self, tmp_path, monkeypatch):
+        import yaml as _yaml
+        from api import config as cfg
+        from api import models
+        from api import routes
+
+        cfgfile = tmp_path / 'config.yaml'
+        cfgfile.write_text(_yaml.safe_dump({'agent': {'reasoning_effort': 'xhigh'}}), encoding='utf-8')
+        session_dir = tmp_path / 'sessions'
+        session_dir.mkdir()
+        monkeypatch.setattr(cfg, '_get_config_path', lambda: cfgfile)
+        monkeypatch.setattr(models, 'SESSION_DIR', session_dir)
+        monkeypatch.setattr(models, 'SESSION_INDEX_FILE', session_dir / '_index.json')
+        with models.LOCK:
+            models.SESSIONS.clear()
+
+        session = models.new_session(workspace=str(tmp_path / 'workspace'))
+        handler = DummyHandler({'session_id': session.session_id, 'scope': 'session', 'effort': 'low'})
+        result = routes.handle_post(
+            handler,
+            urlparse('/api/reasoning'),
+        )
+        assert result in (True, None)
+        payload = handler.json_payload()
+        assert handler.status == 200
+        assert payload['reasoning_effort'] == 'low'
+        assert payload['profile_reasoning_effort'] == 'xhigh'
+        assert payload['session_reasoning_effort'] == 'low'
+        assert payload['reasoning_scope'] == 'session'
+        assert _yaml.safe_load(cfgfile.read_text(encoding='utf-8'))['agent']['reasoning_effort'] == 'xhigh'
+        assert models.get_session(session.session_id).reasoning_effort == 'low'
+
+        handler = DummyHandler({'session_id': session.session_id, 'scope': 'session', 'effort': 'default'})
+        result = routes.handle_post(
+            handler,
+            urlparse('/api/reasoning'),
+        )
+        assert result in (True, None)
+        payload = handler.json_payload()
+        assert handler.status == 200
+        assert payload['reasoning_effort'] == 'xhigh'
+        assert payload['session_reasoning_effort'] == ''
+        assert payload['reasoning_scope'] == 'profile'
+        assert models.get_session(session.session_id).reasoning_effort is None
+        assert _yaml.safe_load(cfgfile.read_text(encoding='utf-8'))['agent']['reasoning_effort'] == 'xhigh'
