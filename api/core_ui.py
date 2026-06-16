@@ -1,9 +1,11 @@
-"""Core UI Mode live dev runtime and proxy boundary.
+"""Core UI Mode live runtime and proxy boundary.
 
-UI Mode is intentionally separate from the Play build pipeline: it starts a
-project's dev server once, exposes status/logs through /api/core, and proxies a
-live preview through /ui-project/{projectId}/... so framework HMR/live-reload can
-update the iframe without production rebuilds.
+UI Mode starts a project runtime once, exposes status/logs through /api/core, and
+proxies a live preview through /ui-project/{projectId}/... so framework
+HMR/live-reload can update the iframe when the project uses a dev server. For
+projects with Play config, UI Mode can source the Play build/start/inspect
+contract so the preview matches the Play runtime instead of using a separate dev
+server path.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from api.helpers import _redact_text, t
 from api.updates import WEBUI_VERSION
 
 UI_CONFIG_FILE_NAMES = (".hermes/ui.json", ".cloud-terminal/ui.json", "project_ui.json")
+AUTO_DETECTED_SOURCE_KEY = "__uiAutoSource"
 UI_LOG_LINE_LIMIT = 1000
 UI_READY_TIMEOUT_DEFAULT_MS = 60 * 1000
 UI_READY_PATTERN = re.compile(r"(ready|listening|started|compiled|server running|running at|local:)", re.I)
@@ -265,6 +268,39 @@ def _config_candidates(project_path: Path) -> list[Path]:
     return [project_path / name for name in UI_CONFIG_FILE_NAMES]
 
 
+def _play_config_candidates(project_path: Path) -> list[Path]:
+    try:
+        from api import play_pipeline
+
+        names = (
+            play_pipeline.HERMES_PLAY_FILE_NAME,
+            play_pipeline.LEGACY_PLAY_FILE_NAME,
+            play_pipeline.MODERN_PLAY_FILE_NAME,
+        )
+    except Exception:
+        names = (".hermes/play.json", "project_play.json", ".cloud-terminal/play.json")
+    return [project_path / name for name in names]
+
+
+def _existing_play_config_path(project_path: Path) -> Path | None:
+    return next((path for path in _play_config_candidates(project_path) if path.exists()), None)
+
+
+def _relative_config_path(project_path: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(project_path.resolve()).as_posix()
+    except Exception:
+        return str(path)
+
+
+def _auto_detected_source(auto_config: dict | None) -> str:
+    if isinstance(auto_config, dict):
+        source = str(auto_config.get(AUTO_DETECTED_SOURCE_KEY) or "").strip()
+        if source:
+            return source
+    return "package.json"
+
+
 def _package_manager_for_project(project_path: Path) -> str:
     if (project_path / "pnpm-lock.yaml").exists():
         return "pnpm"
@@ -282,6 +318,11 @@ def _package_script_command(package_manager: str, script: str) -> str:
 
 
 def _auto_detect_ui_config(project_path: Path) -> dict | None:
+    play_path = _existing_play_config_path(project_path)
+    if play_path is not None:
+        source = _relative_config_path(project_path, play_path)
+        return {"version": 1, "source": source, AUTO_DETECTED_SOURCE_KEY: source}
+
     package_json = project_path / "package.json"
     if not package_json.exists():
         return None
@@ -297,6 +338,7 @@ def _auto_detect_ui_config(project_path: Path) -> dict | None:
     package_manager = _package_manager_for_project(project_path)
     return {
         "version": 1,
+        AUTO_DETECTED_SOURCE_KEY: "package.json",
         "dev": {
             "command": _package_script_command(package_manager, script),
             "cwd": ".",
@@ -510,7 +552,7 @@ def get_project_ui_config_file_info(project_id: str) -> dict:
         payload["missing"] = normalized["missing"]
         payload["errors"] = normalized["errors"]
         payload["autoDetected"] = True
-        payload["autoSource"] = "package.json"
+        payload["autoSource"] = _auto_detected_source(auto_config)
         payload["source"] = normalized.get("source") or "auto"
         payload["playConfigPath"] = normalized.get("playConfigPath") or ""
         return payload
@@ -545,7 +587,7 @@ def get_project_ui_config(project_id: str) -> dict:
                     "branch": info["branch"],
                     "config": normalized["config"],
                     "autoDetected": True,
-                    "autoSource": "package.json",
+                    "autoSource": _auto_detected_source(auto_config),
                     "source": normalized.get("source") or "auto",
                     "playConfigPath": normalized.get("playConfigPath") or "",
                 }
@@ -992,6 +1034,18 @@ def _ui_status_summary(config_info: dict, snapshot: dict) -> str:
         return str(snapshot.get("error") or "UI runtime failed.")
     if state_name == "stopped":
         return "UI runtime is stopped."
+    if config_info.get("source") == "play-config":
+        if config_info.get("valid") is True:
+            return "UI Mode will use the project's Play build/start config. Start UI Mode to inspect the same app runtime as Play."
+        missing = config_info.get("missing") or []
+        errors = config_info.get("errors") or []
+        parts = []
+        if missing:
+            parts.append("Missing: " + ", ".join(str(part) for part in missing))
+        if errors:
+            parts.extend(str(part) for part in errors)
+        detail = "; ".join(parts)
+        return f"Play-sourced UI config is incomplete. {detail}".strip()
     if config_info.get("exists") is not True and config_info.get("autoDetected") is True:
         if config_info.get("valid") is True:
             return "Auto-detected UI workflow from package.json. Start UI Mode to inspect the live app."
@@ -1008,8 +1062,6 @@ def _ui_status_summary(config_info: dict, snapshot: dict) -> str:
         if errors:
             parts.extend(str(part) for part in errors)
         return "UI config is incomplete. " + "; ".join(parts)
-    if config_info.get("source") == "play-config":
-        return "UI Mode will use the project's Play build/start config. Start UI Mode to inspect the same app runtime as Play."
     return "UI workflow is ready. Start UI Mode to inspect the live app."
 
 

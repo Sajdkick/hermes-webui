@@ -55,6 +55,10 @@ def test_webui_ephemeral_prompt_adds_ui_mode_guidance_only_for_ui_sessions():
             "ui_project_workspace": "/home/ubuntu/cloud-terminal-data/projects/summons",
             "ui_preview_path": "/app/match",
             "ui_preview_title": "Summons Match",
+            "ui_workflow_source": "play-config",
+            "ui_status_summary": "UI runtime is ready at /ui-project/summons-project/app.",
+            "ui_build_command": "bash ./scripts/deploy-build.sh summons",
+            "ui_runtime_command": "node packages/server/dist/index.js",
         },
     )
 
@@ -64,15 +68,24 @@ def test_webui_ephemeral_prompt_adds_ui_mode_guidance_only_for_ui_sessions():
     assert "UI Mode project source workspace: /home/ubuntu/cloud-terminal-data/projects/summons" in ui_prompt
     assert "UI Mode current page path: /app/match" in ui_prompt
     assert "UI Mode current page title: Summons Match" in ui_prompt
+    assert "UI Mode runtime workflow source: play-config" in ui_prompt
+    assert "UI Mode runtime status: UI runtime is ready at /ui-project/summons-project/app." in ui_prompt
+    assert "UI Mode build command: bash ./scripts/deploy-build.sh summons" in ui_prompt
+    assert "UI Mode runtime command: node packages/server/dist/index.js" in ui_prompt
     assert "UI Mode session guidance" in ui_prompt
     assert "live project preview" in ui_prompt
     assert "explicitly mention that this is UI Mode" in ui_prompt
     assert "Fast path for UI edits" in ui_prompt
     assert "source workspace as the working directory" in ui_prompt
     assert "do not begin by searching task-metadata folders" in ui_prompt
-    assert "targeted source searches" in ui_prompt
+    assert "runtime workflow metadata" in ui_prompt
     assert "Do not run production builds" in ui_prompt
-    assert "routine UI/source edits" in ui_prompt
+    assert "hot-reloadable dev-server preview" in ui_prompt
+    assert "runtime workflow source is `play-config`" in ui_prompt
+    assert "Iframe reload does not rebuild" in ui_prompt
+    assert "served artifacts on disk have changed" in ui_prompt
+    assert "restart only when the runtime/server bundle" in ui_prompt
+    assert "verify the actual preview DOM" in ui_prompt
     assert "cheapest reliable check first" in ui_prompt
     assert "Preserve the UI Mode shell/preview workflow" in ui_prompt
 

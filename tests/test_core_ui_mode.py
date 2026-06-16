@@ -160,6 +160,10 @@ def test_session_mode_normalizes_persists_and_compacts(tmp_path, monkeypatch):
         ui_project_label="Summons",
         ui_preview_path="/app",
         ui_preview_title="Summons Arena",
+        ui_workflow_source="play-config",
+        ui_status_summary="UI runtime is ready at /ui-project/summons/app.",
+        ui_build_command="bash ./scripts/deploy-build.sh summons",
+        ui_runtime_command="node packages/server/dist/index.js",
     )
 
     assert session.session_mode == "ui_mode"
@@ -169,6 +173,10 @@ def test_session_mode_normalizes_persists_and_compacts(tmp_path, monkeypatch):
     assert compact["ui_project_label"] == "Summons"
     assert compact["ui_preview_path"] == "/app"
     assert compact["ui_preview_title"] == "Summons Arena"
+    assert compact["ui_workflow_source"] == "play-config"
+    assert compact["ui_status_summary"] == "UI runtime is ready at /ui-project/summons/app."
+    assert compact["ui_build_command"] == "bash ./scripts/deploy-build.sh summons"
+    assert compact["ui_runtime_command"] == "node packages/server/dist/index.js"
 
     session.save(skip_index=True)
     loaded = Session.load("ui-mode-session")
@@ -179,6 +187,10 @@ def test_session_mode_normalizes_persists_and_compacts(tmp_path, monkeypatch):
     assert loaded.ui_project_label == "Summons"
     assert loaded.ui_preview_path == "/app"
     assert loaded.ui_preview_title == "Summons Arena"
+    assert loaded.ui_workflow_source == "play-config"
+    assert loaded.ui_status_summary == "UI runtime is ready at /ui-project/summons/app."
+    assert loaded.ui_build_command == "bash ./scripts/deploy-build.sh summons"
+    assert loaded.ui_runtime_command == "node packages/server/dist/index.js"
     assert loaded.compact()["session_mode"] == "ui_mode"
 
 
@@ -327,6 +339,12 @@ def test_ui_mode_shell_and_static_sources_are_present():
     assert "ui_project_workspace:_uiModeMetadata.projectWorkspace||undefined" in messages
     assert "workspace:_uiModeMetadata.projectWorkspace||S.session.workspace" in messages
     assert "Project source workspace" in messages
+    assert "Runtime workflow source" in js
+    assert "Runtime build command" in js
+    assert "Runtime start command" in js
+    assert "ui_workflow_source:meta.workflowSource" in js
+    assert "ui_workflow_source:_uiModeMetadata.workflowSource||undefined" in messages
+    assert "runtime workflow source" in messages
     assert "ui_preview_path:_uiModeMetadata.previewPath||undefined" in messages
     assert "ui-mode?projectId=" in ops_detail
     routes_src = (root / "api" / "routes.py").read_text(encoding="utf-8")
@@ -335,11 +353,18 @@ def test_ui_mode_shell_and_static_sources_are_present():
     assert "_ui_mode_project_workspace" in routes_src
     assert "ui_project_workspace = _ui_mode_project_workspace" in routes_src
     assert "UI Mode project source workspace" in streaming_src
+    assert "UI Mode runtime workflow source" in streaming_src
     assert "Fast path for UI edits" in streaming_src
     assert "source workspace as the working directory" in streaming_src
     assert "Do not run production builds" in streaming_src
+    assert "Iframe reload does not rebuild" in streaming_src
+    assert "served artifacts on disk have changed" in streaming_src
+    assert "restart only when the runtime/server bundle" in streaming_src
+    assert "actual preview DOM" in streaming_src
     assert "all selected/highlighted-element descriptors" in streaming_src
     assert '"ui_project_workspace"' in gateway_src
+    assert '"ui_workflow_source"' in gateway_src
+    assert '"ui_build_command"' in gateway_src
 
 
 def test_ui_mode_chat_start_uses_project_source_workspace_for_stale_sidecar_session(tmp_path, monkeypatch):
@@ -413,6 +438,42 @@ def test_ui_mode_can_import_project_play_config(tmp_path):
     assert config["dev"]["env"]["AUTH_DEBUG_LOGIN"] == "true"
     assert config["dev"]["env"]["SERVE_CLIENT_BUILD"] == "true"
     assert config["inspect"]["url"] == "/app"
+
+
+def test_ui_mode_auto_detects_project_play_config_before_package_scripts(tmp_path, monkeypatch):
+    project_id = "play-first-ui"
+    registry_dir = tmp_path / "registry"
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+    _write_project_registry(registry_dir, project_id, project_path)
+    _write_tiny_play_sourced_ui_project(project_path)
+    (project_path / ".hermes" / "ui.json").unlink()
+    (project_path / "package.json").write_text(json.dumps({"scripts": {"dev": "vite --host 0.0.0.0"}}), encoding="utf-8")
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(registry_dir))
+
+    config_info = core_ui.get_project_ui_config_file_info(project_id)
+
+    assert config_info["exists"] is False
+    assert config_info["autoDetected"] is True
+    assert config_info["autoSource"] == "project_play.json"
+    assert config_info["source"] == "play-config"
+    assert config_info["valid"] is True
+    assert config_info["playConfigPath"].endswith("project_play.json")
+
+    resolved = core_ui.get_project_ui_config(project_id)
+    assert resolved["autoDetected"] is True
+    assert resolved["autoSource"] == "project_play.json"
+    assert resolved["source"] == "play-config"
+    assert resolved["config"]["dev"]["command"] == "python3 -u server.py"
+    assert "vite" not in resolved["config"]["dev"]["command"]
+    assert resolved["config"]["inspect"]["url"] == "/app"
+
+    status = core_ui.build_project_ui_status(project_id)
+    assert status["canStart"] is True
+    assert status["workflowSource"] == "play-config"
+    assert status["configAutoDetected"] is True
+    assert status["configAutoSource"] == "project_play.json"
+    assert "same app runtime as Play" in status["statusSummary"]
 
 
 def test_ui_mode_shell_cache_busts_script_by_file_mtime():

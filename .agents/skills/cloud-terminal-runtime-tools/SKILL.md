@@ -26,14 +26,9 @@ Use `ct-runtime` for Cloud Terminal Play and inspect workflows. Do not guess the
    - `ct-runtime inspect action --script-file inspect-actions.json`
    - `ct-runtime inspect action --capture-screenshot --file-name post-action-check --script-file inspect-actions.json`
    - `ct-runtime inspect session close <session-id>`
-4. If `ct-runtime` itself refuses to run with a message like `ct-runtime only works inside a Cloud Terminal project session`, do not loop on it. Fall back to the repo-local Play configuration:
-   - read `project_play.json` to identify the start command, port range, inspect URL, and auth strategy,
-   - use `ps`/`ss`/`curl` to identify the live Play server and health endpoint,
-   - if browser automation is needed, run Playwright against the local Play URL and use the app's configured inspect auth flow (for example, debug login) when available,
-   - clearly report that `ct-runtime` was unavailable in the current tool session.
-5. If Play fails or never becomes ready:
+4. If Play fails or never becomes ready:
    - `ct-runtime play logs --limit 200`
-6. If screenshot capture is unavailable or you need human feedback:
+5. If screenshot capture is unavailable or you need human feedback:
    - `ct-runtime inspect request-review "Please inspect the running app and share feedback."`
 
 ## Guidance
@@ -53,10 +48,6 @@ Use `ct-runtime` for Cloud Terminal Play and inspect workflows. Do not guess the
 - Add `--keep-session` when you want later `inspect action` or `inspect screenshot` commands to reuse the same browser memory and profile.
 - `inspect action` also supports `evaluate` and `assert` steps for deterministic DOM/app-state checks inside the running page.
 - Treat screenshots as best-effort. If no supported headless browser is installed, fall back to `ct-runtime inspect request-review`.
-- In UI Mode live preview tasks, follow `references/ui-mode-fast-iteration.md`: start from the resolved project source workspace and selected/page context, make targeted source edits first, let hot reload update the preview when possible, and only rebuild/restart after evidence shows the preview is serving immutable built output or did not pick up the edit.
-- For UI Mode selected-element removal requests, also follow `references/ui-mode-selected-element-removal.md`: remove only the selected presentation elements/copy, preserve unselected controls/state, avoid empty header wrappers, and verify removed text/links/alerts are absent while core controls remain visible.
-- When a build regenerates source files unrelated to the requested UI change (for example an app-module manifest), inspect the diff and revert only that incidental generated source while preserving the requested edit and any built runtime assets needed by the preview.
-- For layout moves, prefer a deterministic DOM coordinate check over text-only grep: use Playwright against the local Play URL, authenticate through the configured inspect/debug flow if available, collect bounding boxes for the moved controls, and assert row/center alignment within a small tolerance.
 - Keep screenshot file names short and task-specific.
 - Mention the saved screenshot path in your response when you used one.
 - For manual review outside the CLI, Cloud Terminal Settings now has a Recordings section that groups guide recordings by project.

@@ -268,9 +268,10 @@ UI Mode session guidance:
 - This session is attached to a live project preview in the Hermes WebUI UI Mode surface.
 - If the user asks what is happening or where you are, explicitly mention that this is UI Mode and name the UI Mode project when project metadata is present.
 - Fast path for UI edits: use the UI Mode project source workspace as the working directory; do not begin by searching task-metadata folders, generated bundles, or unrelated workspaces when that source workspace is available.
-- Start from the current page path and all selected/highlighted-element descriptors. Use targeted source searches for nearby labels/selectors/components before broad repository scans.
-- Prefer editing source files that the live preview can hot-reload. Do not run production builds, regenerate bundles, or restart/rebuild the preview for routine UI/source edits unless a quick status check proves the preview is serving built output with no hot-reload path.
-- Verify with the cheapest reliable check first: syntax/source assertions and focused tests for the touched component. Use browser/DOM automation only when it materially increases confidence, and do not loop on unavailable runtime tooling.
+- Start from the current page path, runtime workflow metadata, and all selected/highlighted-element descriptors. Use targeted source searches for nearby labels/selectors/components before broad repository scans.
+- Prefer editing source files that the live preview can hot-reload. Do not run production builds, regenerate bundles, or restart/rebuild a hot-reloadable dev-server preview for routine UI/source edits.
+- If UI Mode context or status says the runtime workflow source is `play-config`, treat the preview as Play-sourced built output rather than a hot-reloading source server. Iframe reload does not rebuild; it can only show updates after the relevant served artifacts on disk have changed. If source changed but the preview is stale, compare source vs built output, run the configured build when required, restart only when the runtime/server bundle or process state requires it, then verify the actual preview DOM before reporting success.
+- Verify with the cheapest reliable check first: syntax/source assertions and focused tests for the touched component. Before claiming a UI removal/change is done, also confirm the served preview or DOM reflects it whenever the runtime serves built output.
 - If selected elements are present, treat them as authoritative UI context from the live preview; do not dismiss the selection just because the visible user message is short.
 - When a rebuild, restart, or manual refresh is genuinely required, say so clearly and keep the next step actionable.
 - Preserve the UI Mode shell/preview workflow; do not ask the user to leave UI Mode unless the task cannot be completed from the live preview context.
@@ -319,6 +320,10 @@ def _webui_surface_context_prompt(surface_context: Optional[dict]) -> str:
         ("ui_project_workspace", "UI Mode project source workspace"),
         ("ui_preview_path", "UI Mode current page path"),
         ("ui_preview_title", "UI Mode current page title"),
+        ("ui_workflow_source", "UI Mode runtime workflow source"),
+        ("ui_status_summary", "UI Mode runtime status"),
+        ("ui_build_command", "UI Mode build command"),
+        ("ui_runtime_command", "UI Mode runtime command"),
     )
     for key, label in fields:
         raw = surface_context.get(key)
@@ -5966,6 +5971,10 @@ def _run_agent_streaming(
                     'ui_project_workspace': (getattr(s, 'ui_project_workspace', None) or s.workspace) if str(getattr(s, 'session_mode', '') or '').lower().replace('-', '_') == 'ui_mode' else None,
                     'ui_preview_path': getattr(s, 'ui_preview_path', None),
                     'ui_preview_title': getattr(s, 'ui_preview_title', None),
+                    'ui_workflow_source': getattr(s, 'ui_workflow_source', None),
+                    'ui_status_summary': getattr(s, 'ui_status_summary', None),
+                    'ui_build_command': getattr(s, 'ui_build_command', None),
+                    'ui_runtime_command': getattr(s, 'ui_runtime_command', None),
                 },
                 config_data=_cfg,
             )

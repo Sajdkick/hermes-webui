@@ -408,9 +408,13 @@ function _uiModeFallbackContextText(){
   const previewTitle=_uiModeParam(params,'uiPreviewTitle','ui_preview_title');
   const previewUrl=_uiModeParam(params,'uiPreviewUrl','ui_preview_url');
   const projectWorkspace=_uiModeParam(params,'uiProjectWorkspace','ui_project_workspace','ui_project_source_workspace');
+  const workflowSource=_uiModeParam(params,'uiWorkflowSource','ui_workflow_source');
+  const statusSummary=_uiModeParam(params,'uiStatusSummary','ui_status_summary');
   const lines=['[UI Mode context]','Mode: UI Mode live preview',`Project: ${projectLabel}`];
   if(projectId)lines.push(`Project ID: ${projectId}`);
   if(projectWorkspace)lines.push(`Project source workspace: ${projectWorkspace}`);
+  if(workflowSource)lines.push(`Runtime workflow source: ${workflowSource}`);
+  if(statusSummary)lines.push(`Runtime status: ${statusSummary}`);
   lines.push(`Current page path: ${previewPath}`);
   if(previewTitle)lines.push(`Current page title: ${previewTitle}`);
   if(previewUrl)lines.push(`Preview URL: ${previewUrl}`);
@@ -433,7 +437,11 @@ function _uiModeTurnMetadata(){
     previewPath:_uiModeParam(params,'uiPreviewPath','ui_preview_path'),
     previewUrl:_uiModeParam(params,'uiPreviewUrl','ui_preview_url'),
     previewTitle:_uiModeParam(params,'uiPreviewTitle','ui_preview_title'),
-    projectWorkspace:_uiModeParam(params,'uiProjectWorkspace','ui_project_workspace','ui_project_source_workspace')
+    projectWorkspace:_uiModeParam(params,'uiProjectWorkspace','ui_project_workspace','ui_project_source_workspace'),
+    workflowSource:_uiModeParam(params,'uiWorkflowSource','ui_workflow_source'),
+    statusSummary:_uiModeParam(params,'uiStatusSummary','ui_status_summary'),
+    buildCommand:'',
+    runtimeCommand:''
   };
   if(liveContext){
     for(const rawLine of liveContext.split('\n')){
@@ -446,6 +454,10 @@ function _uiModeTurnMetadata(){
       if(key==='project'&&!metadata.projectLabel)metadata.projectLabel=value;
       else if(key==='project id'&&!metadata.projectId)metadata.projectId=value;
       else if((key==='project source workspace'||key==='ui mode project source workspace')&&!metadata.projectWorkspace)metadata.projectWorkspace=value;
+      else if(key==='runtime workflow source'||key==='ui mode runtime workflow source')metadata.workflowSource=value;
+      else if(key==='runtime status'||key==='ui mode runtime status')metadata.statusSummary=value;
+      else if(key==='runtime build command'||key==='ui mode build command')metadata.buildCommand=value;
+      else if(key==='runtime start command'||key==='runtime command'||key==='ui mode runtime command')metadata.runtimeCommand=value;
       else if(key==='current page path')metadata.previewPath=value;
       else if(key==='preview url')metadata.previewUrl=value;
       else if(key==='current page title')metadata.previewTitle=value;
@@ -787,6 +799,10 @@ async function send(){
       ui_preview_path:_uiModeMetadata.previewPath||undefined,
       ui_preview_url:_uiModeMetadata.previewUrl||undefined,
       ui_preview_title:_uiModeMetadata.previewTitle||undefined,
+      ui_workflow_source:_uiModeMetadata.workflowSource||undefined,
+      ui_status_summary:_uiModeMetadata.statusSummary||undefined,
+      ui_build_command:_uiModeMetadata.buildCommand||undefined,
+      ui_runtime_command:_uiModeMetadata.runtimeCommand||undefined,
       attachments:uploaded.length?uploaded:undefined
     })});
 

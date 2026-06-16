@@ -7,12 +7,14 @@ description: Use this skill when a Hermes WebUI project/session needs managed Pl
 
 Use `hermes-runtime` as the Hermes WebUI Play/inspect bridge. In a correctly wired Hermes WebUI agent session, runtime context should be injected into the agent process, giving project-aware Play lifecycle, inspect URLs, managed browser sessions, screenshots, scripts, guides, and review requests. If that context is missing, treat it as a WebUI launch/runtime-context integration gap for the current session; continue with the project’s documented build/start path, browser tools, and `hermes-gather-information`, but do not normalize the missing bridge or claim managed runtime verification.
 
+Keep the naming boundary strict: `hermes-runtime` is for Play/inspect/lifecycle; Hermes WebUI gather reports are created and inspected through `hermes-gather-information`. Do not introduce legacy runtime/gather aliases or fallback language when updating docs/skills/scripts: say `hermes-runtime` for runtime work and Hermes gather for evidence capture. For stale CT-runtime/gather cleanup audits, use `hermes-gather-information` reference `references/hermes-runtime-gather-naming-cleanup.md`.
+
 ## First check
 
 1. Resolve the command:
    - Start with `command -v hermes-runtime`.
    - If it is not on `PATH` but the Hermes WebUI checkout is available, use `/home/ubuntu/cloud-terminal-data/projects/hermes-webui/bin/hermes-runtime` or set `HERMES_RUNTIME_BIN` to that path for project helpers that invoke the runtime.
-   - Do **not** switch to the legacy Cloud Terminal runtime tool when working from a Hermes WebUI task/session.
+   - Use the Hermes runtime tool for Play/inspect work in Hermes WebUI sessions; do not switch to any other runtime bridge.
 2. Check the runtime bridge before relying on managed Play/inspect:
    - `hermes-runtime doctor --json`
    - If using the repo binary directly: `/home/ubuntu/cloud-terminal-data/projects/hermes-webui/bin/hermes-runtime doctor --json`
@@ -22,6 +24,16 @@ Use `hermes-runtime` as the Hermes WebUI Play/inspect bridge. In a correctly wir
    - If `doctor` is not `ok`, stop trying managed runtime commands except for help/diagnostics and jump to the manual Play-equivalent fallback.
 
 ## Workflow
+
+### UI Mode selected-element ownership tracing
+
+When the user asks whether a highlighted UI element is owned by a shared editor/runtime shell or by an app/domain editor, trace ownership before answering:
+
+1. Use the selected element text/role/selector from the UI Mode context as the clue, but do not assume DOM placement equals code ownership.
+2. Search source for the visible labels and imported icons/components, then follow the route/page that mounts the editor.
+3. Distinguish **slot provider** from **slot consumer**: shared shells often expose slots such as `headerActions`, `navigationActions`, drawers, or stage surfaces, while app/domain editors may construct the actual buttons and pass them into those slots.
+4. Answer in ownership terms: e.g. “the shared editor shell provides the slot/layout; the model-kit editor creates the Undo/Redo buttons and passes them into that slot.”
+5. Cite the key files/components and the prop chain, but keep the response concise unless the user asks for a deeper audit.
 
 1. Check current state:
    - `hermes-runtime status --json`
@@ -47,10 +59,10 @@ Use `hermes-runtime` as the Hermes WebUI Play/inspect bridge. In a correctly wir
    - `hermes-runtime inspect guide request "Show me how to complete this flow in Play." --json`
    - `hermes-runtime inspect guide update <guide-id> --content-file <path> --json`
    - `hermes-runtime inspect guide delete <guide-id> --json`
-5. Use gather report access when it complements runtime inspection:
-   - `hermes-runtime gather create --title "Runtime repro" --json`
-   - `hermes-runtime gather show <report-id> --json`
-   - Prefer the `hermes-gather-information` skill when you need temporary app instrumentation and a user-driven repro.
+5. Use Hermes WebUI gather reports when runtime inspection needs user-reproduced evidence:
+   - Load and follow `hermes-gather-information`.
+   - Create/show reports with `/home/ubuntu/cloud-terminal-data/projects/hermes-webui/scripts/hermes-gather.py`.
+   - Do not route gather-report work through runtime commands; keep `hermes-runtime` for Play/inspect/lifecycle work and Hermes gather for evidence capture.
 6. If Play fails or never becomes ready:
    - `hermes-runtime play logs --limit 200 --json`
 7. If screenshot capture is unavailable or you need human feedback:
@@ -132,7 +144,6 @@ For project/session interruption reports where the session store is large or lon
 ## References
 
 - `references/play-project-runtime-binding-mismatch.md` — diagnostic and recovery pattern for Play/runtime sessions bound to the wrong WebUI project id, causing app-specific tRPC/static 404s despite correct source routers.
-- `references/cloud-terminal-runtime-migration.md` — cleanup checklist and rationale for replacing Cloud Terminal-era runtime guidance with Hermes runtime usage.
 - `references/core-play-boundary-extraction.md` — proven Hermes-only Play core boundary pattern, contract shape, caller list, verification gate, and pitfalls.
 - `references/core-api-deployments-boundary.md` — broader Hermes Core API extraction and Ops Deployments page pattern, including Core route/domain shape, legacy Ops compatibility shims, and verification pitfalls.
 - `references/core-ui-mode-live-preview-boundary.md` — Core UI Mode/live-preview pattern: loopback dev runtime lifecycle, `/ui-project/{projectId}/...` proxy, side-by-side chat shell, proxy-compat injection, and focused integration-test recipe.

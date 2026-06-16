@@ -210,13 +210,18 @@
 
   function currentPreviewContextMetadata(){
     var page=state.pageContext||{};
+    var status=state.status||{};
     return {
       projectId:state.projectId||'',
       projectLabel:uiProjectLabel(),
       projectSourceWorkspace:projectSourceWorkspace(),
       previewPath:page.appPath||previewAppPathFromUrl(page.url)||page.path||'',
       previewUrl:page.url||'',
-      previewTitle:page.title||''
+      previewTitle:page.title||'',
+      workflowSource:String(status.workflowSource||status.configSource||'').trim(),
+      statusSummary:String(status.statusSummary||status.summary||status.title||'').trim(),
+      buildCommand:String(status.buildCommand||'').trim(),
+      runtimeCommand:String(status.command||'').trim()
     };
   }
 
@@ -279,6 +284,10 @@
     var lines=['[UI Mode context]','Mode: UI Mode live preview','Project: '+meta.projectLabel];
     if(meta.projectId)lines.push('Project ID: '+meta.projectId);
     if(meta.projectSourceWorkspace)lines.push('Project source workspace: '+meta.projectSourceWorkspace);
+    if(meta.workflowSource)lines.push('Runtime workflow source: '+meta.workflowSource);
+    if(meta.statusSummary)lines.push('Runtime status: '+meta.statusSummary);
+    if(meta.buildCommand)lines.push('Runtime build command: '+trimText(meta.buildCommand,300));
+    if(meta.runtimeCommand)lines.push('Runtime start command: '+trimText(meta.runtimeCommand,300));
     lines.push('Current page path: '+path);
     if(page.title)lines.push('Current page title: '+page.title);
     if(page.url)lines.push('Preview URL: '+page.url);
@@ -311,7 +320,7 @@
 
   function syncChatContext(){
     var meta=currentPreviewContextMetadata();
-    postChatMessage('hermes-ui-mode-context-update',{context:formatUiContext(),page:state.pageContext,selection:state.selectedElement,selections:selectedElementsList(),project:{id:meta.projectId,label:meta.projectLabel,workspace:meta.projectSourceWorkspace}});
+    postChatMessage('hermes-ui-mode-context-update',{context:formatUiContext(),page:state.pageContext,selection:state.selectedElement,selections:selectedElementsList(),project:{id:meta.projectId,label:meta.projectLabel,workspace:meta.projectSourceWorkspace},runtime:{workflowSource:meta.workflowSource,statusSummary:meta.statusSummary,buildCommand:meta.buildCommand,runtimeCommand:meta.runtimeCommand}});
   }
 
   function handlePreviewMessage(event){
@@ -549,7 +558,11 @@
         ui_project_label:meta.projectLabel,
         ui_preview_path:meta.previewPath,
         ui_preview_url:meta.previewUrl,
-        ui_preview_title:meta.previewTitle
+        ui_preview_title:meta.previewTitle,
+        ui_workflow_source:meta.workflowSource,
+        ui_status_summary:meta.statusSummary,
+        ui_build_command:meta.buildCommand,
+        ui_runtime_command:meta.runtimeCommand
       };
       var workspace=projectSourceWorkspace();
       if(workspace)body.workspace=workspace;
@@ -587,6 +600,8 @@
     if(meta.previewPath)chatUrl.searchParams.set('uiPreviewPath',meta.previewPath);
     if(meta.previewUrl)chatUrl.searchParams.set('uiPreviewUrl',meta.previewUrl);
     if(meta.previewTitle)chatUrl.searchParams.set('uiPreviewTitle',meta.previewTitle);
+    if(meta.workflowSource)chatUrl.searchParams.set('uiWorkflowSource',meta.workflowSource);
+    if(meta.statusSummary)chatUrl.searchParams.set('uiStatusSummary',meta.statusSummary);
     if(meta.projectSourceWorkspace)chatUrl.searchParams.set('uiProjectWorkspace',meta.projectSourceWorkspace);
     setFrameSource(els.chatFrame,chatUrl.href);
     if(els.chatEmpty)els.chatEmpty.style.display='none';

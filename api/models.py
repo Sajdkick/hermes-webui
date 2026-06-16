@@ -705,6 +705,10 @@ class Session:
                 ui_preview_path=None,
                 ui_preview_url=None,
                 ui_preview_title=None,
+                ui_workflow_source=None,
+                ui_status_summary=None,
+                ui_build_command=None,
+                ui_runtime_command=None,
                 **kwargs):
         self.session_id = session_id or uuid.uuid4().hex[:12]
         self.title = title
@@ -767,6 +771,10 @@ class Session:
         self.ui_preview_path = _clean_ui_mode_session_text(ui_preview_path or kwargs.get('ui_preview_path'), 800)
         self.ui_preview_url = _clean_ui_mode_session_text(ui_preview_url or kwargs.get('ui_preview_url'), 1200)
         self.ui_preview_title = _clean_ui_mode_session_text(ui_preview_title or kwargs.get('ui_preview_title'), 240)
+        self.ui_workflow_source = _clean_ui_mode_session_text(ui_workflow_source or kwargs.get('ui_workflow_source'), 120)
+        self.ui_status_summary = _clean_ui_mode_session_text(ui_status_summary or kwargs.get('ui_status_summary'), 600)
+        self.ui_build_command = _clean_ui_mode_session_text(ui_build_command or kwargs.get('ui_build_command'), 1200)
+        self.ui_runtime_command = _clean_ui_mode_session_text(ui_runtime_command or kwargs.get('ui_runtime_command'), 1200)
         raw_message_count = kwargs.get('message_count')
         parsed_message_count = None
         if raw_message_count is not None:
@@ -824,6 +832,7 @@ class Session:
             'is_cli_session', 'source_tag', 'raw_source', 'session_source', 'source_label', 'read_only',
             'enabled_toolsets', 'composer_draft', 'session_mode',
             'ui_project_id', 'ui_project_label', 'ui_project_workspace', 'ui_preview_path', 'ui_preview_url', 'ui_preview_title',
+            'ui_workflow_source', 'ui_status_summary', 'ui_build_command', 'ui_runtime_command',
         ]
         meta = {k: getattr(self, k, None) for k in METADATA_FIELDS}
         self.last_message_at = (
@@ -1076,6 +1085,10 @@ class Session:
             'ui_preview_path': self.ui_preview_path,
             'ui_preview_url': self.ui_preview_url,
             'ui_preview_title': self.ui_preview_title,
+            'ui_workflow_source': self.ui_workflow_source,
+            'ui_status_summary': self.ui_status_summary,
+            'ui_build_command': self.ui_build_command,
+            'ui_runtime_command': self.ui_runtime_command,
             'is_streaming': _is_streaming_session(
                 self.active_stream_id, active_stream_ids
             ) if include_runtime else False,

@@ -2979,6 +2979,10 @@ def _ui_mode_metadata_from_body(body: dict, *, fallback_project_id: str | None =
         "ui_preview_path": _clean_ui_mode_session_text(body.get("ui_preview_path") or body.get("uiPreviewPath"), 800),
         "ui_preview_url": _clean_ui_mode_session_text(body.get("ui_preview_url") or body.get("uiPreviewUrl"), 1200),
         "ui_preview_title": _clean_ui_mode_session_text(body.get("ui_preview_title") or body.get("uiPreviewTitle"), 240),
+        "ui_workflow_source": _clean_ui_mode_session_text(body.get("ui_workflow_source") or body.get("uiWorkflowSource"), 120),
+        "ui_status_summary": _clean_ui_mode_session_text(body.get("ui_status_summary") or body.get("uiStatusSummary"), 600),
+        "ui_build_command": _clean_ui_mode_session_text(body.get("ui_build_command") or body.get("uiBuildCommand"), 1200),
+        "ui_runtime_command": _clean_ui_mode_session_text(body.get("ui_runtime_command") or body.get("uiRuntimeCommand"), 1200),
     }
 
 

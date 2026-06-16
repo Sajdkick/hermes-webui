@@ -137,8 +137,8 @@ UI Mode is a project-scoped live-preview runtime for fast UI iteration. It is a 
 
 | Route | Method | Notes |
 | --- | --- | --- |
-| `/api/core/projects/{projectId}/ui-config-file` | `GET` | Report UI workflow config discovery/validation. Core checks `.hermes/ui.json`, `.cloud-terminal/ui.json`, `project_ui.json`, then package-script auto-detection. A UI config may import `project_play.json` to use Play-equivalent build/start/inspect behavior. |
-| `/api/core/projects/{projectId}/ui/status` | `GET` | Return configured/available/running/ready state, preview URL, allocated loopback port metadata, and user-facing summary. |
+| `/api/core/projects/{projectId}/ui-config-file` | `GET` | Report UI workflow config discovery/validation. Core checks `.hermes/ui.json`, `.cloud-terminal/ui.json`, and `project_ui.json`; when no UI config exists, an existing Play config (`.hermes/play.json`, `project_play.json`, or `.cloud-terminal/play.json`) is auto-detected before package-script fallback so UI Mode can run the same build/start/inspect contract as Play by default. |
+| `/api/core/projects/{projectId}/ui/status` | `GET` | Return configured/available/running/ready state, workflow source, config source, preview URL, allocated loopback port metadata, build/runtime commands when a runtime has started, and user-facing summary. |
 | `/api/core/projects/{projectId}/ui/logs` | `GET` | Return redacted build/runtime logs. |
 | `/api/core/projects/{projectId}/ui/start` | `POST` | Optionally run the configured build stage, then start the project runtime with an auto-allocated loopback port. Optional body fields include `sessionId` for associating the side-by-side chat. |
 | `/api/core/projects/{projectId}/ui/restart` | `POST` | Stop any current UI runtime and start a fresh one. |
@@ -178,7 +178,7 @@ To keep UI Mode exactly aligned with Play for projects that depend on Play's ser
 }
 ```
 
-When `source`, `extends`, or `usePlayConfig` points at Play config, UI Mode maps Play `build` to a one-shot build stage, Play `start` to the long-running preview runtime, and Play `inspect` to the iframe preview path/readiness contract. This is the recommended shape when debug-login, server-rendered app shells, or Play-specific environment variables must behave identically to Play.
+When `source`, `extends`, or `usePlayConfig` points at Play config, UI Mode maps Play `build` to a one-shot build stage, Play `start` to the long-running preview runtime, and Play `inspect` to the iframe preview path/readiness contract. This is the recommended shape when debug-login, server-rendered app shells, or Play-specific environment variables must behave identically to Play. Because these previews often serve built assets, the UI Mode shell forwards `workflowSource`, runtime status, build command, and runtime command into the side-by-side chat context so agents can distinguish hot-reloaded source from static served artifacts: iframe reload does not rebuild, but it may show updates once the relevant built files on disk have changed; rebuilds are needed when source changed while the served artifacts remain stale, and restarts are reserved for runtime/server bundle or process-state changes.
 
 The runtime must bind to loopback and is exposed to the browser only through the WebUI-owned `/ui-project/{projectId}/...` proxy. Do not expose the dev server directly and do not grant previewed app code access to WebUI admin APIs outside the explicit proxy path.
 

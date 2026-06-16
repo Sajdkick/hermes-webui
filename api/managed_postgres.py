@@ -355,6 +355,78 @@ def _read_postmaster_pid(data_dir: Path) -> dict:
     }
 
 
+def _forget_stale_postmaster_pid(data_dir: Path, pid: Any) -> None:
+    if _is_process_alive(pid):
+        return
+    try:
+        (data_dir / "postmaster.pid").unlink()
+    except OSError:
+        pass
+
+
+def _stop_postmaster(data_dir: Path, settings: dict, pid: int) -> None:
+    pg_ctl_path = _resolve_binary("pg_ctl", settings["local"].get("binDir") or "")
+    if _binary_available(pg_ctl_path):
+        subprocess.run(
+            [pg_ctl_path, "-D", str(data_dir), "-m", "fast", "-w", "-t", "15", "stop"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    if not _is_process_alive(pid):
+        _forget_stale_postmaster_pid(data_dir, pid)
+        return
+
+    try:
+        os.kill(pid, 15)
+    except OSError:
+        _forget_stale_postmaster_pid(data_dir, pid)
+        return
+
+    deadline = time.time() + 10
+    while time.time() <= deadline:
+        if not _is_process_alive(pid):
+            _forget_stale_postmaster_pid(data_dir, pid)
+            return
+        time.sleep(0.25)
+
+    try:
+        os.kill(pid, 9)
+    except OSError:
+        pass
+    deadline = time.time() + 5
+    while time.time() <= deadline:
+        if not _is_process_alive(pid):
+            break
+        time.sleep(0.25)
+    _forget_stale_postmaster_pid(data_dir, pid)
+
+
+def _recover_unusable_postmaster(settings: dict, data_dir: Path, host: str) -> dict[str, Any] | None:
+    postmaster = _read_postmaster_pid(data_dir)
+    pid = postmaster.get("pid")
+    port = postmaster.get("port")
+    if not pid:
+        return None
+    if not _is_process_alive(pid):
+        _forget_stale_postmaster_pid(data_dir, pid)
+        return None
+    if not port:
+        return None
+
+    deadline = time.time() + 5
+    while time.time() <= deadline:
+        if _probe_ready(settings, host, int(port), timeout=1.0):
+            runtime = {"host": host, "port": int(port), "pid": int(pid), "dataDir": str(data_dir)}
+            _write_runtime_file(runtime)
+            return runtime
+        time.sleep(0.25)
+
+    _stop_postmaster(data_dir, settings, int(pid))
+    return None
+
+
 def _admin_connection(settings: dict, host: str, port: int) -> dict[str, Any]:
     return {
         "url": _build_connection_url(
@@ -458,6 +530,14 @@ def start_local_postgres(settings: dict | None = None) -> dict[str, Any]:
                 {"process": None, "pid": reused["pid"], "host": reused["host"], "port": reused["port"], "data_dir": data_dir}
             )
             return reused
+        recovered = _recover_unusable_postmaster(settings, data_dir, host)
+        if recovered:
+            _LOCAL_STATE.update(
+                {
+                    "process": None, "pid": recovered["pid"], "host": recovered["host"], "port": recovered["port"], "data_dir": data_dir
+                }
+            )
+            return recovered
 
         preferred_port = _normalize_port(local.get("port"), DEFAULT_DB_PORT)
         if preferred_port == 0:
