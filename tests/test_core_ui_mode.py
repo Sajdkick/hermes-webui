@@ -867,7 +867,7 @@ def test_ui_mode_auto_detects_monorepo_template_client_dev_with_play_parity(tmp_
     assert resolved["config"]["build"]["command"] == ""
     dev = resolved["config"]["dev"]
     assert dev["cwd"] == "."
-    assert dev["command"] == "pnpm --filter ./packages/client run dev -- --host 127.0.0.1 --port ${PORT} --strictPort"
+    assert dev["command"] == "pnpm --filter ./packages/client run dev --host 127.0.0.1 --port ${PORT} --strictPort"
     assert dev["env"]["MONOREPO_ACTIVE_APP"] == "model-builder"
     assert dev["env"]["COREPACK_ENABLE_DOWNLOAD_PROMPT"] == "0"
     assert dev["env"]["NPM_CONFIG_STORE_DIR"] == ".cache/pnpm-store"
@@ -961,6 +961,48 @@ def test_ui_mode_uses_tracked_monorepo_template_project_ui_contract(tmp_path, mo
     assert status["configAutoDetected"] is False
     assert status["configAutoSource"] == ""
     assert status["statusSummary"] == "UI workflow is ready. Start UI Mode to inspect the live app."
+
+
+def test_ui_mode_project_ui_contract_wins_over_legacy_local_play_pointer(tmp_path, monkeypatch):
+    project_id = "monorepo-template-local-play-pointer"
+    registry_dir = tmp_path / "registry"
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+    _write_project_registry(registry_dir, project_id, project_path)
+    _write_monorepo_template_project(project_path)
+    _add_monorepo_template_ui_dev_contract(project_path)
+    _write_monorepo_template_ui_config(project_path)
+    (project_path / ".hermes").mkdir(parents=True, exist_ok=True)
+    (project_path / ".hermes" / "ui.json").write_text(json.dumps({"version": 1, "source": "project_play.json"}), encoding="utf-8")
+    monkeypatch.setenv("HERMES_WEBUI_CLOUD_TERMINAL_PROJECTS_DIR", str(registry_dir))
+
+    config_info = core_ui.get_project_ui_config_file_info(project_id)
+
+    assert config_info["exists"] is True
+    assert config_info["path"].endswith("project_ui.json")
+    assert config_info["source"] == "monorepo-template:ui-dev"
+    assert config_info["valid"] is True
+    assert config_info["parityAvailable"] is True
+    assert config_info["parityWorkflowSource"] == "play-config"
+    assert config_info["parityConfigPath"].endswith("project_play.json")
+
+    resolved = core_ui.get_project_ui_config(project_id)
+    assert resolved["path"].endswith("project_ui.json")
+    assert resolved["source"] == "monorepo-template:ui-dev"
+    assert resolved["config"]["dev"]["command"] == "pnpm run ui:dev"
+    assert "SERVE_CLIENT_BUILD" not in resolved["config"]["dev"]["env"]
+
+    parity = core_ui.get_project_ui_config(project_id, workflow="play-config")
+    assert parity["source"] == "play-config"
+    assert parity["config"]["build"]["command"] == "bash ./scripts/deploy-build.sh model-builder"
+    assert parity["config"]["dev"]["command"] == "node -r ./scripts/register-runtime-paths.cjs packages/server/dist/packages/server/index.js"
+    assert parity["config"]["dev"]["env"]["SERVE_CLIENT_BUILD"] == "true"
+    assert parity["config"]["inspect"]["url"] == "/app"
+
+    status = core_ui.build_project_ui_status(project_id)
+    assert status["workflowSource"] == "monorepo-template:ui-dev"
+    assert status["iterationMode"] == "fast-dev"
+    assert status["parityAvailable"] is True
 
 
 def test_ui_mode_default_start_uses_fast_package_dev_not_play_build(tmp_path, monkeypatch):

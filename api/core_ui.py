@@ -34,6 +34,8 @@ from api.helpers import _redact_text, t
 from api.updates import WEBUI_VERSION
 
 UI_CONFIG_FILE_NAMES = (".hermes/ui.json", ".cloud-terminal/ui.json", "project_ui.json")
+LOCAL_UI_CONFIG_FILE_NAMES = frozenset({".hermes/ui.json", ".cloud-terminal/ui.json"})
+TRACKED_UI_CONFIG_FILE_NAME = "project_ui.json"
 AUTO_DETECTED_SOURCE_KEY = "__uiAutoSource"
 AUTO_DETECTED_PARITY_SOURCE_KEY = "__uiParitySource"
 UI_LOG_LINE_LIMIT = 1000
@@ -816,7 +818,7 @@ def _auto_detect_monorepo_template_ui_config(project_path: Path) -> dict | None:
         command = "bash ./scripts/ui-dev.sh"
         auto_source = "monorepo-template:ui-dev"
     else:
-        command = f"{package_manager} --filter ./packages/client run dev -- --host 127.0.0.1 --port ${{PORT}} --strictPort"
+        command = f"{package_manager} --filter ./packages/client run dev --host 127.0.0.1 --port ${{PORT}} --strictPort"
         auto_source = "monorepo-template:packages/client"
     env = {
         "HOST": "127.0.0.1",
@@ -1074,11 +1076,64 @@ def normalize_ui_config(payload: dict, project_path: Path) -> dict:
     return {"valid": not missing and not errors, "missing": missing, "errors": errors, "config": config, "source": workflow_source}
 
 
+def _relative_ui_config_name(project_path: Path, path: Path) -> str:
+    try:
+        return path.relative_to(project_path).as_posix()
+    except ValueError:
+        return path.name
+
+
+def _has_direct_ui_dev_contract(payload: dict[str, Any]) -> bool:
+    for key in ("dev", "start", "ui"):
+        if isinstance(payload.get(key), dict):
+            return True
+    for key in ("devCommand", "command"):
+        if isinstance(payload.get(key), str) and payload.get(key, "").strip():
+            return True
+    return False
+
+
+def _is_local_play_pointer_ui_config(project_path: Path, path: Path) -> bool:
+    relative_name = _relative_ui_config_name(project_path, path)
+    if relative_name not in LOCAL_UI_CONFIG_FILE_NAMES:
+        return False
+    payload = _read_json_object(path)
+    if payload is None:
+        return False
+    if not _play_source_request(payload):
+        return False
+    return not _has_direct_ui_dev_contract(payload)
+
+
+def _select_ui_config_candidate(project_path: Path) -> Path:
+    """Choose the default UI Mode config without letting legacy Play pointers
+    shadow tracked fast-dev contracts.
+
+    Local `.hermes/ui.json` and `.cloud-terminal/ui.json` remain valid explicit
+    UI dev overrides. The only skipped shape is a local UI config that merely
+    points at Play config, when another concrete UI config exists later in the
+    normal candidate list. Explicit `workflow=play-config` continues to use the
+    real Play build/start contract, and normal Play routes do not call this
+    selector.
+    """
+
+    candidates = _config_candidates(project_path)
+    existing = [path for path in candidates if path.exists()]
+    if not existing:
+        return candidates[0]
+    for index, path in enumerate(existing):
+        if _is_local_play_pointer_ui_config(project_path, path) and any(
+            not _is_local_play_pointer_ui_config(project_path, later) for later in existing[index + 1 :]
+        ):
+            continue
+        return path
+    return existing[0]
+
+
 def get_project_ui_config_file_info(project_id: str) -> dict:
     project = _get_project(project_id)
     project_path = _project_path(project)
-    candidates = _config_candidates(project_path)
-    selected = next((path for path in candidates if path.exists()), candidates[0])
+    selected = _select_ui_config_candidate(project_path)
     payload = {
         "projectId": project_id,
         "path": str(selected),

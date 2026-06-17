@@ -560,8 +560,8 @@
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-12T11:50:50.276Z",
-          "qaStatus": "needs-more-work",
-          "moreWork": "It still doesnt work, its gray with a sad face instead."
+          "qaStatus": "ready-for-test",
+          "updatedAt": "2026-06-06T12:25:11.706Z"
         },
         {
           "id": "7bef3c0e-fbd5-4372-845a-3109d9e11229",
@@ -674,14 +674,17 @@
         },
         {
           "id": "576dbf31-06c9-487a-9cfe-c060c97f745b",
-          "text": "Something's wrong with the readable outputs. It seems like it's always attached to a session, so it's not like one readable output per session, because I can go into a completely unrelated session and see the same readable outputs if I just scroll up. And that's another thing. It shouldn't be put there, it shouldn't be put as an overlay on top of the shaft. With a clear like close readable output button, so it's really easy to see that this is the message and when you're done, you click close and you can continue on.",
+          "text": "Obsolete retired Markdown-report overlay task #1",
           "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-13T17:51:19.296Z",
           "completedAt": "2026-05-18T08:05:21.058Z",
           "archived": true,
-          "archivedAt": "2026-05-18T08:12:47.062Z"
+          "archivedAt": "2026-05-18T08:12:47.062Z",
+          "markers": [
+            "AI suggestion"
+          ]
         },
         {
           "id": "ab84e898-7e73-4d01-8a14-c38f7e7242dd",
@@ -975,14 +978,17 @@
         },
         {
           "id": "8efefebb-651a-4164-8e7a-90f41bbed938",
-          "text": "We need to take a look at how we're doing readable outputs, because right now it feels very tied to cloud terminal, because it keeps breaking. And the way I wanted to work is that when it creates a readable output, it should take over the say simplified session views. You should be rendered on top of the shed. And then you should display everything and at the bottom you should have a close readable output. Right now I don't think it works at all. Previously when it worked kind of, it created a readable output at the top, like above the shed, not on top of rendered over it. And it felt like all sessions were sharing a readable output. Readable outputs should not be shared between sessions. Each session should have their own readable output.",
+          "text": "Obsolete retired Markdown-report overlay task #2",
           "done": true,
           "dependencies": [],
           "grade": "green",
           "createdAt": "2026-05-16T12:16:56.881Z",
           "completedAt": "2026-05-18T08:07:28.142Z",
           "archived": true,
-          "archivedAt": "2026-05-18T08:12:47.062Z"
+          "archivedAt": "2026-05-18T08:12:47.062Z",
+          "markers": [
+            "AI suggestion"
+          ]
         },
         {
           "id": "826be284-fa5f-4c11-9519-f45c3c4c6c7a",
@@ -1195,7 +1201,8 @@
           "grade": "green",
           "createdAt": "2026-05-21T14:14:49.852Z",
           "startedAt": "2026-05-21T14:14:50.858Z",
-          "lastSessionAt": "2026-05-21T20:06:00.195Z"
+          "qaStatus": "ready-for-test",
+          "updatedAt": "2026-06-06T12:26:35.665Z"
         },
         {
           "id": "320e3649-b1dc-45ad-b633-d155eee70c47",
@@ -1203,7 +1210,9 @@
           "done": false,
           "dependencies": [],
           "grade": "green",
-          "createdAt": "2026-05-21T20:15:08.961Z"
+          "createdAt": "2026-05-21T20:15:08.961Z",
+          "qaStatus": "ready-for-test",
+          "updatedAt": "2026-06-06T12:27:34.037Z"
         },
         {
           "id": "935be0d6-9530-4d2c-b725-6a5601adef5a",
@@ -1228,6 +1237,355 @@
           "sessionId": "3ee941d0-3a30-4124-97c2-7a3bd1d0c7f0",
           "lastSessionAt": "2026-05-25T05:12:53.175Z",
           "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "90f4a281-1bec-42c6-8e79-8dc004be21dc",
+          "text": "Theres a bug where a lot of test projects(?) show up in the quick task runner project drop down. They are named main (test_same_session_profile_swit0)",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-27T08:56:26.704Z",
+          "startedAt": "2026-05-27T08:56:27.038Z",
+          "qaStatus": "ready-for-test",
+          "updatedAt": "2026-06-06T12:28:31.796Z"
+        },
+        {
+          "id": "2529c3d9-47fe-43a4-8e83-7b5bd2e1c1b3",
+          "text": "We currently have alternative data project deployed, but i did it through the cloud terminal UI. And i dont see it deployed in the hermes UI? I really want to redeploy from the hermes UI, but keep the database and all data from the cloud terminal deployed one.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-27T09:18:46.792Z",
+          "startedAt": "2026-05-27T09:18:47.150Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "27f662c6-f1cd-4a82-9d9f-0a5ae7552f55",
+          "text": "When i go to the deployed alternative data project i get to the login page, but i cant login with the debug empty credentials, and when i try to sign up for a new account it says \"not found\". We are in the process of porting all deployment functionality into the core API, and something must have gone wrong. I want you to analyze it in depth, and compare it to the cloud terminal implementation of deployment and make sure you get everything right, because we dont want to end up with a broken port. We want a proper native hermes deployment solution that is robust and easy to maintain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-27T12:58:46.043Z",
+          "startedAt": "2026-05-27T12:58:46.376Z",
+          "qaStatus": "ready-for-test",
+          "updatedAt": "2026-06-06T12:29:50.758Z"
+        },
+        {
+          "id": "ad6d0031-d732-4804-8977-699f91ff2262",
+          "text": "I get this error in the ops dashboard: Deployment runtime exited before ready (exit code 1).",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-28T06:29:29.679Z",
+          "startedAt": "2026-05-28T06:29:30.340Z",
+          "createdBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "startedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "updatedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "inProgress": true,
+          "sessionId": "ef7a32b1-9cca-4357-bf75-798bc08e1f36",
+          "lastSessionAt": "2026-05-28T06:29:30.340Z"
+        },
+        {
+          "id": "3c6e92c5-0407-4a13-a9bd-ffa60c03a549",
+          "text": "I am getting weird html error messages closing sessions in the ops dashboard, and i get this message trying to g oto the alternative data deployment: Unable to transform response from server. We have been doing some work on the deployment and have been having a lot of issues with cookies. It feels like the implementation in core related to deployments is very buggy. Analyze it in depth and write a report on the current state.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-28T07:38:40.514Z",
+          "startedAt": "2026-05-28T07:38:40.881Z",
+          "qaStatus": "ready-for-test",
+          "updatedAt": "2026-06-06T12:36:59.241Z"
+        },
+        {
+          "id": "ec5c5939-05b7-49f6-8180-875891229e62",
+          "text": "I am getting this when opening the deployed alternative data project: Unable to transform response from server",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-28T08:20:58.795Z",
+          "startedAt": "2026-05-28T08:20:59.125Z",
+          "qaStatus": "ready-for-test",
+          "updatedAt": "2026-06-06T12:37:21.827Z"
+        },
+        {
+          "id": "c504d4d5-52b4-4403-b562-62db9bccfcab",
+          "text": "Something is wrong with how we use profiles. I launched a task from the quick task runner, for the summons project, and it successfully started a task with the summons profile. But then i created a new chat directly through the hermes UI, and set the profile to Laxlyftet. Initially it seemed to work, both sessions had their respective profiles. But when i sent another message in the laxlyftet session it seemed to have switched to the summons profile? Atleast it said this in the chat \"Verifieringen visar att själva skillen nu är uppdaterad, men sessionens shell-miljö pekar fortfarande på profiles/summons\". So they are interfering somehow?",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-28T11:20:50.029Z",
+          "startedAt": "2026-05-28T11:20:50.482Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "fa62e21b-321e-4906-abcc-90912623e652",
+          "text": "Suddenly a deployment stopped working? \"Cloud Terminal deployment `alternativedata` is failed. \"",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-28T20:12:46.211Z",
+          "startedAt": "2026-05-28T20:12:46.552Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "66c1556e-ec79-4d28-8291-e87d756671bc",
+          "text": "Something is wrong with the auto selection of profiles. I have a session for the summons project active, that should have the summons profile selected, but instead it is using the default profile. How did this happen? And how do we fix it so it doesn't happen again?",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-05-31T00:58:55.011Z",
+          "startedAt": "2026-05-31T00:58:55.574Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "7f9e3592-5fb4-4067-b192-00357f349247",
+          "text": "I asked the AI if it could connect to a specific google sheets and then it crashed? It said something about a bad gateway and nginx?",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-01T08:58:07.709Z",
+          "startedAt": "2026-06-01T08:58:08.047Z",
+          "lastSessionAt": "2026-06-01T13:57:22.542Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "5a2b9bea-6a40-4c53-8dd7-1df4ea2f8d2c",
+          "text": "We need to update the create project page so that when i click import on a repo, it asks me for a branch name, And if that branch name doesnt exist it will create a new branch with that name, and push it to the remote. We already do this in cloud terminal so if you need to see how to do it look there.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-02T13:30:59.590Z",
+          "startedAt": "2026-06-02T13:31:00.057Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "e4c2e213-e195-45bd-94d4-4604d9eca745",
+          "text": "There is still a bug where some shats can get desinked or some sessions can get desinked. I have a session attached to the model kit project and I asked it to look through the project and locate all the apps associated with the model kit and it did and then I send a message for it to delete all about the one main app and it went through and it proceeded to do so. But now when I will go back into the session, it takes me to a version of the shats that's before I ask you to remove those apps. So I want you to analyze and figure out how this is possible, but it's not sending us to the main, the latest version of the shats.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-02T14:39:35.389Z",
+          "startedAt": "2026-06-02T14:39:36.073Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "931a9ab5-25f6-48a2-9077-3b6eeb3f7c5e",
+          "text": "I had an active session in the ops dashboard for the summons project, that was in the process of promoting a champion. But now its suddenly not showing up in the active sessions section of the ops dashboard? Find out what happened and fix it so it shows up again, and make it so this bug won't happen again in the future.",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-03T04:24:08.998Z",
+          "startedAt": "2026-06-03T04:24:09.672Z",
+          "completedAt": "2026-06-03T04:38:03.198Z",
+          "lastSessionAt": "2026-06-03T20:33:14.325Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "fc138454-1732-4efd-99af-a5db1d34e36d",
+          "text": "Obsolete retired Markdown-report overlay task #3",
+          "done": true,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-03T06:01:03.157Z",
+          "startedAt": "2026-06-03T06:01:03.645Z",
+          "completedAt": "2026-06-03T12:33:36.594Z",
+          "lastSessionAt": "2026-06-03T12:33:36.568Z",
+          "markers": [
+            "AI suggestion"
+          ]
+        },
+        {
+          "id": "e85bacf3-4227-402e-98a0-f93f46b23102",
+          "text": "The pop-up and clicking up play notification that lets you directly interface with the session while playing the project still doesn't work. It still just shows a sad broken link image, which is gray, see the attached screenshot. And another bug if you can't see the attached screenshot, there's a bug where we can't use the quick toss-arounder and use the attached image feature. And then it just shows off blank. But yeah, if you can see the image, then it works. So I want you to fix both these bugs.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-03T08:13:13.866Z",
+          "startedAt": "2026-06-03T08:13:14.656Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "7eadb0f0-b8cd-4cbf-a27b-1cfc1ff73280",
+          "text": "There's a bug where seslions cn switch profile, i have a session connected to the modelkit project but it is in the default profile",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-05T09:30:27.846Z",
+          "startedAt": "2026-06-05T09:30:28.758Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "a0864d93-43a9-438c-a63b-b1a051af8b39",
+          "text": "'There's a bug where seslions cn switch profile, i have a session connected to the modelkit project but it is in the default profile",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-05T10:49:12.762Z",
+          "startedAt": "2026-06-05T10:49:14.315Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "be16f067-2a5a-45dd-ad82-b79810005dbe",
+          "text": "Hermes keeps crashing after I've used it for a while, and I have to end up going into recovery and restarting Hermes to get it to work. You must get why and fix it.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-05T12:53:42.399Z",
+          "startedAt": "2026-06-05T12:53:42.943Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "31224eb1-6e81-47dc-946d-835940c34804",
+          "text": "I recently updated from upstream, and now I get this error trying to update Hermes agent by pressing the UI button: Update failed: Cross-origin mismatch - check reverse proxy headers",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-05T16:16:47.185Z",
+          "startedAt": "2026-06-05T16:16:47.745Z",
+          "createdBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "startedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "updatedBy": {
+            "id": "pontus",
+            "label": "Pontus"
+          },
+          "sessionId": "0941abd6-2f6f-4aa7-b99c-cee691e3373b",
+          "lastSessionAt": "2026-06-05T16:16:47.745Z",
+          "inProgress": true
+        },
+        {
+          "id": "b1c8f6e0-ab37-42f6-9d61-27a9b2ec0c74",
+          "text": "I want to upgrade this machine from 4 ram to 8, to do that i have to power off the machine. What will be the consequences?",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-05T18:08:55.471Z",
+          "lastSessionAt": "2026-06-08T11:35:08.242Z",
+          "startedAt": "2026-06-05T18:08:55.842Z"
+        },
+        {
+          "id": "f9481ffe-eb96-4725-b15e-66434866aef1",
+          "text": "There's a big where if a task has too long description text, I can't close the session because the pop up close button goes outside the screen.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-06T12:00:37.440Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "953017bd-1af3-42d0-8600-a2d4a7358ff3",
+          "text": "There's seems to be something that builds up over time, vmbecause initially the Hermes web ui is snappy but it gets slower and slower until it eventually crashes",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-06T12:03:27.049Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "8990e44b-e2cb-4c33-9d2d-d240e2fe8fda",
+          "text": "The Hermes web ui start out fast and responsive, but over time it slows down and eventually crashes and forces me to restart Hermes in the recovery page. I want you to figure out what causes this. We just restarted after a crash.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-06T16:29:34.460Z",
+          "lastSessionAt": "2026-06-06T19:12:32.662Z",
+          "startedAt": "2026-06-06T16:29:34.908Z"
+        },
+        {
+          "id": "c390219a-f525-4b71-8911-965fc63fb13d",
+          "text": "When I run sessions connected to the summons project they keep getting interrupted instead of finishing. The session currently connected to the summons project just got interrupted. Figure out what happened and fix it. Dont just find a solution, analyze the code and find the root cause of these issues and why its so easy to write code that causes these errors. Then find a solution that fixes this on a fundamental level that makes it harder for these kinds of bigs to emerge.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-06T23:45:09.420Z",
+          "lastSessionAt": "2026-06-07T20:37:19.785Z",
+          "startedAt": "2026-06-06T23:45:09.893Z"
+        },
+        {
+          "id": "55f4c6ae-1bab-4e5a-9d35-6bd35750523d",
+          "text": "AN agent got this bug and wrote this report:\n\n\"No — based on the evidence, this was **not a Summons build-pipeline bug**.\n\nIt was a **Hermes WebUI runtime/session context isolation bug**: the agent/tool process for this Summons session had environment variables from an unrelated Model-kit Ops session.\n\nThe smoking gun from the live process env:\n\n```text\nHERMES_HOME=/home/ubuntu/cloud-terminal-data/projects/.cloud-terminal/hermes/profiles/summons\nHERMES_SESSION_ID=20260608_055514_af1bfe\nHERMES_SESSION_KEY=20260608_034335_ccb22a\nHERMES_WEBUI_RUNTIME_API_BASE_URL=http://127.0.0.1:5003/api/ops/projects/b840ee27-85ec-407a-9819-285d5953e0a2/runtime\nHERMES_WEBUI_RUNTIME_PROJECT_ID=b840ee27-85ec-407a-9819-285d5953e0a2\nTERMINAL_CWD=/home/ubuntu/cloud-terminal-data/projects/monorepo-template-2\n```\n\nBut the actual current persisted session is:\n\n```text\nsession_id: 20260608_055514_af1bfe\nworkspace: /home/ubuntu/cloud-terminal-data/projects/monorepo-template-5\nproject_id: dc51e1cb-0729-45b4-85ea-889d88cd58f0\nprofile: summons\nsource_tag: ops_task\n```\n\nThe leaked session key points to this unrelated session:\n\n```text\nsession_id: 20260608_034335_ccb22a\nworkspace: /home/ubuntu/cloud-terminal-data/projects/monorepo-template-2\nproject_id: b840ee27-85ec-407a-9819-285d5953e0a2\nprofile: model-kit\nsource_tag: ops_task\n```\n\nSo the current Summons agent had a mixed context:\n\n- `HERMES_HOME` said **summons**\n- `HERMES_SESSION_ID` said current **Summons session**\n- but `HERMES_SESSION_KEY`, `TERMINAL_CWD`, `HERMES_WEBUI_RUNTIME_API_BASE_URL`, and `HERMES_WEBUI_RUNTIME_PROJECT_ID` still pointed to **Model-kit / monorepo-template-2**\n\nThat is how it was possible.\n\nThe immediate chain was:\n\n1. This chat/workspace was correctly Summons:\n\n   ```text\n   /home/ubuntu/cloud-terminal-data/projects/monorepo-template-5\n   ```\n\n2. But when I ran:\n\n   ```bash\n   hermes-runtime play start\n   ```\n\n   the CLI did **not** infer the project from the shell cwd first. It used:\n\n   ```text\n   HERMES_WEBUI_RUNTIME_API_BASE_URL=.../projects/b840ee27.../runtime\n   ```\n\n3. That made Play start/build the wrong project:\n\n   ```text\n   /home/ubuntu/cloud-terminal-data/projects/monorepo-template-2\n   branch/profile: Model-kit\n   ```\n\n4. The browser then hit Summons routes against a runtime/server that did not have the Summons app/router mounted, causing:\n\n   ```text\n   /api/trpc/summons.profile.getHomeState -> 404 {\"error\":\"not found\"}\n   ```\n\n5. When I explicitly pointed the runtime API at the correct Summons project:\n\n   ```text\n   dc51e1cb-0729-45b4-85ea-889d88cd58f0\n   ```\n\n   the same route existed and returned `401 Unauthorized` pre-login, then worked after debug login. That proves the Summons server/build was fine.\n\nSo the root cause is:\n\n> A stale Model-kit Ops runtime context leaked into the Summons WebUI agent/tool environment. `hermes-runtime` trusted that stale `HERMES_WEBUI_RUNTIME_API_BASE_URL` / project id over the selected workspace, so it built/served the wrong project.\n\nRelevant code behavior I found:\n\nIn `api/streaming.py`, `_build_runtime_bridge_env(...)` builds runtime env for launched agent sessions. It looks up a project by `project_id` first, then workspace. It also preserves existing runtime bridge env in some cases. The intended design is session-owned runtime context, but this live process showed the active agent environment was not aligned with the persisted session row.\n\nThis is a **WebUI runtime context/session isolation failure**, likely around agent/process/env reuse or process-level env restoration between concurrent/previous Ops task sessions — not a defect in `project_play.json`, the Summons build, or the app’s tRPC registration.\"\n\n\nI want you to fix this so it doesnt happen again.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-08T06:58:27.212Z",
+          "lastSessionAt": "2026-06-08T12:00:27.972Z",
+          "startedAt": "2026-06-08T06:58:27.658Z"
+        },
+        {
+          "id": "9955db14-7b76-4371-b7c2-d1cac5f2d057",
+          "text": "Make it so that if the task text is too long, its concatenated in the confirmation popup when we click the close session button in the Active sessions section in the ops dashboard.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-08T11:36:03.554Z",
+          "startedAt": "2026-06-08T11:36:04.005Z",
+          "qaStatus": "ready-for-test",
+          "updatedAt": "2026-06-08T11:45:58Z",
+          "lastSessionAt": "2026-06-08T12:20:03.999Z"
+        },
+        {
+          "id": "c4aa449a-d6da-4caa-8f5c-e946c36cb0d2",
+          "text": "The pop up that shows the chat session while playing doesn't show the chat session. It fails to load.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-09T15:10:00.361Z",
+          "qaStatus": "ready-for-test"
+        },
+        {
+          "id": "ea3d1eea-3fbe-4737-85b0-06bdf78a1b7e",
+          "text": "I want to make it easier to give feedback on the UI. When playing i want there to be a little feedback button. When you click it a screenshot is automatically taken, then a pop up shows up where you get to draw with a red marker on the screenshot. Below the screenshot you have two buttons, skip and done, skip discards the screenshot and done saves the screenshot and moves onto a next step where you get to write your feedback. If the user drew anything the text automatically starts with \"Note the red marker.\" Below the input field there's a send button. When that button is pressed the screenshot and the text is saved in the projects task json under the epic \"User Feedback\". Before it is saved the text is altered to look like this \"We recieved this feedback from a user '*text*' analyze it in depth and fix it\". Clicking send shows a short \"Feedback sent\" response, and then you can close the pop up to go back and play.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-10T04:02:26.428Z",
+          "lastSessionAt": "2026-06-10T17:04:58.393Z",
+          "startedAt": "2026-06-10T04:02:26.851Z"
+        },
+        {
+          "id": "a26e85ce-b8e4-45e1-b09c-879bb4078424",
+          "text": "I want to make it easier to iterate quickly on the UI. Would it be possible to have a \"UI\" mode, where we have a live version of a project running, with a chat session next to it, and have it update the UI in realtime without rebuilding? Do not implement anything, just describe to me the best way to build something like this.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-10T04:35:06.530Z",
+          "lastSessionAt": "2026-06-14T16:15:24.141Z",
+          "startedAt": "2026-06-10T04:35:07.397Z"
+        },
+        {
+          "id": "2cb44ff7-2e96-4e64-8abc-746f809ab8da",
+          "text": "I tried to open the model-kit project in UI mode but i get this error: No UI config found for this project.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-11T03:50:39.900Z",
+          "lastSessionAt": "2026-06-11T06:56:49.294Z",
+          "startedAt": "2026-06-11T03:50:40.389Z"
+        },
+        {
+          "id": "13621d5a-424a-40ad-a673-a9603f50158e",
+          "text": "I want to make UI Mode a lot faster. Right now it feels like it makes the changes, then rebuilds everything everytime. It feels like it could be a lot faster because we are only updating the UI. An idea i had is that couldnt we edit the built frontend files directly, and keep track of our changes and then have like an apply button that makes the AI migrate those changes to the source files? Could that be faster? Dont implement anything just help me understand the best way to make it faster.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-16T06:57:03.518Z",
+          "startedAt": "2026-06-16T06:57:03.884Z",
+          "qaStatus": "ready-for-test",
+          "updatedAt": "2026-06-16T09:38:26Z"
         }
       ]
     },
@@ -1253,11 +1611,11 @@
           "grade": "green",
           "createdAt": "2026-05-15T23:57:08.151Z",
           "startedAt": "2026-05-15T23:57:08.926Z",
-          "qaStatus": "ready-for-test",
           "updatedBy": {
             "id": "pontus",
             "label": "Pontus"
-          }
+          },
+          "qaStatus": "ready-for-test"
         },
         {
           "id": "bd3e9513-5c5b-4a80-b68a-ccaa212d8def",
@@ -1328,11 +1686,11 @@
           "grade": "green",
           "createdAt": "2026-05-17T14:28:11.710Z",
           "startedAt": "2026-05-17T14:28:15.195Z",
-          "qaStatus": "ready-for-test",
           "updatedBy": {
             "id": "pontus",
             "label": "Pontus"
-          }
+          },
+          "qaStatus": "ready-for-test"
         },
         {
           "id": "9f0cdd4c-edcc-4fcb-965a-927b2437272d",
@@ -1352,11 +1710,11 @@
           "grade": "green",
           "createdAt": "2026-05-18T04:37:57.248Z",
           "startedAt": "2026-05-18T04:37:59.384Z",
-          "qaStatus": "ready-for-test",
           "updatedBy": {
             "id": "pontus",
             "label": "Pontus"
-          }
+          },
+          "qaStatus": "ready-for-test"
         },
         {
           "id": "de17b182-829c-49c2-9b80-eada6dea147e",
@@ -1376,7 +1734,8 @@
           "grade": "green",
           "createdAt": "2026-05-18T08:23:59.300Z",
           "startedAt": "2026-05-18T08:24:02.036Z",
-          "lastSessionAt": "2026-05-18T12:43:33.144Z"
+          "lastSessionAt": "2026-05-18T12:43:33.144Z",
+          "inProgress": true
         },
         {
           "id": "24be5cf0-b779-4122-ae97-86b02fca6c01",
@@ -1388,6 +1747,16 @@
           "markers": [
             "AI suggestion"
           ]
+        },
+        {
+          "id": "e050f5c0-f94f-41ee-8628-2359ecd92cd4",
+          "text": "Analyze the current project task file and execute the ready tasks with AI.\nFollow the project task file as the source of truth for execution order and status updates.\nBranch: master\nTasks JSON file for this branch: /home/ubuntu/cloud-terminal-data/projects/hermes-webui/project_tasks/master.json\nRead and update that JSON file directly for this branch.\nProcess tasks sequentially with no user prompts.\nActionable tasks are only:\n- ready: not done, not blocked by dependencies, no qaStatus, and not inProgress.\n- needs-more-work: qaStatus is \"needs-more-work\".\nExecution loop for each actionable task:\n1) Reload task JSON and choose the next actionable task.\n2) Implement the task in the codebase.\n3) Immediately update the task JSON before moving on.\nIf you discover new follow-up work while executing, add it as a new ready task with done=false, no qaStatus, and no inProgress.\nNever set qaStatus=\"ready-for-test\" on newly created follow-up tasks; that status is only for actionable tasks you just executed.\n4) If task is completed, keep done=false, set qaStatus=\"ready-for-test\", and clear moreWork/inProgress/sessionId/lastSessionAt when present.\n5) If task cannot be completed now, keep done=false, set qaStatus=\"needs-more-work\", and write a clear moreWork note.\n6) Save the JSON and continue to the next actionable task until none remain.",
+          "done": false,
+          "dependencies": [],
+          "grade": "green",
+          "createdAt": "2026-06-06T12:03:29.163Z",
+          "lastSessionAt": "2026-06-06T19:12:47.546Z",
+          "startedAt": "2026-06-06T12:03:30.831Z"
         }
       ]
     }
