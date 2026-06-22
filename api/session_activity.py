@@ -205,6 +205,27 @@ def _session_has_live_stream(session: dict) -> bool:
     return bool(session.get("is_streaming"))
 
 
+def _is_ui_mode_session(session: dict | None) -> bool:
+    if not isinstance(session, dict):
+        return False
+    mode = str(session.get("session_mode") or "").strip().lower().replace("-", "_")
+    if mode == "ui_mode":
+        return True
+    return bool(str(session.get("ui_project_id") or "").strip())
+
+
+def _ui_mode_project_id(session: dict) -> str:
+    return _text(session.get("ui_project_id") or session.get("projectId") or session.get("project_id"), limit=128)
+
+
+def _ui_mode_status_summary(session: dict) -> str:
+    for key in ("ui_status_summary", "ui_iteration_mode", "ui_workflow_source"):
+        value = _text(session.get(key), limit=256)
+        if value:
+            return value
+    return "UI Mode is open for this project."
+
+
 def _recent_epoch(value, *, max_age_seconds: int = SESSION_ACTIVITY_PLAY_HANDOFF_VISIBILITY_SECONDS) -> bool:
     stamp = _epoch_seconds(value)
     if stamp <= 0:
@@ -292,6 +313,14 @@ def _activity_status(session: dict) -> dict | None:
             "labelText": "Play handoff pending",
             "title": "Play was triggered for this completed Ops run and is still pending or needs attention.",
         }
+    if _is_ui_mode_session(session):
+        summary = _ui_mode_status_summary(session)
+        return {
+            "key": "ui-mode",
+            "toneClass": "active",
+            "labelText": "UI Mode open",
+            "title": summary,
+        }
     if run_status in {"stopped", "succeeded"}:
         return {
             "key": "done",
@@ -314,6 +343,8 @@ def _is_activity_session(session: dict) -> bool:
         return True
     if _session_has_live_stream(session):
         return True
+    if _is_ui_mode_session(session):
+        return True
     if str(task.get("id") or "").strip():
         return True
     if str(session.get("source_tag") or "").strip() == ops_sessions.OPS_TASK_SOURCE_TAG:
@@ -324,6 +355,8 @@ def _is_activity_session(session: dict) -> bool:
 
 
 def _activity_title(session: dict) -> str:
+    if _is_ui_mode_session(session):
+        return "UI Mode"
     for candidate in (
         session.get("label"),
         ((session.get("ops_task") or {}).get("text") if isinstance(session.get("ops_task"), dict) else ""),
@@ -339,7 +372,8 @@ def _activity_title(session: dict) -> str:
 
 def _activity_project_name(session: dict) -> str:
     return str(
-        session.get("projectName")
+        session.get("ui_project_label")
+        or session.get("projectName")
         or session.get("repositoryLabel")
         or session.get("branchLabel")
         or "Default workspace"
@@ -347,7 +381,7 @@ def _activity_project_name(session: dict) -> str:
 
 
 def _activity_repo_label(session: dict) -> str:
-    return str(session.get("repositoryLabel") or _activity_project_name(session)).strip()
+    return str(session.get("ui_project_label") or session.get("repositoryLabel") or _activity_project_name(session)).strip()
 
 
 def _activity_last_output_at(session: dict, run: dict) -> float | None:
@@ -420,7 +454,8 @@ def _minimal_ops_projects_by_id() -> dict[str, dict]:
 
 def _project_id_for_session(session: dict) -> str:
     return str(
-        session.get("ops_project_id")
+        session.get("ui_project_id")
+        or session.get("ops_project_id")
         or session.get("projectId")
         or session.get("project_id")
         or ""
@@ -707,7 +742,7 @@ def _lean_activity_source() -> dict:
         project = context.get("project") or _project_context_for_session(session, project_by_id)
         task = context.get("task")
         run = context.get("run")
-        if run or _session_has_live_stream(session):
+        if run or _session_has_live_stream(session) or _is_ui_mode_session(session):
             enriched_sessions.append(ops_sessions._enrich_session_summary(session, project, task, run))
 
     try:
@@ -732,9 +767,11 @@ def _serialize_activity_session(session: dict, assignment_map: dict[str, str]) -
     }
     last_output_at = _activity_last_output_at(session, run)
     task = session.get("ops_task") if isinstance(session.get("ops_task"), dict) else {}
+    ui_mode = _is_ui_mode_session(session)
+    ui_project_id = _ui_mode_project_id(session) if ui_mode else ""
     return {
         "id": str(session.get("session_id") or "").strip(),
-        "projectId": str(session.get("ops_project_id") or session.get("projectId") or "").strip() or None,
+        "projectId": str(ui_project_id or session.get("ops_project_id") or session.get("projectId") or "").strip() or None,
         "projectName": _activity_project_name(session),
         "repoLabel": _activity_repo_label(session),
         "branchLabel": str(session.get("branchLabel") or "").strip() or None,
@@ -753,6 +790,17 @@ def _serialize_activity_session(session: dict, assignment_map: dict[str, str]) -
         "groupId": group_id,
         "running": True,
         "activityStatus": status,
+        "sessionMode": str(session.get("session_mode") or "").strip() or None,
+        "uiMode": ui_mode,
+        "uiProjectId": ui_project_id or None,
+        "uiProjectLabel": str(session.get("ui_project_label") or "").strip() or None,
+        "uiPreviewPath": str(session.get("ui_preview_path") or "").strip() or None,
+        "uiPreviewUrl": str(session.get("ui_preview_url") or "").strip() or None,
+        "uiPreviewTitle": str(session.get("ui_preview_title") or "").strip() or None,
+        "uiIterationMode": str(session.get("ui_iteration_mode") or "").strip() or None,
+        "uiWorkflowSource": str(session.get("ui_workflow_source") or "").strip() or None,
+        "uiStatusSummary": str(session.get("ui_status_summary") or "").strip() or None,
+        "uiBuildPolicy": str(session.get("ui_build_policy") or "").strip() or None,
     }
 
 
@@ -766,7 +814,7 @@ def _session_activity_rich_fallback_enabled() -> bool:
 
 def _rich_ops_activity_source() -> dict | None:
     try:
-        fallback = ops_sessions.list_ops_sessions()
+        fallback = ops_sessions.list_ops_sessions(activity_only=True)
     except Exception:
         return None
     return fallback if isinstance(fallback, dict) else None

@@ -875,6 +875,7 @@ details.ops-project-sessions{display:block;}
 .menu-session-activity-group-select{min-width:144px;border:1px solid rgba(71,85,105,.8);border-radius:9px;padding:6px 10px;background:rgba(15,23,42,.86);color:#f8fafc;font-size:.8rem;}
 .menu-session-activity-group-select:focus-visible{outline:2px solid rgba(96,165,250,.75);outline-offset:2px;}
 .menu-session-activity-badge{display:inline-flex;align-items:center;justify-content:center;border:1px solid #334155;border-radius:999px;padding:2px 8px;font-size:.68rem;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:#cbd5f5;background:rgba(15,23,42,.7);}
+.menu-session-activity-badge.ui-mode{border-color:rgba(45,212,191,.48);color:#99f6e4;background:rgba(20,184,166,.14);}
 .menu-session-activity-status{display:inline-flex;align-items:center;gap:5px;border:1px solid rgba(71,85,105,.72);border-radius:999px;padding:2px 8px;font-size:.68rem;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:#cbd5e1;background:rgba(15,23,42,.72);white-space:nowrap;}
 .menu-session-activity-status-dot{width:7px;height:7px;border-radius:999px;background:#64748b;box-shadow:0 0 0 3px rgba(100,116,139,.14);}
 .menu-session-activity-status.active,.menu-session-activity-status.connecting{border-color:rgba(96,165,250,.48);color:#bfdbfe;background:rgba(30,64,175,.18);}

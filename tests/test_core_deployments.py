@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import pytest
 
 from api import auth, core_deployments, routes
+from api.runtime_process_cleanup import RuntimeProcessInfo
 
 
 def write_json(path: Path, data) -> None:
@@ -309,6 +310,7 @@ def test_core_deployment_local_legacy_start_installs_snapshot_dependencies_befor
     monkeypatch.setattr(core_deployments, "_maybe_install_runtime_dependencies", fake_install)
     monkeypatch.setattr(core_deployments.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(core_deployments, "_is_port_open", fake_is_port_open)
+    monkeypatch.setattr(core_deployments, "_stop_stale_deployment_runtime_processes", lambda *args, **kwargs: [])
 
     result = core_deployments._start_local_legacy_runtime(project, record, snapshot_source)
 
@@ -319,6 +321,52 @@ def test_core_deployment_local_legacy_start_installs_snapshot_dependencies_befor
     assert calls[1][3] == "dev-secret-key-must-be-long-1234567890"
     assert calls[1][4] == "true"
     assert result["dependencies"]["command"] == "pnpm install --frozen-lockfile"
+
+
+def test_core_deployment_stops_stale_runtime_processes_by_slug(monkeypatch):
+    infos = [
+        RuntimeProcessInfo(
+            pid=101,
+            cmdline="node packages/server/dist/packages/server/index.js",
+            environ={"HERMES_DEPLOYMENT": "true", "HERMES_DEPLOYMENT_SLUG": "alternativedata"},
+            pgid=101,
+        ),
+        RuntimeProcessInfo(
+            pid=102,
+            cmdline="node packages/server/dist/packages/server/index.js",
+            environ={"HERMES_DEPLOYMENT": "true", "HERMES_DEPLOYMENT_SLUG": "alternativedata"},
+            pgid=900,
+        ),
+        RuntimeProcessInfo(
+            pid=103,
+            cmdline="node packages/server/dist/packages/server/index.js",
+            environ={"HERMES_DEPLOYMENT": "true", "HERMES_DEPLOYMENT_SLUG": "other"},
+            pgid=103,
+        ),
+        RuntimeProcessInfo(
+            pid=104,
+            cmdline="node packages/server/dist/packages/server/index.js",
+            environ={"HERMES_DEPLOYMENT": "false", "HERMES_DEPLOYMENT_SLUG": "alternativedata"},
+            pgid=104,
+        ),
+    ]
+    killed = []
+    state = core_deployments._DeploymentRuntimeState(
+        project_id="project-1",
+        deployment_id="deployment-1",
+        slug="alternativedata",
+        snapshot_path="/tmp/snapshot",
+    )
+
+    monkeypatch.setattr(core_deployments, "iter_runtime_processes", lambda: iter(infos))
+    monkeypatch.setattr(core_deployments, "terminate_process_group", lambda pid: killed.append(pid) or True)
+    monkeypatch.setattr(core_deployments.os, "getpgid", lambda pid: 900 if pid == 999 else pid)
+    monkeypatch.setattr(core_deployments, "_append_runtime_log", lambda *args, **kwargs: None)
+
+    stopped = core_deployments._stop_stale_deployment_runtime_processes({"id": "project-1"}, state, keep_pid=999)
+
+    assert stopped == [101]
+    assert killed == [101]
 
 
 def test_core_deployment_redeploy_uses_internal_service_token_for_loopback_provider(tmp_path, monkeypatch):

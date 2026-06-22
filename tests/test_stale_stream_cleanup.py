@@ -1,5 +1,6 @@
 import queue
 import threading
+import time
 from pathlib import Path
 
 import api.config as config
@@ -48,7 +49,8 @@ class _FakeSession:
 
 def test_stale_stream_cleanup_helper_exists():
     assert "def _clear_stale_stream_state(session)" in ROUTES_SRC
-    assert "stream_id in STREAMS" in ROUTES_SRC
+    assert "stream_channel_runtime_recent" in ROUTES_SRC
+    assert "purge_stream_runtime(stream_id)" in ROUTES_SRC
     assert "session.active_stream_id = None" in ROUTES_SRC
     assert "session.pending_user_message = None" in ROUTES_SRC
     assert "session.pending_attachments = []" in ROUTES_SRC
@@ -58,6 +60,8 @@ def test_stale_stream_cleanup_helper_exists():
 
 def test_stale_stream_cleanup_does_not_refresh_sidebar_timestamp():
     config.STREAMS.clear()
+    with config.ACTIVE_RUNS_LOCK:
+        config.ACTIVE_RUNS.clear()
     config.SESSION_AGENT_LOCKS.clear()
     session = _FakeSession()
 
@@ -65,6 +69,38 @@ def test_stale_stream_cleanup_does_not_refresh_sidebar_timestamp():
 
     assert session.active_stream_id is None
     assert session.saved_touch_updated_at == [False]
+
+
+def test_stale_stream_cleanup_defers_recent_startup_channel():
+    config.STREAMS.clear()
+    with config.ACTIVE_RUNS_LOCK:
+        config.ACTIVE_RUNS.clear()
+    config.SESSION_AGENT_LOCKS.clear()
+    session = _FakeSession()
+    config.STREAMS[session.active_stream_id] = config.create_stream_channel()
+
+    assert routes._clear_stale_stream_state(session) is False
+
+    assert session.active_stream_id == "stale-stream"
+    assert session.saved_touch_updated_at == []
+
+
+def test_stale_stream_cleanup_purges_old_orphaned_stream_channel():
+    config.STREAMS.clear()
+    with config.ACTIVE_RUNS_LOCK:
+        config.ACTIVE_RUNS.clear()
+    config.SESSION_AGENT_LOCKS.clear()
+    session = _FakeSession()
+    channel = config.create_stream_channel()
+    channel.created_at = time.time() - config.STREAM_STARTUP_GRACE_SECONDS - 5
+    channel.last_event_at = channel.created_at
+    config.STREAMS[session.active_stream_id] = channel
+
+    assert routes._clear_stale_stream_state(session) is True
+
+    assert session.active_stream_id is None
+    assert session.saved_touch_updated_at == [False]
+    assert "stale-stream" not in config.STREAMS
 
 
 def test_session_load_clears_stale_stream_before_response():

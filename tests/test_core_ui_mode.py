@@ -528,6 +528,8 @@ def test_ui_mode_shell_and_static_sources_are_present():
     messages = (root / "static" / "messages.js").read_text(encoding="utf-8")
     ui_src = (root / "static" / "ui.js").read_text(encoding="utf-8")
     ops_detail = (root / "static" / "ops-legacy-project-detail.js").read_text(encoding="utf-8")
+    ops_home = (root / "static" / "ops-legacy-home.js").read_text(encoding="utf-8")
+    ops_css = (root / "static" / "ops-legacy.css").read_text(encoding="utf-8")
 
     assert "data-preview-frame" in html
     assert "data-chat-frame" in html
@@ -613,10 +615,17 @@ def test_ui_mode_shell_and_static_sources_are_present():
     assert "schedulePoll(status)" in js
     assert "value==='starting'||value==='building'" in js
     assert "lastPreviewAppPath:''" in js
+    assert "lastUsefulPreviewAppPath:''" in js
+    assert "lastPreviewContextAt:0" in js
     assert "previewRuntimeReady:false" in js
     assert "hermes-ui-mode-preview-route-v1:" in js
+    assert "hermes-ui-mode-preview-useful-route-v1:" in js
+    assert "isPreviewAuthAppPath" in js
+    assert "isPreviewRootAppPath" in js
     assert "rememberPreviewRoute(state.pageContext.appPath)" in js
     assert "currentPreviewReloadUrl" in js
+    assert "schedulePreviewReattach" in js
+    assert "hermes-ui-mode-chat-settled" in js
     assert "attachPreviewForStatus(status)" in js
     assert "!state.previewRuntimeReady" in js
     assert "setFrameSource(els.previewFrame,target,state.cacheToken)" in js
@@ -642,6 +651,8 @@ def test_ui_mode_shell_and_static_sources_are_present():
     assert "applyPreviewPatches" in compat
     assert "hermes-ui-preview-patches-applied" in compat
     assert "hermes-ui-mode-context-update" in messages
+    assert "_uiModeNotifyParentChatSettled" in messages
+    assert "hermes-ui-mode-chat-settled" in messages
     assert "hermes-ui-preview-patch" in messages
     assert "_uiModeDispatchPreviewPatchDirectives" in messages
     assert "hermes-ui-preview-patch-request" in messages
@@ -682,6 +693,12 @@ def test_ui_mode_shell_and_static_sources_are_present():
     assert "runtime workflow source" in messages
     assert "ui_preview_path:_uiModeMetadata.previewPath||undefined" in messages
     assert "ui-mode?projectId=" in ops_detail
+    assert "openUiModeActivitySession" in ops_home
+    assert "open-ui-mode-session" in ops_home
+    assert "Open UI Mode" in ops_home
+    assert "menu-session-activity-badge ui-mode" in ops_home
+    assert "shellUrl('ui-mode.html')" in ops_home
+    assert ".menu-session-activity-badge.ui-mode" in ops_css
     routes_src = (root / "api" / "routes.py").read_text(encoding="utf-8")
     streaming_src = (root / "api" / "streaming.py").read_text(encoding="utf-8")
     gateway_src = (root / "api" / "gateway_chat.py").read_text(encoding="utf-8")

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hermes Runtime Tools"
+  short_description: "Run, inspect, and review apps through Hermes runtime"
+  default_prompt: "Use $hermes-runtime-tools to run the project, inspect the app, and capture review evidence through Hermes runtime."

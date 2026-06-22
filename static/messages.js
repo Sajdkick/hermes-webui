@@ -447,6 +447,19 @@ function _uiModeDispatchPreviewPatchDirectives(text){
   return true;
 }
 
+function _uiModeNotifyParentChatSettled(reason,details){
+  if(!_isUiModeChatSession())return false;
+  if(!window.parent||window.parent===window)return false;
+  try{
+    window.parent.postMessage(Object.assign({
+      hermesUiMode:1,
+      type:'hermes-ui-mode-chat-settled',
+      reason:String(reason||'settled')
+    },details||{}),window.location.origin);
+    return true;
+  }catch(_){return false;}
+}
+
 function _uiModeSetComposerText(text){
   const value=String(text||'').trim();
   const composer=$('msg');
@@ -1586,6 +1599,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
           return;
         }
         if(st&&st.replay_available){
+          if(st.journal&&st.journal.terminal&&await _restoreSettledSession()) return;
           setComposerStatus('Restoring stream…');
           const replaySource=new EventSource(new URL(`api/chat/stream?stream_id=${encodeURIComponent(streamId)}${_runJournalReplayParams()}`,document.baseURI||location.href).href,{withCredentials:true});
           replaySource.addEventListener('open',()=>setComposerStatus('Reconnected'),{once:true});
@@ -2730,6 +2744,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
         _setActivePaneIdleIfOwner();
         playNotificationSound();
         sendBrowserNotification('Response complete',assistantText?assistantText.slice(0,100):'Task finished');
+        _uiModeNotifyParentChatSettled('done',{sessionId:completedSid,streamId:streamId});
       };
       if(_shouldUseStreamFade()&&assistantBody){
         _cancelAnimationFramePendingStreamRender();
@@ -2765,6 +2780,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       _smdEndParser();
       if(typeof finalizeThinkingCard==='function') finalizeThinkingCard();
       _closeSource(source);
+      _uiModeNotifyParentChatSettled('stream_end',{sessionId:activeSid,streamId:streamId});
     });
 
     source.addEventListener('pending_steer_leftover',e=>{
@@ -2945,6 +2961,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
         catch(_){trackBackgroundError(activeSid,_errTitle,'Error');}
       }
       _setActivePaneIdleIfOwner();
+      _uiModeNotifyParentChatSettled('apperror',{sessionId:activeSid,streamId:streamId});
       renderSessionList(); // clear streaming indicator immediately on apperror
     });
 
@@ -3033,6 +3050,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       })();
       renderSessionList();
       _setActivePaneIdleIfOwner();
+      _uiModeNotifyParentChatSettled('cancel',{sessionId:activeSid,streamId:streamId});
     });
 
     for(const _runJournalEventName of ['token','interim_assistant','reasoning','tool','tool_complete','todo_state','approval','clarify','state_saved','title','title_status','context_status','goal','goal_continue','done','stream_end','pending_steer_leftover','compressing','compressed','metering','apperror','warning','error','cancel']){
@@ -3088,7 +3106,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       return false;
     }
     try{
-      const data=await api(`/api/session?session_id=${encodeURIComponent(activeSid)}`);
+      const data=await api(`/api/session?session_id=${encodeURIComponent(activeSid)}&messages=0&resolve_model=0`);
       // Opus #2852 race-fix: if a late `done` event ran the finalize path while
       // we were awaiting the network roundtrip, bail out — done already settled.
       if(_streamFinalized) return true;
@@ -3114,9 +3132,16 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       if(isActiveSession){
         S.activeStreamId=null;
         clearLiveToolCards();if(!assistantText)removeThinking();
+        const previousMessages=Array.isArray(S.messages)?S.messages:[];
         S.session=session;
-        const _nextMsgs3018=(session.messages||[]).filter(m=>m&&m.role);
-        S.messages=_carryForwardEphemeralTurnFields(S.messages||[], _nextMsgs3018);
+        S.messages=[];
+        if(typeof _ensureMessagesLoaded==='function'){
+          try{await _ensureMessagesLoaded(completedSid);}
+          catch(_){S.messages=[];}
+        }else{
+          S.messages=(session.messages||[]).filter(m=>m&&m.role);
+        }
+        S.messages=_carryForwardEphemeralTurnFields(previousMessages, S.messages||[]);
         S.messages=_filterRecoveryControlMessages(S.messages || []);
         if(typeof _hydrateTodosFromSession==='function') _hydrateTodosFromSession(S.session);
         if(S.session&&S.session.session_id){
@@ -3147,6 +3172,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       if(_isActiveSession()) _queueDrainSid=activeSid;
       renderSessionList();
       _setActivePaneIdleIfOwner();
+      _uiModeNotifyParentChatSettled('restored',{sessionId:completedSid,streamId:streamId});
       return true;
     }catch(_){
       return false;
@@ -3181,6 +3207,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       }
     }
     _setActivePaneIdleIfOwner();
+    _uiModeNotifyParentChatSettled('connection-interrupted',{sessionId:activeSid,streamId:streamId});
   }
 
   (async()=>{
@@ -3191,6 +3218,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       try{
         const st=await api(`/api/chat/stream/status?stream_id=${encodeURIComponent(streamId)}`);
         if(!st.active&&st.replay_available){
+          if(st.journal&&st.journal.terminal&&await _restoreSettledSession()) return;
           replayOnly=true;
         }else if(!st.active){
           if(await _restoreSettledSession()) return;

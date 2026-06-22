@@ -34,6 +34,7 @@ from urllib.parse import quote, unquote, urlparse, urlsplit
 from api import ops_projects
 from api.core_contracts import CoreApiError, coerce_core_error, now_iso, operation_record, project_root, redact_payload, relative_to_project, safe_project_child
 from api.helpers import _redact_text
+from api.runtime_process_cleanup import RuntimeProcessInfo, env_flag_enabled, iter_runtime_processes, terminate_process_group
 
 DeploymentCoreError = CoreApiError
 DEPLOYMENT_DIR = ".hermes/ops/deployments"
@@ -1477,6 +1478,9 @@ def _runtime_plan(snapshot_path: Path, record: dict) -> dict:
     env[env_var] = str(port)
     env.setdefault("HERMES_DEPLOYMENT", "true")
     env.setdefault("HERMES_DEPLOYMENT_SLUG", _normalize_deployment_slug(record.get("slug")))
+    project_id = _text(record.get("projectId"), limit=128)
+    if project_id:
+        env.setdefault("HERMES_DEPLOYMENT_PROJECT_ID", project_id)
     if _text(inspect.get("mode"), limit=64).lower() == "proxy":
         env.setdefault("SERVE_CLIENT_BUILD", "true")
     request_path, inspect_path = _normalize_runtime_proxy_path(_interpolate_runtime_port(inspect_url, env_var, port))
@@ -1561,6 +1565,59 @@ def _terminate_runtime_process(proc: subprocess.Popen | None, timeout: float = 4
             pass
 
 
+def _deployment_runtime_process_matches(info: RuntimeProcessInfo, *, slug: str, project_id: str) -> bool:
+    if not slug:
+        return False
+    env = info.environ or {}
+    if not env_flag_enabled(env.get("HERMES_DEPLOYMENT")):
+        return False
+    if _normalize_deployment_slug(env.get("HERMES_DEPLOYMENT_SLUG")) != slug:
+        return False
+    runtime_project_id = str(env.get("HERMES_DEPLOYMENT_PROJECT_ID") or "").strip()
+    if runtime_project_id and project_id and runtime_project_id != project_id:
+        return False
+    return True
+
+
+def _deployment_runtime_pids(slug: str, project_id: str, *, keep_pid: int | None = None) -> list[int]:
+    normalized_slug = _normalize_deployment_slug(slug)
+    keep = {int(keep_pid)} if keep_pid else set()
+    keep_pgids: set[int] = set()
+    if keep_pid:
+        try:
+            keep_pgids.add(os.getpgid(int(keep_pid)))
+        except OSError:
+            pass
+    pids: list[int] = []
+    for info in iter_runtime_processes():
+        if info.pid in keep or (info.pgid is not None and info.pgid in keep_pgids):
+            continue
+        if _deployment_runtime_process_matches(info, slug=normalized_slug, project_id=str(project_id or "")):
+            pids.append(info.pid)
+    return pids
+
+
+def _stop_deployment_runtime_pids(slug: str, project_id: str, *, keep_pid: int | None = None) -> list[int]:
+    stopped: list[int] = []
+    for pid in _deployment_runtime_pids(slug, project_id, keep_pid=keep_pid):
+        if terminate_process_group(pid):
+            stopped.append(pid)
+    return stopped
+
+
+def _stop_stale_deployment_runtime_processes(project: dict, state: _DeploymentRuntimeState, *, keep_pid: int | None = None) -> list[int]:
+    stopped = _stop_deployment_runtime_pids(state.slug, state.project_id, keep_pid=keep_pid)
+    if stopped:
+        _append_runtime_log(
+            project,
+            state,
+            stage="start",
+            stream="system",
+            message=f"Stopped {len(stopped)} stale deployment runtime process(es) for slug {state.slug}.",
+        )
+    return stopped
+
+
 def _runtime_process_watcher(project: dict, state: _DeploymentRuntimeState, proc: subprocess.Popen) -> None:
     code = proc.wait()
     with state.lock:
@@ -1601,9 +1658,16 @@ def _stop_runtime_state(project: dict, state: _DeploymentRuntimeState | None) ->
 
 
 def _stop_project_runtime(project: dict) -> None:
+    project_id = str(project.get("id") or "")
     with _DEPLOYMENT_RUNTIME_LOCK:
-        state = _DEPLOYMENT_RUNTIMES.pop(str(project.get("id") or ""), None)
+        state = _DEPLOYMENT_RUNTIMES.pop(project_id, None)
     _stop_runtime_state(project, state)
+    slug = state.slug if state else ""
+    if not slug:
+        record = _cloud_terminal_record_for_project(project_id)
+        slug = _normalize_deployment_slug((record or {}).get("slug"))
+    if slug:
+        _stop_deployment_runtime_pids(slug, project_id)
 
 
 def _start_local_legacy_runtime(project: dict, record: dict, snapshot_path: Path, *, replace_existing: bool = True) -> dict:
@@ -1692,6 +1756,7 @@ def _start_local_legacy_runtime(project: dict, record: dict, snapshot_path: Path
             _DEPLOYMENT_RUNTIMES[project_id] = state
     if previous is not None and previous is not state and replace_existing:
         _stop_runtime_state(project, previous)
+    _stop_stale_deployment_runtime_processes(project, state, keep_pid=proc.pid)
     threading.Thread(target=_runtime_process_watcher, args=(project, state, proc), daemon=True).start()
     _append_runtime_log(project, state, stage="start", stream="system", message="Deployment runtime is ready.")
     return {

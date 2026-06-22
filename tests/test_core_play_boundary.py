@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import io
 import json
+from pathlib import Path
 from urllib.parse import urlparse
 
 from api import core_play, play_pipeline, routes_ops_play
+from api.runtime_process_cleanup import RuntimeProcessInfo
 
 
 class DummyHandler:
@@ -131,6 +133,58 @@ def test_ops_play_stop_route_preserves_status_fallback(monkeypatch):
         "message": "Play pipeline stopped.",
     }
     assert calls == [("stop", "project 1"), ("status", "project 1")]
+
+
+def test_play_cleanup_stops_stale_project_runtime_processes(tmp_path, monkeypatch):
+    project_path = tmp_path / "project"
+    app_path = project_path / "apps" / "web"
+    app_path.mkdir(parents=True)
+    other_path = tmp_path / "other"
+    other_path.mkdir()
+    marker = play_pipeline.APP_SERVER_COMMAND_MARKER
+    infos = [
+        RuntimeProcessInfo(pid=201, cmdline=f"node {marker}", environ={}, cwd=app_path, pgid=201),
+        RuntimeProcessInfo(pid=202, cmdline=f"node {marker}", environ={}, cwd=app_path, pgid=900),
+        RuntimeProcessInfo(
+            pid=203,
+            cmdline=f"node {marker}",
+            environ={"HERMES_DEPLOYMENT": "true", "HERMES_DEPLOYMENT_SLUG": "alternativedata"},
+            cwd=app_path,
+            pgid=203,
+        ),
+        RuntimeProcessInfo(pid=204, cmdline=f"node {marker}", environ={}, cwd=other_path, pgid=204),
+        RuntimeProcessInfo(
+            pid=205,
+            cmdline=f"node {marker}",
+            environ={"HERMES_PLAY_RUNTIME": "true", "HERMES_PLAY_PROJECT_ID": "project-1"},
+            cwd=None,
+            pgid=205,
+        ),
+        RuntimeProcessInfo(
+            pid=206,
+            cmdline="python custom-play-server.py",
+            environ={"HERMES_PLAY_RUNTIME": "true", "HERMES_PLAY_PROJECT_ID": "project-1"},
+            cwd=None,
+            pgid=206,
+        ),
+        RuntimeProcessInfo(
+            pid=207,
+            cmdline="python custom-play-server.py",
+            environ={"HERMES_PLAY_RUNTIME": "true", "HERMES_PLAY_PROJECT_ID": "other-project"},
+            cwd=app_path,
+            pgid=207,
+        ),
+    ]
+    killed = []
+
+    monkeypatch.setattr(play_pipeline, "iter_runtime_processes", lambda: iter(infos))
+    monkeypatch.setattr(play_pipeline, "terminate_process_group", lambda pid: killed.append(pid) or True)
+    monkeypatch.setattr(play_pipeline.os, "getpgid", lambda pid: 900 if pid == 999 else pid)
+
+    stopped = play_pipeline._stop_stale_play_runtime_processes("project-1", Path(project_path), keep_pid=999)
+
+    assert stopped == [201, 205, 206]
+    assert killed == [201, 205, 206]
 
 
 def test_ops_play_proxy_route_delegates_to_core_play(monkeypatch):

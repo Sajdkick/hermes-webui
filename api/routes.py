@@ -1146,9 +1146,10 @@ def _kanban_unknown_endpoint(handler, parsed, method: str) -> bool:
 def _clear_stale_stream_state(session) -> bool:
     """Clear persisted streaming flags when the in-memory stream no longer exists.
 
-    A server restart or worker crash can leave active_stream_id/pending_* in the
-    session JSON while STREAMS is empty. The frontend then keeps reconnecting to
-    a dead stream and shows a permanent running/thinking state.
+    A server restart, worker crash, or orphaned SSE channel can leave
+    active_stream_id/pending_* in the session JSON after the worker is gone. The
+    frontend then keeps reconnecting to a dead stream and shows a permanent
+    running/thinking state.
 
     SAFETY (#1558): If ``session`` was loaded with ``metadata_only=True``, its
     ``messages`` array is empty by design and calling ``save()`` would
@@ -1159,24 +1160,41 @@ def _clear_stale_stream_state(session) -> bool:
     stream_id = getattr(session, "active_stream_id", None)
     if not stream_id:
         return False
-    with STREAMS_LOCK:
-        stream_alive = stream_id in STREAMS
-    if stream_alive:
-        return False
+    _live_config = None
     try:
         from api import config as _live_config
+        with STREAMS_LOCK:
+            stream_channel = STREAMS.get(stream_id)
         with _live_config.ACTIVE_RUNS_LOCK:
             worker_alive = stream_id in (_live_config.ACTIVE_RUNS or {})
+        runtime_alive = worker_alive or _live_config.stream_channel_runtime_recent(stream_channel)
     except Exception:
         worker_alive = False
-    if worker_alive:
+        runtime_alive = False
+    if runtime_alive:
         logger.debug(
-            "_clear_stale_stream_state: stream %s for session %s missing SSE channel "
-            "but worker bookkeeping is still active; deferring stale cleanup",
+            "_clear_stale_stream_state: stream %s for session %s still has live "
+            "runtime bookkeeping; deferring stale cleanup",
             stream_id,
             getattr(session, "session_id", "?"),
         )
         return False
+    if _live_config is not None:
+        try:
+            if _live_config.purge_stream_runtime(stream_id):
+                logger.debug(
+                    "_clear_stale_stream_state: purged orphaned runtime bookkeeping for "
+                    "stream %s on session %s",
+                    stream_id,
+                    getattr(session, "session_id", "?"),
+                )
+        except Exception:
+            logger.debug(
+                "_clear_stale_stream_state: failed to purge orphaned runtime "
+                "bookkeeping for stream %s",
+                stream_id,
+                exc_info=True,
+            )
     grace_seconds = 30.0
     try:
         from api.models import _REPAIR_STALE_PENDING_GRACE_SECONDS
@@ -5850,10 +5868,11 @@ def handle_get(handler, parsed) -> bool:
                 scoped = _cap_recent_cli_sessions(scoped, cli_cap=CLI_VISIBLE_SESSION_CAP)
             diag.stage("redact_sessions")
             safe_merged = []
+            redact_enabled = bool(settings.get("api_redact_enabled", True))
             for s in scoped:
                 item = dict(s)
                 if isinstance(item.get("title"), str):
-                    item["title"] = _redact_text(item["title"])
+                    item["title"] = _redact_text(item["title"], _enabled=redact_enabled)
                 item["attention"] = _session_attention_summary(str(item.get("session_id") or ""))
                 safe_merged.append(item)
             diag.stage("response_write")

@@ -119,6 +119,44 @@ def test_sessions_api_includes_attention_summary_for_sidebar_rows(monkeypatch):
         _clear_attention_state(sid)
 
 
+def test_sessions_api_reuses_redaction_setting_for_sidebar_titles(monkeypatch):
+    calls = []
+
+    def fake_redact(text, *, _enabled=None):
+        calls.append((text, _enabled))
+        return text
+
+    monkeypatch.setattr(routes, "all_sessions", lambda diag=None: [
+        {
+            "session_id": "redact-setting-one",
+            "title": "One",
+            "profile": "default",
+            "updated_at": 2,
+            "last_message_at": 2,
+        },
+        {
+            "session_id": "redact-setting-two",
+            "title": "Two",
+            "profile": "default",
+            "updated_at": 1,
+            "last_message_at": 1,
+        },
+    ])
+    monkeypatch.setattr(routes, "_reconcile_stale_stream_state_for_session_rows", lambda rows: False)
+    monkeypatch.setattr(routes, "load_settings", lambda: {
+        "show_cli_sessions": False,
+        "api_redact_enabled": False,
+    })
+    monkeypatch.setattr(routes, "_redact_text", fake_redact)
+    monkeypatch.setattr(profiles, "get_active_profile_name", lambda: "default")
+
+    handler = _FakeHandler()
+    routes.handle_get(handler, urlparse("http://example.com/api/sessions"))
+
+    assert handler.status == 200
+    assert calls == [("One", False), ("Two", False)]
+
+
 def test_session_sidebar_renders_attention_badge_and_semantic_classes():
     sessions_js = (REPO_ROOT / "static" / "sessions.js").read_text(encoding="utf-8")
     style_css = (REPO_ROOT / "static" / "style.css").read_text(encoding="utf-8")

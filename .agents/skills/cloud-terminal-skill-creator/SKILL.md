@@ -35,6 +35,8 @@ If the goal is a shared Cloud Terminal skill, the source of truth is this reposi
 
 - Prefer names that match the existing shared skill style, usually with a `cloud-terminal-` prefix.
 - Keep metadata specific enough that the skill triggers for the right tasks.
+- Prefer class-level umbrella skills with rich `SKILL.md` guidance and concise support files under `references/`, `templates/`, or `scripts/`; avoid one-session-one-skill entries for narrow bugs.
+- During post-session skill review, actively update the loaded skill or the nearest existing umbrella when a workflow correction, reusable debugging technique, or missing pitfall appeared. Treat `Nothing to save.` as appropriate only after checking for these signals, not as the default.
 - Keep the body short and procedural. Put only the rules the agent actually needs in the skill.
 - Mirror the existing shared skill layout instead of inventing a new structure.
 - If you need generic skill-writing guidance, read `~/.codex/skills/.system/skill-creator/SKILL.md`.

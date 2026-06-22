@@ -23,6 +23,9 @@
     selectedElement:null,
     selectedElements:[],
     lastPreviewAppPath:'',
+    lastUsefulPreviewAppPath:'',
+    lastPreviewContextAt:0,
+    previewReattachTimer:null,
     previewRuntimeReady:false,
     fastWorkspace:'',
     uiContextPath:'',
@@ -190,10 +193,53 @@
     return 'hermes-ui-mode-preview-route-v1:'+String(state.projectId||'');
   }
 
+  function previewUsefulRouteStorageKey(){
+    return 'hermes-ui-mode-preview-useful-route-v1:'+String(state.projectId||'');
+  }
+
+  function previewAppPathname(raw){
+    var clean=cleanPreviewAppPath(raw);
+    if(!clean)return '';
+    try{return (new URL(clean,window.location.origin).pathname||'/').replace(/\/+$/,'')||'/';}
+    catch(_){return clean.split(/[?#]/,1)[0]||'/';}
+  }
+
+  function isPreviewAuthAppPath(raw){
+    var path=previewAppPathname(raw).toLowerCase();
+    if(!path)return false;
+    return path==='/login'||path.indexOf('/login/')===0||
+      path==='/logout'||path.indexOf('/logout/')===0||
+      path==='/auth'||path.indexOf('/auth/')===0||
+      path==='/signin'||path.indexOf('/signin/')===0||
+      path==='/sign-in'||path.indexOf('/sign-in/')===0;
+  }
+
+  function isPreviewRootAppPath(raw){
+    var clean=cleanPreviewAppPath(raw);
+    if(!clean)return false;
+    try{
+      var url=new URL(clean,window.location.origin);
+      return (url.pathname||'/')==='/'&&!url.search&&!url.hash;
+    }catch(_){return clean==='/'||clean==='';}
+  }
+
+  function isPreviewUsefulAppPath(raw){
+    var clean=cleanPreviewAppPath(raw);
+    return !!clean&&!isPreviewAuthAppPath(clean)&&!isPreviewRootAppPath(clean);
+  }
+
   function loadStoredPreviewAppPath(){
     try{
       if(!window.sessionStorage||!state.projectId)return '';
       return cleanPreviewAppPath(window.sessionStorage.getItem(previewRouteStorageKey())||'');
+    }catch(_){return '';}
+  }
+
+  function loadStoredUsefulPreviewAppPath(){
+    try{
+      if(!window.sessionStorage||!state.projectId)return '';
+      var clean=cleanPreviewAppPath(window.sessionStorage.getItem(previewUsefulRouteStorageKey())||'');
+      return isPreviewUsefulAppPath(clean)?clean:'';
     }catch(_){return '';}
   }
 
@@ -204,6 +250,12 @@
     try{
       if(window.sessionStorage&&state.projectId)window.sessionStorage.setItem(previewRouteStorageKey(),clean);
     }catch(_){/* best effort */}
+    if(isPreviewUsefulAppPath(clean)){
+      state.lastUsefulPreviewAppPath=clean;
+      try{
+        if(window.sessionStorage&&state.projectId)window.sessionStorage.setItem(previewUsefulRouteStorageKey(),clean);
+      }catch(_){/* best effort */}
+    }
     return clean;
   }
 
@@ -282,14 +334,15 @@
   function currentPreviewContextMetadata(){
     var page=state.pageContext||{};
     var status=state.status||{};
+    var preferredPath=preferredPreviewAppPath(status)||page.appPath||previewAppPathFromUrl(page.url)||page.path||'';
     return {
       projectId:state.projectId||'',
       projectLabel:uiProjectLabel(),
       projectSourceWorkspace:projectSourceWorkspace(),
       fastWorkspace:state.fastWorkspace||'',
       uiContextPath:state.uiContextPath||'',
-      previewPath:page.appPath||previewAppPathFromUrl(page.url)||page.path||'',
-      previewUrl:page.url||'',
+      previewPath:preferredPath,
+      previewUrl:previewUrlForAppPath(preferredPath,status)||page.url||'',
       previewTitle:page.title||'',
       workflowSource:String(status.workflowSource||status.configSource||'').trim(),
       iterationMode:String(status.iterationMode||'').trim(),
@@ -562,10 +615,12 @@
     var data=event.data||{};
     if(!data||data.hermesUiMode!==1)return;
     if(data.type==='hermes-ui-preview-context'){
+      state.lastPreviewContextAt=Date.now();
       state.pageContext=normalizePageContext(data);
       rememberPreviewRoute(state.pageContext.appPath);
       renderPreviewContext();
     }else if(data.type==='hermes-ui-element-selected'){
+      state.lastPreviewContextAt=Date.now();
       state.selectedElements=normalizeSelectedElements(data);
       state.selectedElement=state.selectedElements.length?state.selectedElements[state.selectedElements.length-1]:null;
       if(data.page){
@@ -580,6 +635,8 @@
     }else if(data.type==='hermes-ui-preview-patches-applied'){
       state.previewPatchesAppliedCount=Number(data.count)||0;
       updatePreviewPatchControls();
+    }else if(data.type==='hermes-ui-mode-chat-settled'){
+      schedulePreviewReattach(data.reason||data.status||'chat-settled');
     }
   }
 
@@ -633,9 +690,23 @@
     if(frame.getAttribute('src')!==resolved)frame.setAttribute('src',resolved);
   }
 
-  function preferredPreviewAppPath(status){
+  function currentPreviewObservedAppPath(){
     var page=state.pageContext||{};
-    return cleanPreviewAppPath(page.appPath)||previewAppPathFromUrl(page.url)||cleanPreviewAppPath(page.path)||cleanPreviewAppPath(state.lastPreviewAppPath)||loadStoredPreviewAppPath()||previewAppPathFromUrl(status&&status.previewUrl)||'/';
+    return cleanPreviewAppPath(page.appPath)||previewAppPathFromUrl(page.url)||cleanPreviewAppPath(page.path)||cleanPreviewAppPath(state.lastPreviewAppPath)||loadStoredPreviewAppPath();
+  }
+
+  function currentUsefulPreviewAppPath(){
+    var clean=cleanPreviewAppPath(state.lastUsefulPreviewAppPath)||loadStoredUsefulPreviewAppPath();
+    return isPreviewUsefulAppPath(clean)?clean:'';
+  }
+
+  function preferredPreviewAppPath(status){
+    var observed=currentPreviewObservedAppPath();
+    var useful=currentUsefulPreviewAppPath();
+    if(isPreviewUsefulAppPath(observed))return observed;
+    if(useful&&(!observed||isPreviewAuthAppPath(observed)||isPreviewRootAppPath(observed)))return useful;
+    if(useful)return useful;
+    return observed||previewAppPathFromUrl(status&&status.previewUrl)||'/';
   }
 
   function previewUrlForAppPath(appPath,status){
@@ -678,6 +749,45 @@
       state.pageContext=normalizePageContext({url:appUrl(target),appPath:clean||appPath,reason:'status'});
       renderPreviewContext();
     }
+  }
+
+  function previewNeedsUsefulRouteRepair(){
+    var useful=currentUsefulPreviewAppPath();
+    if(!useful)return false;
+    var observed=currentPreviewObservedAppPath();
+    if(!observed)return true;
+    return isPreviewAuthAppPath(observed)||isPreviewRootAppPath(observed);
+  }
+
+  async function reattachPreviewAfterChatSettled(reason){
+    if(!state.projectId||!els.previewFrame)return;
+    var status=state.status||{};
+    if(!status.ready||!status.previewUrl){
+      try{status=await refreshStatus();}
+      catch(error){setError(error.message);return;}
+    }
+    if(!status||!status.ready||!status.previewUrl)return;
+    var hasSrc=!!els.previewFrame.getAttribute('src');
+    var staleContext=!state.lastPreviewContextAt||(Date.now()-state.lastPreviewContextAt)>1200;
+    var needsAttach=!hasSrc||!state.previewRuntimeReady||previewNeedsUsefulRouteRepair()||(staleContext&&currentUsefulPreviewAppPath());
+    if(!needsAttach){
+      if(state.previewPatches.length)postPreviewPatches();
+      return;
+    }
+    var target=previewUrlForAppPath(preferredPreviewAppPath(status),status)||status.previewUrl;
+    if(!target)return;
+    state.cacheToken=String(Date.now());
+    setFrameSource(els.previewFrame,target,state.cacheToken);
+    window.setTimeout(requestPreviewContext,160);
+  }
+
+  function schedulePreviewReattach(reason){
+    if(state.previewReattachTimer)window.clearTimeout(state.previewReattachTimer);
+    requestPreviewContext();
+    state.previewReattachTimer=window.setTimeout(function(){
+      state.previewReattachTimer=null;
+      reattachPreviewAfterChatSettled(reason||'chat-settled').catch(function(error){setError(error.message);});
+    },360);
   }
 
   function renderStatus(status){

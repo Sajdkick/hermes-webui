@@ -54,13 +54,14 @@ def test_profile_shared_skill_dirs_are_added_without_duplicates(tmp_path, monkey
 
     home = tmp_path / "profiles" / "summons"
     shared = tmp_path / "shared-skills"
+    legacy_shared = Path(__file__).resolve().parents[1] / ".agents" / "skills"
     shared.mkdir(parents=True)
     home.mkdir(parents=True)
     (home / "config.yaml").write_text(
         yaml.safe_dump(
             {
                 "terminal": {"backend": "local", "cwd": "/workspace"},
-                "skills": {"external_dirs": ["~/team-skills"]},
+                "skills": {"external_dirs": ["~/team-skills", str(legacy_shared)]},
             },
             sort_keys=False,
         ),
@@ -76,6 +77,37 @@ def test_profile_shared_skill_dirs_are_added_without_duplicates(tmp_path, monkey
     assert profiles_mod.ensure_webui_shared_skill_dirs(home) is False
     second = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
     assert second["skills"]["external_dirs"] == ["~/team-skills", str(shared.resolve())]
+
+
+def test_webui_shared_skill_sync_exposes_only_hermes_skills(tmp_path):
+    from api import profiles as profiles_mod
+
+    source = tmp_path / "repo" / ".agents" / "skills"
+    target = tmp_path / "repo" / ".agents" / "hermes-shared-skills"
+    for name in [
+        "hermes-runtime-tools",
+        "hermes-gather-information",
+        "cloud-terminal-runtime-tools",
+        "cloud-terminal-gather-information",
+    ]:
+        skill_dir = source / name
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: {name}\n---\n# {name}\n",
+            encoding="utf-8",
+        )
+    stale = target / "cloud-terminal-runtime-tools"
+    stale.mkdir(parents=True)
+    (stale / "SKILL.md").write_text("stale", encoding="utf-8")
+
+    assert profiles_mod._sync_webui_hermes_shared_skills_dir(source, target) is True
+
+    assert sorted(p.name for p in target.iterdir()) == [
+        "hermes-gather-information",
+        "hermes-runtime-tools",
+    ]
+    assert (target / "hermes-runtime-tools" / "SKILL.md").is_file()
+    assert not (target / "cloud-terminal-runtime-tools").exists()
 
 
 def test_profile_runtime_env_ensures_shared_skill_dirs(tmp_path, monkeypatch):

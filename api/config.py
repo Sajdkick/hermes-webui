@@ -4864,16 +4864,18 @@ _INDEX_HTML_PATH = REPO_ROOT / "static" / "index.html"
 
 # ── Thread synchronisation ───────────────────────────────────────────────────
 LOCK = threading.Lock()
-# Max compact Session objects held in the in-memory LRU (issue #3506). Lighter
-# than the agent cache (no live agent runtime), but still bounded and operator-
-# tunable via HERMES_WEBUI_SESSIONS_MAX for installs with hundreds of sessions.
-SESSIONS_MAX = _env_int("HERMES_WEBUI_SESSIONS_MAX", 100)
+# Max full Session objects held in the in-memory LRU (issue #3506). These are
+# not compact once loaded: a power-user session can be tens of MB, so the default
+# must stay small and operator-tunable via HERMES_WEBUI_SESSIONS_MAX.
+SESSIONS_MAX = _env_int("HERMES_WEBUI_SESSIONS_MAX", 20)
 CHAT_LOCK = threading.Lock()
 # Bound the per-stream event tail held while no browser tab is connected.
 # Disconnected long-running streams can otherwise accumulate thousands of token,
 # metering, and tool events in RAM until the worker exits. The run journal remains
 # the durable source for replay; this in-memory buffer is only a reconnect tail.
 STREAM_OFFLINE_BUFFER_MAX = _env_int("HERMES_WEBUI_STREAM_OFFLINE_BUFFER_MAX", 1024)
+STREAM_STARTUP_GRACE_SECONDS = _env_int("HERMES_WEBUI_STREAM_STARTUP_GRACE_SECONDS", 30)
+STREAM_TERMINAL_EVENTS = {"done", "stream_end", "apperror", "error", "cancel"}
 
 
 class StreamChannel:
@@ -4892,6 +4894,9 @@ class StreamChannel:
         self._subscribers: list[queue.Queue] = []
         self._offline_buffer: list[tuple[str, object]] = []
         self._offline_dropped = 0
+        self.created_at = time.time()
+        self.last_event_at = self.created_at
+        self.terminal_event_at: float | None = None
         try:
             limit = int(STREAM_OFFLINE_BUFFER_MAX if offline_buffer_max is None else offline_buffer_max)
         except (TypeError, ValueError):
@@ -4919,7 +4924,15 @@ class StreamChannel:
                 pass
 
     def put_nowait(self, item: tuple[str, object]) -> None:
+        try:
+            event_name = str(item[0] or "")
+        except Exception:
+            event_name = ""
+        now = time.time()
         with self._lock:
+            self.last_event_at = now
+            if event_name in STREAM_TERMINAL_EVENTS:
+                self.terminal_event_at = now
             subscribers = list(self._subscribers)
             if not subscribers:
                 self._offline_buffer.append(item)
@@ -4940,11 +4953,69 @@ class StreamChannel:
                 "offline_buffered_events": len(self._offline_buffer),
                 "offline_dropped_events": self._offline_dropped,
                 "offline_buffer_max": self._offline_buffer_max,
+                "age_seconds": int(max(0, time.time() - self.created_at)),
+                "terminal_age_seconds": (
+                    int(max(0, time.time() - self.terminal_event_at))
+                    if self.terminal_event_at is not None
+                    else -1
+                ),
             }
 
 
 def create_stream_channel(*, offline_buffer_max: int | None = None) -> StreamChannel:
     return StreamChannel(offline_buffer_max=offline_buffer_max)
+
+
+def stream_channel_runtime_recent(channel, *, now: float | None = None) -> bool:
+    """Return True when a stream channel can still represent a starting worker."""
+    if channel is None:
+        return False
+    if getattr(channel, "terminal_event_at", None) is not None:
+        return False
+    created_at = getattr(channel, "created_at", None)
+    if created_at is None:
+        # Legacy tests and defensive callers sometimes use plain Queue/object
+        # sentinels in STREAMS. Treat unknown stream objects as live.
+        return True
+    try:
+        age = float(now if now is not None else time.time()) - float(created_at)
+    except (TypeError, ValueError):
+        return True
+    return age <= max(1, STREAM_STARTUP_GRACE_SECONDS)
+
+
+def stream_runtime_alive(stream_id: str, *, now: float | None = None) -> bool:
+    """Return True when a stream id still has a worker or is in startup grace."""
+    if not stream_id:
+        return False
+    with ACTIVE_RUNS_LOCK:
+        if stream_id in ACTIVE_RUNS:
+            return True
+    with STREAMS_LOCK:
+        channel = STREAMS.get(stream_id)
+    return stream_channel_runtime_recent(channel, now=now)
+
+
+def purge_stream_runtime(stream_id: str) -> bool:
+    """Remove orphaned runtime bookkeeping for a stream id."""
+    if not stream_id:
+        return False
+    removed = False
+    with STREAMS_LOCK:
+        for mapping in (
+            STREAMS,
+            CANCEL_FLAGS,
+            AGENT_INSTANCES,
+            STREAM_PARTIAL_TEXT,
+            STREAM_REASONING_TEXT,
+            STREAM_LIVE_TOOL_CALLS,
+            STREAM_GOAL_RELATED,
+            STREAM_LAST_EVENT_ID,
+        ):
+            removed = mapping.pop(stream_id, None) is not None or removed
+    with ACTIVE_RUNS_LOCK:
+        removed = ACTIVE_RUNS.pop(stream_id, None) is not None or removed
+    return removed
 
 
 STREAMS: dict = {}

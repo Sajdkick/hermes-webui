@@ -67,6 +67,8 @@ def handle_post(handler, parsed, body: dict) -> bool:
         return True
     if routes_ops_runtime.handle_post(handler, parsed, body):
         return True
+    if routes_ops_sessions.handle_post(handler, parsed, body):
+        return True
     if routes_ops_projects.handle_post(handler, parsed, body):
         return True
     return False

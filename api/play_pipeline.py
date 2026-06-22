@@ -23,6 +23,14 @@ from urllib import parse as urlparse
 from urllib import request as urlrequest
 
 from api import managed_postgres, ops_projects
+from api.runtime_process_cleanup import (
+    APP_SERVER_COMMAND_MARKER,
+    RuntimeProcessInfo,
+    env_flag_enabled,
+    iter_runtime_processes,
+    path_is_within,
+    terminate_process_group,
+)
 
 
 LEGACY_PLAY_FILE_NAME = "project_play.json"
@@ -783,6 +791,70 @@ def _terminate_process(proc: subprocess.Popen | None, timeout: float = 4.0) -> N
             pass
 
 
+def _play_runtime_process_matches(info: RuntimeProcessInfo, *, project_id: str, project_path: Path) -> bool:
+    env = info.environ or {}
+    if env_flag_enabled(env.get("HERMES_DEPLOYMENT")):
+        return False
+
+    runtime_project_id = str(env.get("HERMES_PLAY_PROJECT_ID") or "").strip()
+    is_tagged_play_runtime = env_flag_enabled(env.get("HERMES_PLAY_RUNTIME"))
+    project_key = str(project_id or "")
+
+    # Prefer explicit ownership tags for newly spawned Play runtimes.  This keeps
+    # cleanup independent of a particular app-server command shape, which is the
+    # core lifecycle footgun: a custom backend can otherwise survive a rebuild
+    # simply because its argv does not contain the historical monorepo marker.
+    if is_tagged_play_runtime:
+        if runtime_project_id:
+            return runtime_project_id == project_key
+        return path_is_within(info.cwd, project_path)
+
+    # Legacy fallback for runtimes started before the ownership tags existed.
+    if APP_SERVER_COMMAND_MARKER not in info.cmdline:
+        return False
+    if runtime_project_id:
+        return runtime_project_id == project_key
+    return path_is_within(info.cwd, project_path)
+
+
+def _play_runtime_pids(project_id: str, project_path: Path, *, keep_pid: int | None = None) -> list[int]:
+    keep = {int(keep_pid)} if keep_pid else set()
+    keep_pgids: set[int] = set()
+    if keep_pid:
+        try:
+            keep_pgids.add(os.getpgid(int(keep_pid)))
+        except OSError:
+            pass
+    pids: list[int] = []
+    for info in iter_runtime_processes():
+        if info.pid in keep or (info.pgid is not None and info.pgid in keep_pgids):
+            continue
+        if _play_runtime_process_matches(info, project_id=project_id, project_path=project_path):
+            pids.append(info.pid)
+    return pids
+
+
+def _stop_stale_play_runtime_processes(
+    project_id: str,
+    project_path: Path,
+    *,
+    state: PlayPipelineState | None = None,
+    keep_pid: int | None = None,
+) -> list[int]:
+    stopped: list[int] = []
+    for pid in _play_runtime_pids(project_id, project_path, keep_pid=keep_pid):
+        if terminate_process_group(pid):
+            stopped.append(pid)
+    if stopped and state is not None:
+        _append_log(
+            state,
+            stage="start",
+            stream="system",
+            message=f"Stopped {len(stopped)} stale Play runtime process(es) for this project.",
+        )
+    return stopped
+
+
 def _run_build_stage(project_path: Path, config: dict, state: PlayPipelineState) -> None:
     command = config["build"]["command"]
     env = dict(config["build"].get("env") or {})
@@ -870,6 +942,8 @@ def _run_start_stage(project: dict, project_path: Path, runtime: dict, state: Pl
     ready_event = threading.Event()
     command = start_config["command"]
     stage_env = dict(start_config.get("env") or {})
+    stage_env.setdefault("HERMES_PLAY_RUNTIME", "true")
+    stage_env.setdefault("HERMES_PLAY_PROJECT_ID", state.project_id)
     proc = _spawn_stage(project_path, command, start_config.get("cwd") or ".", stage_env)
     with _LOCK:
         state.start_process = proc
@@ -916,6 +990,7 @@ def _run_start_stage(project: dict, project_path: Path, runtime: dict, state: Pl
         set_ready_at=True,
         message=f"{_project_label(project)} is ready for inspection.",
     )
+    _stop_stale_play_runtime_processes(state.project_id, project_path, state=state, keep_pid=proc.pid)
 
     code = proc.wait()
     _join_reader_threads(threads)
@@ -986,7 +1061,7 @@ def start_project_play_pipeline(project_id: str, body: dict | None = None) -> di
     _body = body if isinstance(body, dict) else {}
     terminal_target = _body.get("terminalTarget") if isinstance(_body.get("terminalTarget"), dict) else {}
     play_config = get_project_play_config(project_id)
-    stop_project_play_pipeline(project_id, purge=True)
+    stop_project_play_pipeline(project_id, purge=True, project_path=Path(play_config["projectPath"]))
     state = PlayPipelineState(
         project_id=project_id,
         config_path=play_config["path"],
@@ -1015,14 +1090,24 @@ def restart_project_play_pipeline(project_id: str, body: dict | None = None) -> 
     return start_project_play_pipeline(project_id, body)
 
 
-def stop_project_play_pipeline(project_id: str, *, purge: bool = False) -> dict | None:
+def stop_project_play_pipeline(project_id: str, *, purge: bool = False, project_path: Path | None = None) -> dict | None:
     with _LOCK:
         state = _PIPELINES.get(project_id)
+    cleanup_path = project_path
+    if cleanup_path is None:
+        try:
+            cleanup_path = _project_path(_get_project(project_id))
+        except PlayPipelineError:
+            cleanup_path = None
     if not state:
+        if cleanup_path is not None:
+            _stop_stale_play_runtime_processes(project_id, cleanup_path)
         return None
     state.stop_requested = True
     _terminate_process(state.build_process)
     _terminate_process(state.start_process)
+    if cleanup_path is not None:
+        _stop_stale_play_runtime_processes(project_id, cleanup_path, state=state)
     with _LOCK:
         state.build_process = None
         state.start_process = None

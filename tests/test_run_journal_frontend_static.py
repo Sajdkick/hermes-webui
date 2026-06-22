@@ -10,19 +10,40 @@ def test_reattach_path_uses_replay_when_status_reports_journal():
     block = MESSAGES_SRC[reattach_pos : reattach_pos + 1200]
 
     assert "st.replay_available" in block
+    assert "st.journal&&st.journal.terminal&&await _restoreSettledSession()" in block
     assert "replayOnly=true" in block
     assert "replayOnly?_runJournalReplayParams():''" in block
     assert "_clearOwnerInflightState()" in block
 
 
 def test_error_reconnect_path_can_restore_from_journal():
-    reconnect_pos = MESSAGES_SRC.index("setComposerStatus('Reconnecting")
-    block = MESSAGES_SRC[reconnect_pos : reconnect_pos + 900]
+    reconnect_pos = MESSAGES_SRC.index("async function _attemptReconnect")
+    block = MESSAGES_SRC[reconnect_pos : reconnect_pos + 1800]
 
     assert "st.active" in block
     assert "st.replay_available" in block
+    assert "st.journal&&st.journal.terminal&&await _restoreSettledSession()" in block
     assert "Restoring stream" in block
     assert "_runJournalReplayParams()" in block
+
+
+def test_terminal_completed_journals_restore_settled_session_before_replay():
+    first_guard = MESSAGES_SRC.index("st.journal&&st.journal.terminal&&await _restoreSettledSession()")
+    first_replay = MESSAGES_SRC.index("setComposerStatus('Restoring stream", first_guard)
+    second_guard = MESSAGES_SRC.index("st.journal&&st.journal.terminal&&await _restoreSettledSession()", first_replay)
+    second_replay = MESSAGES_SRC.index("replayOnly=true", second_guard)
+
+    assert first_guard < first_replay
+    assert second_guard < second_replay
+
+
+def test_settled_stream_restore_uses_metadata_then_lazy_message_tail():
+    restore_pos = MESSAGES_SRC.index("async function _restoreSettledSession")
+    block = MESSAGES_SRC[restore_pos : MESSAGES_SRC.index("function _handleStreamError", restore_pos)]
+
+    assert "messages=0&resolve_model=0" in block
+    assert "await _ensureMessagesLoaded(completedSid)" in block
+    assert "api(`/api/session?session_id=${encodeURIComponent(activeSid)}`)" not in block
 
 
 def test_frontend_replay_cursor_uses_eventsource_last_event_id():

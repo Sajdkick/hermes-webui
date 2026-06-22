@@ -328,6 +328,56 @@ def test_merge_display_backfill_does_not_reintroduce_compression_markers():
     ), "Normal user turn from context should be backfilled"
 
 
+def test_merge_display_backfill_large_visible_history_uses_bounded_identity_calls(monkeypatch):
+    """A compacted session can have a huge visible transcript and tiny context.
+
+    The backfill path must not rescan the remaining visible transcript for each
+    display row; that kept completed runs marked active for very large sessions.
+    """
+    from api import streaming
+
+    original_identity = streaming._message_identity
+    calls = 0
+
+    def counted_identity(msg):
+        nonlocal calls
+        calls += 1
+        return original_identity(msg)
+
+    monkeypatch.setattr(streaming, "_message_identity", counted_identity)
+
+    previous_display = [
+        {"role": "user" if idx % 2 == 0 else "assistant", "content": f"visible row {idx}"}
+        for idx in range(1500)
+    ]
+    previous_context = [
+        {"role": "user", "content": "context-only middle user turn"},
+        {"role": "assistant", "content": "context-only middle assistant turn"},
+        previous_display[-1],
+    ]
+    result_messages = previous_context + [
+        {"role": "user", "content": "new follow-up user turn"},
+        {"role": "assistant", "content": "new follow-up assistant turn"},
+    ]
+
+    merged = streaming._merge_display_messages_after_agent_result(
+        previous_display,
+        previous_context,
+        result_messages,
+        "new follow-up user turn",
+    )
+
+    merged_texts = [
+        _message_text_safe(m)
+        for m in merged
+        if isinstance(m, dict)
+    ]
+    assert "context-only middle user turn" in merged_texts
+    assert "context-only middle assistant turn" in merged_texts
+    assert merged_texts[-2:] == ["new follow-up user turn", "new follow-up assistant turn"]
+    assert calls < 7000
+
+
 def _message_text_safe(msg):
     """Extract plain text from a message content field (list or string)."""
     if not isinstance(msg, dict):

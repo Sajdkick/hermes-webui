@@ -170,6 +170,43 @@ def test_session_activity_keeps_live_non_ops_stream(monkeypatch):
     assert item["activityStatus"]["labelText"] == "Codex is working"
 
 
+def test_session_activity_keeps_open_ui_mode_session_without_run_or_stream(monkeypatch):
+    _patch_activity_source(
+        monkeypatch,
+        [
+            {
+                "session_id": "ui-mode-session",
+                "title": "Hermes: UI Mode",
+                "session_mode": "ui_mode",
+                "ui_project_id": "project-1",
+                "ui_project_label": "Hermes WebUI",
+                "ui_preview_path": "/app/editor/model-1",
+                "ui_iteration_mode": "fast-dev",
+                "ui_status_summary": "Vite HMR ready",
+                "is_streaming": False,
+                "message_count": 0,
+                "updated_at": 400,
+            }
+        ],
+    )
+
+    payload = session_activity.list_session_activity()
+
+    assert payload["sessionCount"] == 1
+    [item] = payload["sessions"]
+    assert item["id"] == "ui-mode-session"
+    assert item["label"] == "UI Mode"
+    assert item["projectId"] == "project-1"
+    assert item["projectName"] == "Hermes WebUI"
+    assert item["uiMode"] is True
+    assert item["sessionMode"] == "ui_mode"
+    assert item["uiProjectId"] == "project-1"
+    assert item["uiPreviewPath"] == "/app/editor/model-1"
+    assert item["uiIterationMode"] == "fast-dev"
+    assert item["activityStatus"]["key"] == "ui-mode"
+    assert item["activityStatus"]["labelText"] == "UI Mode open"
+
+
 def test_session_activity_uses_lean_source_not_rich_ops_sessions(monkeypatch):
     calls = []
     rich_calls = []
@@ -253,6 +290,66 @@ def test_session_activity_falls_back_to_rich_source_when_lean_source_errors(monk
     assert payload["sessionCount"] == 1
     assert payload["sessions"][0]["id"] == "fallback-session"
     assert rich_calls == ["rich"]
+
+
+def test_lean_activity_source_keeps_open_ui_mode_sessions_without_runs(monkeypatch, tmp_path):
+    from api import ops_projects, ops_sessions
+
+    workspace = tmp_path / "hermes"
+    workspace.mkdir()
+    project = {
+        "id": "project-1",
+        "name": "Hermes",
+        "fullName": "Hermes WebUI",
+        "path": str(workspace),
+        "coreBranch": "master",
+    }
+    monkeypatch.setattr(
+        session_activity,
+        "all_sessions",
+        lambda: [
+            {
+                "session_id": "ui-mode-session",
+                "_lineage_root_id": "ui-mode-session",
+                "title": "Hermes: UI Mode",
+                "workspace": str(workspace),
+                "session_mode": "ui_mode",
+                "ui_project_id": "project-1",
+                "ui_project_label": "Hermes WebUI",
+                "ui_preview_path": "/app/editor/model-1",
+                "ui_iteration_mode": "fast-dev",
+                "ui_status_summary": "Vite HMR ready",
+                "is_streaming": False,
+                "message_count": 0,
+                "created_at": 100,
+                "updated_at": 400,
+                "last_message_at": 400,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        session_activity.ops_sessions.session_sidecars,
+        "_with_parent_lineage_metadata",
+        lambda rows: rows,
+    )
+    monkeypatch.setattr(ops_projects, "_read_projects", lambda: [project])
+    monkeypatch.setattr(session_activity, "_read_raw_ops_runs", lambda: [])
+    monkeypatch.setattr(
+        ops_sessions,
+        "list_ops_sessions",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("rich session source called")),
+    )
+
+    payload = session_activity._lean_activity_source()
+
+    [item] = payload["sessions"]
+    assert item["session_id"] == "ui-mode-session"
+    assert item["session_mode"] == "ui_mode"
+    assert item["projectId"] == "project-1"
+    assert item["ops_project_id"] == "project-1"
+    assert item["repositoryLabel"] == "Hermes WebUI"
+    assert item["ui_project_id"] == "project-1"
+    assert item["ui_preview_path"] == "/app/editor/model-1"
 
 
 def test_lean_activity_source_uses_raw_indexes_without_rich_ops_calls(monkeypatch, tmp_path):

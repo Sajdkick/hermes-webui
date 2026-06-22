@@ -7,6 +7,10 @@ description: Collect structured, user-driven runtime evidence from a Cloud Termi
 
 Use `ct-runtime gather` to create a session-scoped report, add a temporary logging hook that posts into it, ask the user to reproduce the flow, then inspect the captured events directly from the terminal.
 
+If `ct-runtime gather create` returns `ct-runtime only works inside a Cloud Terminal project session`, do not stop or ask the user to collect console logs manually. Switch to the Hermes WebUI gather workflow (`hermes-gather-information`) and create the report with `/home/ubuntu/cloud-terminal-data/projects/hermes-webui/scripts/hermes-gather.py` from the current workspace.
+
+For mobile browser hard reloads/crashes where the page reloads before a normal exception can be caught, use the Hermes WebUI gather reference `mobile-browser-hard-reload-gather.md` when available. The important pattern is to write a compact pre-action marker to `sessionStorage`/`localStorage`, emit it on the next page mount, log boundaries around decode/resize/model/API work, and clear the marker only on normal error or successful completion.
+
 ## Workflow
 
 1. Create a report:

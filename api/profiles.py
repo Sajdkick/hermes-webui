@@ -30,6 +30,10 @@ _PROFILE_DIRS = [
     'logs', 'plans', 'workspace', 'cron',
 ]
 _CLONE_CONFIG_FILES = ['config.yaml', '.env', 'SOUL.md']
+_WEBUI_HERMES_SHARED_SKILL_NAMES = frozenset({
+    'hermes-gather-information',
+    'hermes-runtime-tools',
+})
 
 # ── Module state ────────────────────────────────────────────────────────────
 _active_profile = 'default'
@@ -648,9 +652,49 @@ def _stringify_env_value(value) -> str:
     return str(value)
 
 
+def _sync_webui_hermes_shared_skills_dir(source: Path, target: Path) -> bool:
+    """Sync WebUI's Hermes-only shared skill root from the mixed repo source.
+
+    The repository still contains legacy Cloud Terminal skill sources for
+    migration/reference work.  Hermes profiles must not expose those through
+    ``skills.external_dirs`` or agents can discover ``ct-runtime`` guidance even
+    when running from Hermes WebUI.  Keep a generated Hermes-only root instead.
+    """
+    source = Path(source)
+    target = Path(target)
+    if not source.is_dir():
+        return False
+
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        for existing in list(target.iterdir()):
+            if existing.name in _WEBUI_HERMES_SHARED_SKILL_NAMES:
+                continue
+            if existing.is_dir():
+                shutil.rmtree(existing)
+            else:
+                existing.unlink()
+
+        copied = False
+        for name in sorted(_WEBUI_HERMES_SHARED_SKILL_NAMES):
+            src = source / name
+            if not src.is_dir() or not (src / 'SKILL.md').is_file():
+                continue
+            shutil.copytree(src, target / name, dirs_exist_ok=True)
+            copied = True
+        return copied
+    except Exception:
+        logger.debug("Failed to sync Hermes shared skill dir from %s to %s", source, target, exc_info=True)
+        return False
+
+
 def get_webui_shared_skills_dirs() -> list[Path]:
-    """Return repository-owned skill directories shared by every WebUI profile."""
-    shared = Path(__file__).resolve().parents[1] / '.agents' / 'skills'
+    """Return Hermes-only repository skill roots shared by every WebUI profile."""
+    repo_root = Path(__file__).resolve().parents[1]
+    source = repo_root / '.agents' / 'skills'
+    shared = repo_root / '.agents' / 'hermes-shared-skills'
+    if not _sync_webui_hermes_shared_skills_dir(source, shared):
+        return []
     try:
         shared = shared.resolve()
     except Exception:
@@ -663,9 +707,10 @@ def ensure_webui_shared_skill_dirs(home: Path) -> bool:
 
     Hermes Agent discovers cross-profile shared skills through
     ``skills.external_dirs`` in the selected profile's config.yaml.  The WebUI
-    owns a repository-level ``.agents/skills`` source for Cloud Terminal-port
-    skills, so each profile should reference that one shared directory instead
-    of receiving divergent copies.
+    owns a repository-level ``.agents/skills`` source that still contains some
+    legacy Cloud Terminal migration/reference skills.  Profiles reference a
+    generated Hermes-only skill root so Hermes sessions do not discover
+    ``ct-runtime`` guidance.
     """
     shared_dirs = get_webui_shared_skills_dirs()
     if not shared_dirs:
@@ -689,18 +734,33 @@ def ensure_webui_shared_skill_dirs(home: Path) -> bool:
         else:
             external_dirs = []
 
+        legacy_shared_roots: set[Path] = set()
+        legacy_source = Path(__file__).resolve().parents[1] / '.agents' / 'skills'
+        try:
+            legacy_shared_roots.add(legacy_source.resolve())
+        except Exception:
+            legacy_shared_roots.add(legacy_source)
+
         resolved_existing: set[Path] = set()
+        filtered_external_dirs: list[str] = []
+        changed = False
         for entry in external_dirs:
             expanded = os.path.expandvars(os.path.expanduser(entry))
             candidate = Path(expanded)
             if not candidate.is_absolute():
                 candidate = home / candidate
             try:
-                resolved_existing.add(candidate.resolve())
+                resolved_candidate = candidate.resolve()
             except Exception:
-                pass
+                filtered_external_dirs.append(entry)
+                continue
+            if resolved_candidate in legacy_shared_roots:
+                changed = True
+                continue
+            resolved_existing.add(resolved_candidate)
+            filtered_external_dirs.append(entry)
+        external_dirs = filtered_external_dirs
 
-        changed = False
         for shared in shared_dirs:
             try:
                 resolved_shared = shared.resolve()

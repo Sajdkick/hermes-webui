@@ -192,6 +192,17 @@ else initOfflineMonitor();
 // Handles iOS PWA standalone mode and keeps subpath mounts like /hermes/ from
 // escaping to the personal site root /login.
 function _redirectIfUnauth(res){if(res&&res.status===401){window.location.href='login?next='+encodeURIComponent(window.location.pathname+window.location.search);return true;}return false;}
+async function _safeJsonResponse(res, fallback){
+  const text=await res.text();
+  if(!String(text||'').trim()) return fallback===undefined?{}:fallback;
+  try{return JSON.parse(text);}catch(e){
+    const detail=String(text||'').trim().slice(0,160);
+    const err=new Error(detail?('Expected JSON response, got: '+detail):'Expected JSON response but the server returned an empty body.');
+    err.cause=e;
+    err.response=res;
+    throw err;
+  }
+}
 function _getSessionQueue(sid, create=false){
   if(!sid) return [];
   if(!SESSION_QUEUES[sid]&&create) SESSION_QUEUES[sid]=[];
@@ -1286,7 +1297,7 @@ async function populateModelDropdown(opts={}){
   try{
     const _modelsRes=await fetch(new URL('api/models',document.baseURI||location.href).href,{credentials:'include'});
     if(_redirectIfUnauth(_modelsRes)) return;
-    const data=await _modelsRes.json();
+    const data=await _safeJsonResponse(_modelsRes,{});
     // Store active provider globally so the send path can warn on mismatch
     window._activeProvider=data.active_provider||null;
     // Store default model so newSession() can apply it (#872).
@@ -1477,7 +1488,7 @@ async function _fetchLiveModels(provider, sel){
     url.searchParams.set('provider',provider);
     const _liveRes=await fetch(url.href,{credentials:'include'});
     if(_redirectIfUnauth(_liveRes)) return;
-    const data=await _liveRes.json();
+    const data=await _safeJsonResponse(_liveRes,{});
     if(!data.models||!data.models.length) return;
     _liveModelCache[provider]=data.models;
     const added=_addLiveModelsToSelect(provider,data.models,sel);
@@ -4697,7 +4708,7 @@ function _playEdgeTtsChunked(text, btn){
     })
     .then(function(r){
       if(!r.ok){
-        return r.json().catch(function(){return {};}).then(function(j){
+        return _safeJsonResponse(r,{}).then(function(j){
           throw new Error((j&&j.error)||('TTS request failed: '+r.status));
         });
       }
@@ -5792,7 +5803,7 @@ async function _waitForServerThenReload(opts){
       const r=await fetch(new URL('health', document.baseURI||location.href).href,{cache:'no-store'});
       if(r.ok){
         let data={};
-        try{ data=await r.json(); }catch(_){}
+        try{ data=await _safeJsonResponse(r,{}); }catch(_){}
         if(data && data.status==='ok'){
           location.reload();
           return;
@@ -9880,7 +9891,7 @@ async function uploadPendingFiles(){
       const res=await fetch(url,{method:'POST',credentials:'include',body:fd});
       if(_redirectIfUnauth(res)) return;
       if(!res.ok){const err=await res.text();throw new Error(err);}
-      const data=await res.json();
+      const data=await _safeJsonResponse(res,{error:'Upload response was empty.'});
       if(data.error)throw new Error(data.error);
       if(isArchive){
         names.push({name: data.dest, path: data.dest, extracted: data.extracted});

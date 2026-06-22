@@ -42,7 +42,7 @@ def test_phase11_session_activity_routes_support_groups_and_lineage_assignments(
     monkeypatch.setattr(
         session_activity.ops_sessions,
         "list_ops_sessions",
-        lambda: {
+        lambda activity_only=False: {
             "sessions": [
                 {
                     "session_id": "tip-1",
@@ -128,7 +128,7 @@ def test_phase11_session_activity_keeps_open_task_sessions_visible_after_run_qui
     monkeypatch.setattr(
         session_activity.ops_sessions,
         "list_ops_sessions",
-        lambda: {
+        lambda activity_only=False: {
             "sessions": [
                 {
                     "session_id": "task-session-1",
@@ -1333,9 +1333,9 @@ def test_phase11_close_session_optimistically_removes_active_row_before_api_retu
             OPS,
             AgentBridge: {
               sessions: {
-                closeTask: async (projectId, taskId, payload) => {
-                  if (projectId !== 'hermes' || taskId !== 'task-1' || payload.sessionId !== 'session-1'){
-                    throw new Error('closeTask payload did not preserve project/task/session ids.');
+                closeOps: async (sessionId, payload) => {
+                  if (sessionId !== 'session-1' || payload.projectId !== 'hermes' || payload.taskId !== 'task-1'){
+                    throw new Error('closeOps payload did not preserve project/task/session ids.');
                   }
                   if (OPS.sessions.length !== 0 || task.inProgress !== false || task.sessionId){
                     throw new Error('Session close did not update the visible state before the API call.');
@@ -1345,7 +1345,7 @@ def test_phase11_close_session_optimistically_removes_active_row_before_api_retu
                   }
                   closeTaskCheckedOptimisticState = true;
                   await closeTaskPromise;
-                  return { ok: true };
+                  return { ok: true, sessionId: 'session-1', closedSessionIds: ['session-1'] };
                 },
               },
               runs: {},

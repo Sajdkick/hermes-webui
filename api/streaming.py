@@ -3244,11 +3244,24 @@ def _strip_replayed_prefix(existing_messages, candidates):
     existing_messages = list(existing_messages or [])
     candidates = list(candidates or [])
     max_overlap = min(len(existing_messages), len(candidates))
-    for overlap in range(max_overlap, 0, -1):
-        left = [_message_replay_key(m) for m in existing_messages[-overlap:]]
-        right = [_message_replay_key(m) for m in candidates[:overlap]]
-        if left == right:
-            return candidates[overlap:]
+    if max_overlap <= 0:
+        return candidates
+
+    existing_keys = [_message_replay_key(m) for m in existing_messages[-max_overlap:]]
+    candidate_keys = [_message_replay_key(m) for m in candidates[:max_overlap]]
+    sentinel = object()
+    combined = candidate_keys + [sentinel] + existing_keys
+    prefix = [0] * len(combined)
+    for idx in range(1, len(combined)):
+        length = prefix[idx - 1]
+        while length and combined[idx] != combined[length]:
+            length = prefix[length - 1]
+        if combined[idx] == combined[length]:
+            length += 1
+        prefix[idx] = length
+    overlap = min(prefix[-1], max_overlap)
+    if overlap > 0:
+        return candidates[overlap:]
     return candidates
 
 
@@ -3622,6 +3635,14 @@ def _merge_display_messages_after_agent_result(previous_display, previous_contex
     if not result_messages:
         return previous_display
 
+    _identity_cache = {}
+
+    def _cached_identity(msg):
+        key = id(msg)
+        if key not in _identity_cache:
+            _identity_cache[key] = _message_identity(msg)
+        return _identity_cache[key]
+
     # ── Backfill normal turns from previous_context that are missing from
     # previous_display.  After context compression recovery, previous_context
     # can contain user/assistant turns that were never rendered in the visible
@@ -3634,15 +3655,48 @@ def _merge_display_messages_after_agent_result(previous_display, previous_contex
     # at/after a cursor. Any context messages between the cursor and that
     # match are context-only gaps that get spliced in before the display msg.
     if previous_display and previous_context:
-        _display_id_set = {_message_identity(m) for m in previous_display}
+        _display_keys = [_cached_identity(m) for m in previous_display]
+        _display_id_set = set(_display_keys)
         _context_id_set = {
-            _message_identity(m)
+            _cached_identity(m)
             for m in previous_context
             if not _is_context_compression_marker(m)
         }
         _has_context_only_turns = bool(_context_id_set - _display_id_set)
         if _has_context_only_turns:
-            context_keys = [_message_identity(m) for m in previous_context]
+            context_keys = [_cached_identity(m) for m in previous_context]
+            _context_positions = {}
+            for _idx, _ckey in enumerate(context_keys):
+                if _ckey is not None:
+                    _context_positions.setdefault(_ckey, []).append(_idx)
+            _future_display_key_counts = {}
+            for _dkey in _display_keys:
+                if _dkey is not None:
+                    _future_display_key_counts[_dkey] = _future_display_key_counts.get(_dkey, 0) + 1
+            _remaining_context_key_cache = {}
+
+            def _next_context_index(_dkey, _cursor):
+                for _pos in _context_positions.get(_dkey, ()):
+                    if _pos >= _cursor:
+                        return _pos
+                return None
+
+            def _remaining_context_keys(_cursor):
+                cached = _remaining_context_key_cache.get(_cursor)
+                if cached is None:
+                    cached = {k for k in context_keys[_cursor:] if k is not None}
+                    _remaining_context_key_cache[_cursor] = cached
+                return cached
+
+            def _future_display_has_context_anchor(_cursor):
+                remaining = _remaining_context_keys(_cursor)
+                if not remaining:
+                    return False
+                return any(
+                    key in _future_display_key_counts
+                    for key in remaining
+                )
+
             _backfilled = []
             # #3300 fix: track ONLY context rows we splice in, so the
             # visible-display backbone is never suppressed. Sharing one set
@@ -3654,12 +3708,16 @@ def _merge_display_messages_after_agent_result(previous_display, previous_contex
             _context_inserted = set()
             _cursor = 0
             for _display_idx, _dmsg in enumerate(previous_display):
-                _dkey = _message_identity(_dmsg)
+                _dkey = _display_keys[_display_idx]
                 if _dkey is not None:
-                    _j = _cursor
-                    while _j < len(context_keys) and context_keys[_j] != _dkey:
-                        _j += 1
-                    if _j < len(context_keys):
+                    _remaining = _future_display_key_counts.get(_dkey, 0) - 1
+                    if _remaining > 0:
+                        _future_display_key_counts[_dkey] = _remaining
+                    else:
+                        _future_display_key_counts.pop(_dkey, None)
+                if _dkey is not None:
+                    _j = _next_context_index(_dkey, _cursor)
+                    if _j is not None:
                         for _k in range(_cursor, _j):
                             _ckey = context_keys[_k]
                             _cmsg = previous_context[_k]
@@ -3667,10 +3725,7 @@ def _merge_display_messages_after_agent_result(previous_display, previous_contex
                                 _backfilled.append(copy.deepcopy(_cmsg))
                                 _context_inserted.add(_ckey)
                         _cursor = _j + 1
-                    elif not any(
-                        _message_identity(_future_dmsg) in context_keys[_cursor:]
-                        for _future_dmsg in previous_display[_display_idx + 1:]
-                    ):
+                    elif not _future_display_has_context_anchor(_cursor):
                         for _k in range(_cursor, len(context_keys)):
                             _ckey = context_keys[_k]
                             _cmsg = previous_context[_k]
@@ -3712,15 +3767,16 @@ def _merge_display_messages_after_agent_result(previous_display, previous_contex
         candidates = marker_candidates + turn_candidates
 
     merged = previous_display[:]
-    seen = {_message_identity(m) for m in merged}
-    current_user_key = _message_identity({'role': 'user', 'content': msg_text})
+    seen = {_cached_identity(m) for m in merged}
+    current_user_msg_for_key = {'role': 'user', 'content': msg_text}
+    current_user_key = _cached_identity(current_user_msg_for_key)
     current_user_in_candidates = any(
-        _message_identity(m) == current_user_key or _looks_like_current_user_turn(m, msg_text)
+        _cached_identity(m) == current_user_key or _looks_like_current_user_turn(m, msg_text)
         for m in candidates
     )
     if current_user_key is not None and current_user_in_candidates:
         current_user_idx = next(
-            (idx for idx, m in enumerate(candidates) if _message_identity(m) == current_user_key),
+            (idx for idx, m in enumerate(candidates) if _cached_identity(m) == current_user_key),
             None,
         )
         if current_user_idx is not None:
@@ -3747,7 +3803,7 @@ def _merge_display_messages_after_agent_result(previous_display, previous_contex
     current_user_already_checkpointed = bool(
         merged
         and (
-            _message_identity(merged[-1]) == current_user_key
+            _cached_identity(merged[-1]) == current_user_key
             or _looks_like_current_user_turn(merged[-1], msg_text)
         )
     )
@@ -3773,13 +3829,13 @@ def _merge_display_messages_after_agent_result(previous_display, previous_contex
         candidates = candidates[:insert_at] + [current_user_msg] + candidates[insert_at:]
 
     for msg in candidates:
-        key = _message_identity(msg)
+        key = _cached_identity(msg)
         is_current_user_turn = _looks_like_current_user_turn(msg, msg_text)
         if (
             ((key is not None and key == current_user_key) or is_current_user_turn)
             and merged
             and (
-                _message_identity(merged[-1]) == current_user_key
+                _cached_identity(merged[-1]) == current_user_key
                 or _looks_like_current_user_turn(merged[-1], msg_text)
             )
         ):
@@ -3793,7 +3849,7 @@ def _merge_display_messages_after_agent_result(previous_display, previous_contex
             and isinstance(msg, dict)
             and msg.get('role') == 'assistant'
             and merged
-            and _message_identity(merged[-1]) == key
+            and _cached_identity(merged[-1]) == key
         ):
             # Some provider/result replay paths can include the same assistant
             # message twice in the current delta. Treat only adjacent identity

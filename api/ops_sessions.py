@@ -831,7 +831,13 @@ def _requested_close_aliases(session_id: str) -> set[str]:
     return {alias for alias in aliases if alias}
 
 
-def _task_close_target_session_ids(project_id: str, requested_session_id: str, selected_linkage: dict | None) -> list[str]:
+def _session_close_target_session_ids(
+    project_id: str,
+    requested_session_id: str,
+    selected_linkage: dict | None = None,
+    *,
+    ops_task_only: bool = False,
+) -> list[str]:
     project_key = str(project_id or "").strip()
     target_aliases: set[str] = set()
     ordered: list[str] = []
@@ -865,7 +871,7 @@ def _task_close_target_session_ids(project_id: str, requested_session_id: str, s
                 sid = str(session.get("session_id") or "").strip()
                 if not sid:
                     continue
-                if str(session.get("source_tag") or "").strip() != OPS_TASK_SOURCE_TAG:
+                if ops_task_only and str(session.get("source_tag") or "").strip() != OPS_TASK_SOURCE_TAG:
                     continue
                 session_project_id = str(session.get("project_id") or session.get("ops_project_id") or session.get("projectId") or "").strip()
                 if project_key and session_project_id and session_project_id != project_key:
@@ -876,6 +882,142 @@ def _task_close_target_session_ids(project_id: str, requested_session_id: str, s
             pass
 
     return ordered
+
+
+def _task_close_target_session_ids(project_id: str, requested_session_id: str, selected_linkage: dict | None) -> list[str]:
+    return _session_close_target_session_ids(
+        project_id,
+        requested_session_id,
+        selected_linkage,
+        ops_task_only=True,
+    )
+
+
+def _archive_close_target_sessions(session_ids: list[str]) -> tuple[list[str], bool]:
+    cancelled_stream = False
+    closed_session_ids: list[str] = []
+    changed_profiles: set[str | None] = set()
+    for target_session_id in session_ids:
+        try:
+            session = get_session(target_session_id)
+        except KeyError:
+            continue
+
+        active_stream_id = str(getattr(session, "active_stream_id", None) or "").strip()
+        session_stream_cancelled = False
+        if active_stream_id:
+            try:
+                from api.streaming import cancel_stream
+
+                session_stream_cancelled = bool(cancel_stream(active_stream_id))
+                cancelled_stream = cancelled_stream or session_stream_cancelled
+                session = get_session(target_session_id)
+            except Exception:
+                logger.debug(
+                    "Failed to cancel stream %s while closing ops session %s",
+                    active_stream_id,
+                    target_session_id,
+                    exc_info=True,
+                )
+
+        session.archived = True
+        if active_stream_id and not session_stream_cancelled and getattr(session, "active_stream_id", None) == active_stream_id:
+            session.active_stream_id = None
+            session.pending_user_message = None
+            session.pending_attachments = None
+            session.pending_started_at = None
+        session.save(touch_updated_at=False)
+        closed_session_ids.append(target_session_id)
+        changed_profiles.add(getattr(session, "profile", None))
+
+    if closed_session_ids:
+        try:
+            from api.session_events import publish_session_list_changed
+
+            for profile in changed_profiles or {None}:
+                publish_session_list_changed("session_archive", profile=profile)
+        except Exception:
+            logger.debug("Failed to publish ops session close event", exc_info=True)
+
+    return closed_session_ids, cancelled_stream
+
+
+def _candidate_projects_for_close(project_id: str) -> list[dict]:
+    requested_project_id = str(project_id or "").strip()
+    if requested_project_id:
+        try:
+            project = ops_projects.get_ops_project(requested_project_id)
+        except Exception:
+            return []
+        return [project] if isinstance(project, dict) else []
+    try:
+        return [project for project in ops_projects.list_ops_projects().get("projects") or [] if isinstance(project, dict)]
+    except Exception:
+        return []
+
+
+def _find_task_close_target(project_id: str, task_id: str, requested_session_id: str) -> tuple[str, str] | None:
+    requested_task_id = str(task_id or "").strip()
+    requested_aliases = _requested_close_aliases(requested_session_id)
+    for project in _candidate_projects_for_close(project_id):
+        pid = str(project.get("id") or "").strip()
+        if not pid:
+            continue
+        try:
+            task_payload = ops_projects.read_ops_project_tasks(pid)
+        except Exception:
+            continue
+        for epic in task_payload.get("epics") or []:
+            for task in epic.get("tasks") or []:
+                tid = str((task or {}).get("id") or "").strip()
+                if not tid or (requested_task_id and tid != requested_task_id):
+                    continue
+                if requested_task_id and tid == requested_task_id:
+                    return pid, tid
+                for linkage in (task or {}).get("linkedSessions") or []:
+                    aliases = _linkage_aliases(linkage)
+                    if requested_session_id in aliases or bool(aliases & requested_aliases):
+                        return pid, tid
+    return None
+
+
+def close_ops_session(body: dict | None = None) -> dict:
+    payload = body if isinstance(body, dict) else {}
+    requested_session_id = str(
+        payload.get("sessionId")
+        or payload.get("session_id")
+        or payload.get("sessionKey")
+        or payload.get("session_key")
+        or ""
+    ).strip()
+    if not requested_session_id:
+        raise OpsSessionError("Session id is required.", 400)
+
+    project_id = str(payload.get("projectId") or payload.get("project_id") or "").strip()
+    task_id = str(payload.get("taskId") or payload.get("task_id") or "").strip()
+    task_target = _find_task_close_target(project_id, task_id, requested_session_id)
+    if task_target:
+        result = close_task_session(task_target[0], task_target[1], {"sessionId": requested_session_id})
+        result["closeType"] = "task"
+        return result
+
+    target_session_ids = _session_close_target_session_ids(project_id, requested_session_id)
+    if not target_session_ids:
+        raise OpsSessionError("Session not found.", 404)
+    closed_session_ids, cancelled_stream = _archive_close_target_sessions(target_session_ids)
+    if not closed_session_ids:
+        raise OpsSessionError("Session not found.", 404)
+    primary_session_id = closed_session_ids[0]
+    return {
+        "ok": True,
+        "closeType": "session",
+        "sessionId": primary_session_id,
+        "closedSessionIds": closed_session_ids,
+        "sessionUrl": session_url(primary_session_id),
+        "cancelledStream": cancelled_stream,
+        "task": None,
+        "run": None,
+    }
 
 
 def close_task_session(project_id: str, task_id: str, body: dict | None = None) -> dict:
@@ -910,40 +1052,7 @@ def close_task_session(project_id: str, task_id: str, body: dict | None = None) 
     if not target_session_ids:
         raise OpsSessionError("Session not found.", 404)
 
-    cancelled_stream = False
-    closed_session_ids: list[str] = []
-    for target_session_id in target_session_ids:
-        try:
-            session = get_session(target_session_id)
-        except KeyError:
-            continue
-
-        active_stream_id = str(getattr(session, "active_stream_id", None) or "").strip()
-        session_stream_cancelled = False
-        if active_stream_id:
-            try:
-                from api.streaming import cancel_stream
-
-                session_stream_cancelled = bool(cancel_stream(active_stream_id))
-                cancelled_stream = cancelled_stream or session_stream_cancelled
-                session = get_session(target_session_id)
-            except Exception:
-                logger.debug(
-                    "Failed to cancel stream %s while closing ops task session %s",
-                    active_stream_id,
-                    target_session_id,
-                    exc_info=True,
-                )
-
-        session.archived = True
-        if active_stream_id and not session_stream_cancelled and getattr(session, "active_stream_id", None) == active_stream_id:
-            session.active_stream_id = None
-            session.pending_user_message = None
-            session.pending_attachments = None
-            session.pending_started_at = None
-        session.save(touch_updated_at=False)
-        closed_session_ids.append(target_session_id)
-
+    closed_session_ids, cancelled_stream = _archive_close_target_sessions(target_session_ids)
     if not closed_session_ids:
         raise OpsSessionError("Session not found.", 404)
     primary_session_id = closed_session_ids[0]

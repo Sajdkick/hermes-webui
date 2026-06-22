@@ -6,6 +6,7 @@ tracking, not only for the foreground conversation.
 """
 
 import threading
+import time
 
 import pytest
 
@@ -28,10 +29,14 @@ def _isolate_session_stream_state(tmp_path, monkeypatch):
     stream_lock = threading.Lock()
     monkeypatch.setattr(models, "STREAMS", stream_map)
     monkeypatch.setattr(models, "STREAMS_LOCK", stream_lock)
+    with models._cfg.ACTIVE_RUNS_LOCK:
+        models._cfg.ACTIVE_RUNS.clear()
 
     yield
 
     models.SESSIONS.clear()
+    with models._cfg.ACTIVE_RUNS_LOCK:
+        models._cfg.ACTIVE_RUNS.clear()
 
 
 def _make_session(session_id, stream_id=None, message_count=1):
@@ -80,6 +85,34 @@ def test_all_sessions_marks_streaming_false_when_stream_is_not_active():
 
     models.STREAMS.pop("stale-stream", None)
     assert all_sessions()[0]["is_streaming"] is False
+
+
+def test_all_sessions_ignores_old_orphaned_stream_channel():
+    """A leftover SSE channel without worker bookkeeping should not keep rows busy."""
+    s = _make_session("orphaned_session", stream_id="orphaned-stream")
+    s.pending_user_message = "pending orphaned turn"
+    s.save()
+    channel = models._cfg.create_stream_channel()
+    channel.created_at = time.time() - models._cfg.STREAM_STARTUP_GRACE_SECONDS - 5
+    channel.last_event_at = channel.created_at
+    models.STREAMS["orphaned-stream"] = channel
+
+    assert all_sessions()[0]["is_streaming"] is False
+
+
+def test_all_sessions_keeps_active_run_streaming_even_with_old_channel():
+    """ACTIVE_RUNS is authoritative when a worker is still in flight."""
+    s = _make_session("active_run_session", stream_id="active-run-stream")
+    s.pending_user_message = "pending active turn"
+    s.save()
+    channel = models._cfg.create_stream_channel()
+    channel.created_at = time.time() - models._cfg.STREAM_STARTUP_GRACE_SECONDS - 5
+    channel.last_event_at = channel.created_at
+    models.STREAMS["active-run-stream"] = channel
+    with models._cfg.ACTIVE_RUNS_LOCK:
+        models._cfg.ACTIVE_RUNS["active-run-stream"] = {"session_id": s.session_id}
+
+    assert all_sessions()[0]["is_streaming"] is True
 
 
 def test_all_sessions_does_not_report_streaming_after_restart_without_active_registry():

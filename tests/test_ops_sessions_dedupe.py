@@ -788,3 +788,108 @@ def test_close_task_session_archives_stale_visible_siblings_for_same_task(monkey
     assert task["sessionId"] == ""
     assert run_updates and run_updates[0][0] == "run-1"
 
+
+def test_close_ops_session_routes_linked_session_through_task_close(monkeypatch):
+    task = {
+        "id": "task-1",
+        "inProgress": True,
+        "sessionId": "root",
+        "linkedSessions": [{"sessionId": "root", "linkedSessionId": "root", "runId": "run-1"}],
+    }
+    root = FakeSession(
+        session_id="root",
+        source_tag=ops_sessions.OPS_TASK_SOURCE_TAG,
+        archived=False,
+        active_stream_id=None,
+        pending_user_message=None,
+    )
+
+    monkeypatch.setattr(ops_sessions.ops_projects, "get_ops_project", lambda project_id: {"id": project_id})
+    monkeypatch.setattr(
+        ops_sessions.ops_projects,
+        "read_ops_project_tasks",
+        lambda project_id: {"epics": [{"tasks": [task]}]},
+    )
+    monkeypatch.setattr(ops_sessions.session_sidecars, "resolve_session_summary", lambda session_id: None)
+    monkeypatch.setattr(ops_sessions.session_sidecars, "resolve_session_id", lambda session_id: session_id)
+    monkeypatch.setattr(ops_sessions, "all_sessions", lambda: [])
+    monkeypatch.setattr(ops_sessions, "get_session", lambda session_id: {"root": root}[session_id])
+
+    def update_task(project_id, task_id, patch):
+        task.update(patch)
+        return {"task": task}
+
+    run_updates = []
+
+    def update_run(run_id, patch):
+        run_updates.append((run_id, patch))
+        return {"id": run_id, **patch}
+
+    from api import ops_runs
+
+    monkeypatch.setattr(ops_sessions.ops_projects, "update_ops_project_task", update_task)
+    monkeypatch.setattr(ops_sessions.ops_projects, "_now_iso", lambda: "2026-05-17T00:00:00Z")
+    monkeypatch.setattr(ops_runs, "update_ops_run", update_run)
+
+    result = ops_sessions.close_ops_session({"sessionId": "root", "projectId": "project-1"})
+
+    assert result["closeType"] == "task"
+    assert result["closedSessionIds"] == ["root"]
+    assert root.archived is True
+    assert task["inProgress"] is False
+    assert task["sessionId"] == ""
+    assert run_updates and run_updates[0][0] == "run-1"
+
+
+def test_close_ops_session_archives_unlinked_lineage_members(monkeypatch):
+    root = FakeSession(
+        session_id="root",
+        source_tag="manual",
+        archived=False,
+        active_stream_id=None,
+        pending_user_message=None,
+    )
+    child = FakeSession(
+        session_id="child",
+        source_tag="manual",
+        archived=False,
+        active_stream_id=None,
+        pending_user_message=None,
+    )
+    sessions = {"root": root, "child": child}
+
+    monkeypatch.setattr(ops_sessions.ops_projects, "get_ops_project", lambda project_id: {"id": project_id})
+    monkeypatch.setattr(
+        ops_sessions.ops_projects,
+        "read_ops_project_tasks",
+        lambda project_id: {"epics": [{"tasks": []}]},
+    )
+    monkeypatch.setattr(ops_sessions.session_sidecars, "resolve_session_summary", lambda session_id: None)
+    monkeypatch.setattr(ops_sessions.session_sidecars, "resolve_session_id", lambda session_id: session_id)
+    monkeypatch.setattr(
+        ops_sessions,
+        "all_sessions",
+        lambda: [
+            {
+                "session_id": "root",
+                "source_tag": "manual",
+                "project_id": "project-1",
+                "archived": False,
+            },
+            {
+                "session_id": "child",
+                "parent_session_id": "root",
+                "source_tag": "manual",
+                "project_id": "project-1",
+                "archived": False,
+            },
+        ],
+    )
+    monkeypatch.setattr(ops_sessions, "get_session", lambda session_id: sessions[session_id])
+
+    result = ops_sessions.close_ops_session({"sessionId": "root", "projectId": "project-1"})
+
+    assert result["closeType"] == "session"
+    assert result["closedSessionIds"] == ["root", "child"]
+    assert root.archived is True
+    assert child.archived is True

@@ -633,6 +633,14 @@
         const resolvedId=await resolveBridgeSessionId(sessionId);
         return api('/api/session/archive',{method:'POST',body:JSON.stringify({session_id:resolvedId,archived})});
       },
+      async closeOps(sessionId,payload={}){
+        const resolvedId=await resolveBridgeSessionId(sessionId);
+        const body=(payload&&typeof payload==='object')?{...payload}:{};
+        const rawKey=bridgeSessionKey(sessionId);
+        body.sessionId=resolvedId;
+        if(rawKey&&rawKey!==resolvedId)body.sessionKey=rawKey;
+        return api('/api/ops/sessions/close',{method:'POST',body:JSON.stringify(body)});
+      },
       async move(sessionId,projectId){
         const resolvedId=await resolveBridgeSessionId(sessionId);
         return api('/api/session/move',{method:'POST',body:JSON.stringify({session_id:resolvedId,project_id:projectId??null})});

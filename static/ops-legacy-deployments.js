@@ -22,6 +22,9 @@
     const loadProjects=(ctx&&typeof ctx.loadProjects==='function')?ctx.loadProjects:async function(){return Array.isArray(OPS&&OPS.projects)?OPS.projects:[];};
     const openProjectDetail=ctx&&ctx.openProjectDetail;
     const windowRef=(ctx&&ctx.windowRef)||(typeof window!=='undefined'?window:null);
+    const setTimeoutRef=(ctx&&typeof ctx.setTimeoutRef==='function')?ctx.setTimeoutRef:(windowRef&&typeof windowRef.setTimeout==='function'?windowRef.setTimeout.bind(windowRef):(typeof setTimeout==='function'?setTimeout:null));
+    const clearTimeoutRef=(ctx&&typeof ctx.clearTimeoutRef==='function')?ctx.clearTimeoutRef:(windowRef&&typeof windowRef.clearTimeout==='function'?windowRef.clearTimeout.bind(windowRef):(typeof clearTimeout==='function'?clearTimeout:null));
+    const deploymentProjectLoadTimeoutMs=normalizePositiveNumber(ctx&&ctx.deploymentProjectLoadTimeoutMs,20000);
     if(!OPS||typeof api!=='function'||typeof renderCurrentOpsView!=='function'||typeof showToast!=='function'||typeof showPromptDialog!=='function'||typeof showConfirmDialog!=='function'||typeof esc!=='function'||!svg||typeof nameOf!=='function'){
       return {};
     }
@@ -37,6 +40,65 @@
       if(!OPS.deploymentBusyByProject||typeof OPS.deploymentBusyByProject!=='object')OPS.deploymentBusyByProject={};
       if(!OPS.deploymentProgressByProject||typeof OPS.deploymentProgressByProject!=='object')OPS.deploymentProgressByProject={};
       if(!Array.isArray(OPS.deploymentProviders))OPS.deploymentProviders=[];
+    }
+
+    function normalizePositiveNumber(value,fallback){
+      const parsed=Number(value);
+      return Number.isFinite(parsed)&&parsed>0?parsed:fallback;
+    }
+
+    function deploymentErrorMessage(error){
+      const raw=String(error&&error.message?error.message:error||'Unable to load deployment status.').trim();
+      return raw.slice(0,500)||'Unable to load deployment status.';
+    }
+
+    function deploymentLoadErrorData(projectId,error){
+      const id=String(projectId||'').trim();
+      const message=deploymentErrorMessage(error);
+      const summary=`Deployment status is unavailable: ${message}`;
+      return {
+        projectId:id,
+        supported:true,
+        summary,
+        artifacts:[],
+        logs:[{
+          level:'error',
+          action:'deployment.status',
+          message:summary,
+        }],
+        deployment:{
+          projectId:id,
+          status:'unavailable',
+          provider:'manual',
+          environment:'production',
+          summary,
+        },
+      };
+    }
+
+    function timeoutError(label,timeoutMs){
+      const seconds=Math.max(1,Math.round(Number(timeoutMs||0)/1000));
+      const error=new Error(`${label} timed out after ${seconds}s.`);
+      error.code='DEPLOYMENT_STATUS_TIMEOUT';
+      return error;
+    }
+
+    function withDeploymentTimeout(promise,label){
+      if(!setTimeoutRef||!clearTimeoutRef||!deploymentProjectLoadTimeoutMs)return Promise.resolve(promise);
+      let timer=null;
+      return new Promise((resolve,reject)=>{
+        timer=setTimeoutRef(()=>reject(timeoutError(label,deploymentProjectLoadTimeoutMs)),deploymentProjectLoadTimeoutMs);
+        Promise.resolve(promise).then(
+          value=>{
+            clearTimeoutRef(timer);
+            resolve(value);
+          },
+          error=>{
+            clearTimeoutRef(timer);
+            reject(error);
+          }
+        );
+      });
     }
 
     function coreApiUrl(path){
@@ -155,9 +217,12 @@
       }
       OPS.deploymentBusyByProject[id]=true;
       try{
-        const data=await api(deploymentProjectUrl(id,'/deployment'));
+        const data=await withDeploymentTimeout(api(deploymentProjectUrl(id,'/deployment')),`Deployment status for ${id||'project'}`);
         OPS.deploymentsByProject[id]=data;
         return data;
+      }catch(error){
+        OPS.deploymentsByProject[id]=deploymentLoadErrorData(id,error);
+        throw error;
       }finally{
         delete OPS.deploymentBusyByProject[id];
         if(!options||options.render!==false)renderCurrentOpsView();
@@ -487,8 +552,17 @@
       const projectIds=(OPS.projects||[])
         .map(project=>String(project&&project.id||'').trim())
         .filter(Boolean);
-      await Promise.allSettled(projectIds.map(projectId=>loadProjectDeployment(projectId,{render:false}).catch(()=>null)));
+      projectIds.forEach(projectId=>{
+        if(deploymentCapabilities(projectId).deployment)OPS.deploymentBusyByProject[projectId]=true;
+      });
       if(token===activeDeploymentsLoadToken&&opts.render!==false&&deploymentsVisible())renderDeployments();
+      const detailLoads=projectIds.map(projectId=>loadProjectDeployment(projectId,{render:false}).catch(()=>null).finally(()=>{
+        if(token===activeDeploymentsLoadToken&&opts.render!==false&&deploymentsVisible())renderDeployments();
+      }));
+      if(opts.waitForDetails!==false){
+        await Promise.allSettled(detailLoads);
+        if(token===activeDeploymentsLoadToken&&opts.render!==false&&deploymentsVisible())renderDeployments();
+      }
       return OPS.projects||[];
     }
 
@@ -501,12 +575,12 @@
       OPS.showCreate=false;
       setDashboardTopbar('Deployments','');
       renderLoading('Loading deployments...');
-      await loadDeployments({render:false});
+      await loadDeployments({render:true,waitForDetails:false});
       return renderDeployments();
     }
 
     async function refreshDeployments(){
-      return await loadDeployments();
+      return await loadDeployments({waitForDetails:false});
     }
 
     return {

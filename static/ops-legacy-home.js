@@ -419,7 +419,17 @@
       return project?String(projectBranchLabel(project)||'').trim():'';
     }
 
+    function isSessionActivityUiMode(session){
+      const mode=String(session&&session.sessionMode||session&&session.session_mode||'').trim().toLowerCase().replace(/-/g,'_');
+      return !!(session&&(session.uiMode===true||mode==='ui_mode'||String(session.uiProjectId||session.ui_project_id||'').trim()));
+    }
+
+    function sessionActivityUiProjectId(session){
+      return String(session&&session.uiProjectId||session&&session.ui_project_id||session&&session.projectId||'').trim();
+    }
+
     function formatSessionActivityTitle(session){
+      if(isSessionActivityUiMode(session))return String(session&&session.label||'UI Mode').trim()||'UI Mode';
       const branchLabel=formatSessionActivityBranchLabel(session);
       if(branchLabel)return branchLabel;
       return String(
@@ -434,10 +444,25 @@
     }
 
     function formatSessionActivityRepoLabel(session){
-      return String(session&&session.repoLabel||session&&session.projectName||'').trim();
+      return String(session&&session.uiProjectLabel||session&&session.ui_project_label||session&&session.repoLabel||session&&session.projectName||'').trim();
     }
 
     function sessionActivityTaskText(session){
+      if(isSessionActivityUiMode(session)){
+        return String(
+          session&&(
+            session.uiPreviewTitle
+            || session.ui_preview_title
+            || session.uiPreviewPath
+            || session.ui_preview_path
+            || session.uiStatusSummary
+            || session.ui_status_summary
+            || session.uiIterationMode
+            || session.ui_iteration_mode
+            || ''
+          )||''
+        ).replace(/\s+/g,' ').trim();
+      }
       return String(
         session&&(
           session.taskText
@@ -759,6 +784,27 @@
       return true;
     }
 
+    function openUiModeActivitySession(projectId,sessionId){
+      const pid=String(projectId||'').trim();
+      if(!pid)return false;
+      const sid=String(sessionId||'').trim();
+      let href=shellUrl('ui-mode.html');
+      try{
+        const UrlCtor=URLRef||(windowRef&&windowRef.URL)||URL;
+        const url=new UrlCtor(href);
+        url.searchParams.set('projectId',pid);
+        if(sid)url.searchParams.set('sessionId',sid);
+        href=url.href;
+      }catch(_error){
+        href=shellUrl(`ui-mode.html?projectId=${encodeURIComponent(pid)}${sid?`&sessionId=${encodeURIComponent(sid)}`:''}`);
+      }
+      if(windowRef&&windowRef.location&&typeof windowRef.location.assign==='function'){
+        windowRef.location.assign(href);
+        return true;
+      }
+      return false;
+    }
+
     async function openDeploymentDestination(){
       if(typeof openDeployments==='function')return await openDeployments();
       const project=menuTargetProject();
@@ -951,9 +997,11 @@
     function renderSessionActivityItemActions(session){
       const sessionKey=sessionActionRefValue(session);
       if(!sessionKey)return '';
-      const projectId=String(session&&session.projectId||session&&session.ops_project_id||'').trim();
+      const uiMode=isSessionActivityUiMode(session);
+      const projectId=String(sessionActivityUiProjectId(session)||session&&session.projectId||session&&session.ops_project_id||'').trim();
       return `
         <div class="menu-session-activity-actions">
+          ${uiMode&&projectId?`<button class="menu-action-btn secondary small" type="button" data-ops-action="open-ui-mode-session" data-ui-project-id="${esc(projectId)}" data-session-key="${esc(sessionKey)}" title="Open this UI Mode workspace.">Open UI Mode</button>`:''}
           <button class="menu-action-btn danger small" type="button" data-ops-action="close-session" data-session-key="${esc(sessionKey)}" ${projectId?`data-project-id="${esc(projectId)}"`:''} title="Close this active session.">${svg.close}<span>Close session</span></button>
         </div>
       `;
@@ -965,20 +1013,25 @@
       const taskText=sessionActivityTaskText(session);
       const taskPreview=formatSessionActivityTaskPreview(session);
       const sessionKey=sessionActionRefValue(session);
-      const projectPlayState=sessionActivityProjectPlayState(session);
+      const uiMode=isSessionActivityUiMode(session);
+      const uiProjectId=sessionActivityUiProjectId(session);
+      const rowAction=uiMode&&uiProjectId?'open-ui-mode-session':'open-session';
+      const projectPlayState=uiMode?null:sessionActivityProjectPlayState(session);
       const activityStatusBadge=sessionActivityCompactStatusBadge(session);
+      const detailLabel=uiMode?'Preview':'Task';
       return `
-        <div class="menu-session-activity-item interactive" tabindex="0" role="button" data-ops-action="open-session" data-session-key="${esc(sessionKey)}" data-ops-session-activity-item="true" data-project-play-state="${esc(projectPlayState&&projectPlayState.key||'')}">
+        <div class="menu-session-activity-item interactive ${uiMode?'ui-mode':''}" tabindex="0" role="button" data-ops-action="${esc(rowAction)}" data-session-key="${esc(sessionKey)}" ${uiProjectId?`data-ui-project-id="${esc(uiProjectId)}"`:''} data-ops-session-activity-item="true" data-project-play-state="${esc(projectPlayState&&projectPlayState.key||'')}">
           <div class="menu-session-activity-main">
             <div class="menu-session-activity-heading">
               <div class="menu-session-activity-copy">
                 <div class="menu-session-activity-title-line">
                   <div class="menu-session-activity-title">${esc(title)}</div>
+                  ${uiMode?`<span class="menu-session-activity-badge ui-mode" title="This is the active UI Mode workspace for ${esc(repoLabel||'this project')}.">UI Mode</span>`:''}
                   ${activityStatusBadge}
                   ${projectPlayState?`<span class="menu-session-activity-badge project-play play-status-badge ${esc(projectPlayState.stateClass)}" title="${esc(projectPlayState.title)}">${esc(projectPlayState.label)}</span>`:''}
                 </div>
                 ${repoLabel&&repoLabel!==title?`<div class="menu-session-activity-repo">${esc(repoLabel)}</div>`:''}
-                ${taskPreview?`<div class="menu-session-activity-task-preview" title="${esc(taskText)}"><span class="menu-session-activity-task-label">Task</span><span>${esc(taskPreview)}</span></div>`:''}
+                ${taskPreview?`<div class="menu-session-activity-task-preview" title="${esc(taskText)}"><span class="menu-session-activity-task-label">${esc(detailLabel)}</span><span>${esc(taskPreview)}</span></div>`:''}
               </div>
               ${renderSessionActivityControls(session,groups)}
             </div>
@@ -1077,10 +1130,10 @@
     function renderProjectSessionRows(project,sessionsOverride){
       const sessions=Array.isArray(sessionsOverride)?sessionsOverride:projectSessionsFor(project,OPS.sessions);
       const count=sessions.length;
-      const rows=count?sessions.map(session=>renderSessionWorkspaceRow(session,project)).join(''):`<div class="ops-project-session-empty">No active sessions for this project.</div>`;
+      const rows=count?sessions.map(session=>renderSessionWorkspaceRow(session,project)).join(''):`<div class="ops-project-session-empty">No open sessions for this project.</div>`;
       const summary=count
-        ? `${count} active session${count===1?'':'s'}`
-        : 'No active sessions';
+        ? `${count} open session${count===1?'':'s'}`
+        : 'No open sessions';
       return `
         <details class="ops-project-sessions" data-ops-project-sessions="${esc(project&&project.id||'')}">
           <summary class="ops-project-sessions-summary">${esc(summary)}</summary>
@@ -1340,6 +1393,12 @@
         return null;
       }
       if(action==='refresh-session-activity')return await loadSessionActivity();
+      if(action==='open-ui-mode-session'){
+        const uiProjectId=String(btn&&btn.dataset&&btn.dataset.uiProjectId||btn&&btn.dataset&&btn.dataset.projectId||'').trim();
+        const sessionId=String(btn&&btn.dataset&&btn.dataset.sessionKey||btn&&btn.dataset&&btn.dataset.sessionId||'').trim();
+        if(openUiModeActivitySession(uiProjectId,sessionId))return null;
+        return false;
+      }
       if(action==='toggle-session-activity'){
         OPS.sessionActivityExpanded=OPS.sessionActivityExpanded===false?true:false;
         return renderCurrentOpsView();

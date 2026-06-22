@@ -517,10 +517,26 @@
       if(domLookup('fileTree'))domLookup('fileTree').innerHTML='';
     }
 
+    async function closeOpsSessionRecord(sessionId,options){
+      const sid=sessionRefValue(sessionId);
+      const opts=(options&&typeof options==='object')?options:{};
+      if(!sid)return null;
+      if(AgentBridgeRef&&AgentBridgeRef.sessions&&typeof AgentBridgeRef.sessions.closeOps==='function'){
+        return await AgentBridgeRef.sessions.closeOps(sid,opts);
+      }
+      if(opts.projectId&&opts.taskId&&AgentBridgeRef&&AgentBridgeRef.sessions&&typeof AgentBridgeRef.sessions.closeTask==='function'){
+        return await AgentBridgeRef.sessions.closeTask(opts.projectId,opts.taskId,{sessionId:sid});
+      }
+      await AgentBridgeRef.sessions.archive(sid,true);
+      return {ok:true,sessionId:sid,closedSessionIds:[sid]};
+    }
+
     async function deleteOpsSessionRecord(sessionId){
       const sid=sessionRefValue(sessionId);
       if(!sid)return false;
-      await AgentBridgeRef.sessions.archive(sid,true);
+      const closeResult=await closeOpsSessionRecord(sid,{});
+      const closedIds=[sid,closeResult&&closeResult.sessionId,...(Array.isArray(closeResult&&closeResult.closedSessionIds)?closeResult.closedSessionIds:[])];
+      removeClosedSessionRefs(closedIds);
       OPS.sessions=(OPS.sessions||[]).filter(session=>sessionRefValue(session)!==sid);
       await clearDeletedSessionFromMainView(sid);
       return true;
@@ -649,12 +665,15 @@
       }
       renderAfterSessionCloseMutation(project);
       try{
+        let closeResult=null;
         if(project&&linked){
-          const closeResult=await AgentBridgeRef.sessions.closeTask(project.id,linked.task.id,{sessionId:sessionRef});
+          closeResult=await closeOpsSessionRecord(sessionRef,{projectId:project.id,taskId:linked.task.id});
           removeClosedSessionRefs([sessionRef,closeResult&&closeResult.sessionId,...(Array.isArray(closeResult&&closeResult.closedSessionIds)?closeResult.closedSessionIds:[])]);
           await refreshOpsSessions().catch(()=>OPS.sessions||[]);
         }else{
-          await deleteOpsSessionRecord(sessionRef);
+          closeResult=await closeOpsSessionRecord(sessionRef,{projectId:project&&project.id||projectId||''});
+          removeClosedSessionRefs([sessionRef,closeResult&&closeResult.sessionId,...(Array.isArray(closeResult&&closeResult.closedSessionIds)?closeResult.closedSessionIds:[])]);
+          await clearDeletedSessionFromMainView(sessionRef);
         }
         if(project&&OPS.currentProject&&OPS.currentProject.id===project.id){
           await refreshDetail();

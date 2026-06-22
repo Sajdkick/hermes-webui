@@ -198,11 +198,101 @@ def test_ops_deployments_module_renders_top_level_project_deployment_panels():
             throw new Error('deployments dashboard did not bind');
           }
           await dashboard.openDeployments();
+          for (let i = 0; i < 5; i += 1) await Promise.resolve();
           if (OPS.view !== 'deployments') throw new Error(`expected deployments view, got ${OPS.view}`);
           if (!apiUrls.includes('/api/core/deployments/providers')) throw new Error('deployment providers endpoint was not loaded');
           if (!apiUrls.includes('/api/core/projects/project-1/deployment')) throw new Error('core deployment endpoint was not loaded');
           for (const text of ['Deployments', 'Deployment projects', 'Deployable app', 'Cloud Terminal deployment `alternativedata` is published.', '.deployments/items/alternativedata/source', 'Cloud Terminal host (legacy)', 'Cloud Terminal', 'alternativedata', 'persistent database', 'Redeploy', 'Record', 'Execute']) {
             if (!rootEl.innerHTML.includes(text)) throw new Error(`missing rendered text: ${text}`);
+          }
+          console.log('ok');
+        })().catch((error) => { console.error(error); process.exit(1); });
+        """
+    )
+    assert _run_node(script) == "ok"
+
+
+def test_ops_deployments_open_renders_when_project_status_request_stalls():
+    script = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+
+        (async () => {
+          const source = fs.readFileSync('static/ops-legacy-deployments.js', 'utf8');
+          const windowRef = { HermesOpsModules: {}, setTimeout, clearTimeout };
+          const context = { console, window: windowRef, setTimeout, clearTimeout };
+          vm.createContext(context);
+          vm.runInContext(source, context);
+
+          const rootEl = { innerHTML: '' };
+          const project = {
+            id: 'project-1',
+            name: 'Alternative Data',
+            resolvedPath: '/workspace/alternative-data',
+            coreBranch: 'main',
+            opsCapabilities: { deployment: true },
+          };
+          const OPS = {
+            view: 'home',
+            projects: [],
+            deploymentsByProject: {},
+            deploymentBusyByProject: {},
+            currentProject: null,
+            taskData: null,
+            showCreate: false,
+          };
+          const dashboard = context.window.HermesOpsModules.deployments.bindDashboard({
+            OPS,
+            api: async (url) => {
+              if (url === '/api/core/deployments/providers') {
+                return { providers: [{ id: 'manual', label: 'Manual record' }], defaultProvider: 'manual' };
+              }
+              if (url === '/api/core/projects/project-1/deployment') {
+                return new Promise(() => {});
+              }
+              throw new Error(`unexpected api url: ${url}`);
+            },
+            coreUrl: (suffix) => `/api/core${suffix || ''}`,
+            coreProjectUrl: (projectId, suffix) => `/api/core/projects/${encodeURIComponent(projectId)}${suffix || ''}`,
+            root: () => rootEl,
+            renderCurrentOpsView: () => {},
+            showToast: () => {},
+            showPromptDialog: async () => null,
+            showConfirmDialog: async () => false,
+            esc: (value) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;'),
+            svg: { refresh: '<r/>', plus: '<p/>', check: '<c/>', play: '<y/>' },
+            nameOf: (entry) => entry.name || entry.id,
+            projectPath: (entry) => entry.resolvedPath || entry.path || '',
+            setDashboardTopbar: () => {},
+            renderLoading: (label) => { rootEl.innerHTML = label; },
+            loadProjects: async () => [project],
+            windowRef,
+            setTimeoutRef: setTimeout,
+            clearTimeoutRef: clearTimeout,
+            deploymentProjectLoadTimeoutMs: 25,
+          });
+
+          if (!dashboard || typeof dashboard.openDeployments !== 'function') {
+            throw new Error('deployments dashboard did not bind');
+          }
+          const openResult = await Promise.race([
+            dashboard.openDeployments().then(() => 'resolved'),
+            new Promise((resolve) => setTimeout(() => resolve('timed-out'), 75)),
+          ]);
+          if (openResult !== 'resolved') throw new Error('deployments route stayed on the initial loading screen');
+          if (rootEl.innerHTML === 'Loading deployments...' || !rootEl.innerHTML.includes('Alternative Data')) {
+            throw new Error(`deployments route did not render project cards: ${rootEl.innerHTML}`);
+          }
+          if (!rootEl.innerHTML.includes('Working on deployment')) {
+            throw new Error('stalled project should render as a per-row deployment load in progress');
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          if (OPS.deploymentBusyByProject['project-1']) {
+            throw new Error('deployment busy state should clear after the UI status timeout');
+          }
+          if (!rootEl.innerHTML.includes('Deployment status is unavailable') || !rootEl.innerHTML.includes('timed out')) {
+            throw new Error(`stalled project did not render a recoverable status error: ${rootEl.innerHTML}`);
           }
           console.log('ok');
         })().catch((error) => { console.error(error); process.exit(1); });

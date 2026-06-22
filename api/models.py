@@ -39,6 +39,14 @@ CRON_PROJECT_CHIP_LIMIT = 200
 _CLI_SESSIONS_CACHE_TTL_SECONDS = 5.0
 _CLI_SESSIONS_CACHE_LOCK = threading.Lock()
 _CLI_SESSIONS_CACHE = {}
+_SIDEBAR_LINEAGE_METADATA_TTL_SECONDS = 15.0
+_SIDEBAR_LINEAGE_METADATA_LOCK = threading.Lock()
+_SIDEBAR_LINEAGE_METADATA_CACHE: tuple[
+    float,
+    str,
+    tuple[str, ...],
+    dict[str, dict],
+] | None = None
 
 # ---------------------------------------------------------------------------
 # Stale temp-file cleanup
@@ -375,16 +383,22 @@ def prune_session_from_index(session_id: str) -> None:
 
 
 def _active_stream_ids():
+    now = time.time()
+    with _cfg.ACTIVE_RUNS_LOCK:
+        active_ids = set(_cfg.ACTIVE_RUNS.keys())
     with STREAMS_LOCK:
-        active_ids = set(STREAMS.keys())
+        stream_items = list(STREAMS.items())
     # STREAMS tracks the browser/SSE observation path. A worker can still be
     # running after the SSE stream entry disappears (for example while a request
     # is blocked in the provider, unwinding after cancel, or otherwise detached
     # from the client). Treat ACTIVE_RUNS as authoritative for worker liveness so
     # stale-pending repair does not append a misleading restart/interrupted
-    # marker while the agent turn is still in flight.
-    with _cfg.ACTIVE_RUNS_LOCK:
-        active_ids.update(_cfg.ACTIVE_RUNS.keys())
+    # marker while the agent turn is still in flight. Conversely, a STREAMS
+    # channel without an ACTIVE_RUN can be orphaned after worker exit; only keep
+    # it active during the startup grace period before ACTIVE_RUN registration.
+    for stream_id, channel in stream_items:
+        if stream_id in active_ids or _cfg.stream_channel_runtime_recent(channel, now=now):
+            active_ids.add(stream_id)
     return active_ids
 
 
@@ -476,6 +490,16 @@ def _last_message_timestamp(messages):
         if ts:
             return ts
     return None
+
+
+def _recent_message_timestamp(messages, *, limit: int = 32):
+    if not isinstance(messages, list) or not messages:
+        return None
+    try:
+        tail = messages[-max(1, int(limit)):]
+    except Exception:
+        tail = messages
+    return _last_message_timestamp(tail)
 
 
 def _message_role(message):
@@ -788,14 +812,9 @@ class Session:
         self.ui_parity_available = _clean_ui_mode_session_text(ui_parity_available or kwargs.get('ui_parity_available'), 20)
         self.ui_parity_workflow_source = _clean_ui_mode_session_text(ui_parity_workflow_source or kwargs.get('ui_parity_workflow_source'), 120)
         self.ui_parity_config_path = _clean_ui_mode_session_text(ui_parity_config_path or kwargs.get('ui_parity_config_path'), 1200)
-        raw_message_count = kwargs.get('message_count')
-        parsed_message_count = None
-        if raw_message_count is not None:
-            try:
-                parsed_message_count = int(raw_message_count)
-            except (TypeError, ValueError):
-                parsed_message_count = None
-        self._metadata_message_count = parsed_message_count if parsed_message_count is not None and parsed_message_count >= 0 else None
+        self._metadata_message_count = _parse_nonnegative_int(kwargs.get('message_count'))
+        self._metadata_user_message_count = _parse_nonnegative_int(kwargs.get('user_message_count'))
+        self._compact_user_message_count_cache = None
 
     @property
     def path(self):
@@ -855,7 +874,12 @@ class Session:
             or _parse_optional_timestamp(self.updated_at)
         )
         meta['last_message_at'] = self.last_message_at
-        meta['message_count'] = len(self.messages or [])
+        message_count = len(self.messages or [])
+        user_message_count = self._user_message_count_for_compact()
+        meta['message_count'] = message_count
+        meta['user_message_count'] = user_message_count
+        self._metadata_message_count = message_count
+        self._metadata_user_message_count = user_message_count
         meta['messages'] = self.messages
         meta['tool_calls'] = self.tool_calls
         # Fields not in METADATA_FIELDS (e.g. last_usage) go at the end
@@ -1017,6 +1041,31 @@ class Session:
                 lookup_index_message_count=lookup_index_message_count,
             )
 
+    def _user_message_count_for_compact(self) -> int:
+        messages = self.messages if isinstance(self.messages, list) else []
+        message_count = len(messages)
+        metadata_message_count = self._metadata_message_count
+        metadata_user_count = self._metadata_user_message_count
+        if (
+            metadata_user_count is not None
+            and (getattr(self, '_loaded_metadata_only', False) or metadata_message_count == message_count)
+        ):
+            return metadata_user_count
+        if not messages:
+            return 0
+        last_identity = id(messages[-1]) if messages else 0
+        cache = getattr(self, '_compact_user_message_count_cache', None)
+        if (
+            isinstance(cache, tuple)
+            and len(cache) == 3
+            and cache[0] == message_count
+            and cache[1] == last_identity
+        ):
+            return cache[2]
+        count = sum(1 for message in messages if _message_role(message) == 'user')
+        self._compact_user_message_count_cache = (message_count, last_identity, count)
+        return count
+
     def compact(self, include_runtime=False, active_stream_ids=None) -> dict:
         active_stream_ids = active_stream_ids if active_stream_ids is not None else set()
         has_pending_user_message = bool(self.pending_user_message)
@@ -1027,13 +1076,19 @@ class Session:
         )
         if has_pending_user_message:
             message_count = max(message_count, 1)
-        last_message_at = (
-            _last_message_timestamp(self.messages)
-            or _parse_optional_timestamp(self.last_message_at)
-            or self.updated_at
-        )
-        if has_pending_user_message and self.pending_started_at:
-            last_message_at = self.pending_started_at
+        last_message_at = max(
+            (
+                value for value in (
+                    _parse_optional_timestamp(self.last_message_at),
+                    _recent_message_timestamp(self.messages),
+                )
+                if value
+            ),
+            default=0.0,
+        ) or _parse_optional_timestamp(self.updated_at) or 0.0
+        pending_started_at = _parse_optional_timestamp(self.pending_started_at)
+        if has_pending_user_message and pending_started_at:
+            last_message_at = max(last_message_at, pending_started_at)
         return {
             'session_id': self.session_id,
             'title': self.title,
@@ -1078,9 +1133,7 @@ class Session:
                 'worktree_repo_root': self.worktree_repo_root,
                 'worktree_created_at': self.worktree_created_at,
             } if self.worktree_path else {}),
-            'user_message_count': sum(
-                1 for message in self.messages if _message_role(message) == 'user'
-            ) if isinstance(self.messages, list) else 0,
+            'user_message_count': self._user_message_count_for_compact(),
             'active_stream_id': self.active_stream_id,
             'pending_user_message': self.pending_user_message,
             'has_pending_user_message': has_pending_user_message,
@@ -2191,9 +2244,8 @@ def _has_compression_continuation(session) -> bool:
             if path.stem == sid:
                 continue
             try:
-                head = path.read_text(encoding='utf-8', errors='ignore')[:4096]
-            except TypeError:
-                head = path.read_text(encoding='utf-8')[:4096]
+                with path.open('r', encoding='utf-8', errors='ignore') as f:
+                    head = f.read(4096)
             except OSError:
                 continue
             if needle in head:
@@ -3027,13 +3079,38 @@ def _sidebar_title_is_generic_webui(title: str | None) -> bool:
 
 def _enrich_sidebar_lineage_metadata(sessions: list[dict]) -> None:
     """Attach state.db compression lineage metadata used by sidebar collapse."""
-    try:
-        metadata = read_session_lineage_metadata(
-            _active_state_db_path(),
-            {str(s.get('session_id')) for s in sessions if s.get('session_id')},
-        )
-    except Exception:
+    global _SIDEBAR_LINEAGE_METADATA_CACHE
+    session_ids = tuple(
+        sorted(str(s.get('session_id')) for s in sessions if s.get('session_id'))
+    )
+    if not session_ids:
         return
+    db_path = _active_state_db_path()
+    now = time.time()
+    cache_key_path = str(db_path)
+    with _SIDEBAR_LINEAGE_METADATA_LOCK:
+        cached = _SIDEBAR_LINEAGE_METADATA_CACHE
+        if (
+            cached is not None
+            and cached[1] == cache_key_path
+            and cached[2] == session_ids
+            and now - cached[0] <= _SIDEBAR_LINEAGE_METADATA_TTL_SECONDS
+        ):
+            metadata = copy.deepcopy(cached[3])
+        else:
+            metadata = None
+    if metadata is None:
+        try:
+            metadata = read_session_lineage_metadata(db_path, set(session_ids))
+        except Exception:
+            return
+        with _SIDEBAR_LINEAGE_METADATA_LOCK:
+            _SIDEBAR_LINEAGE_METADATA_CACHE = (
+                now,
+                cache_key_path,
+                session_ids,
+                copy.deepcopy(metadata),
+            )
     for session in sessions:
         sid = session.get('session_id')
         if sid in metadata:

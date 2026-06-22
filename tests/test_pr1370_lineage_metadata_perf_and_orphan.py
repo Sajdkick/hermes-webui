@@ -111,6 +111,32 @@ def test_does_not_full_scan_sessions_table(tmp_path, monkeypatch):
     )
 
 
+def test_sidebar_lineage_metadata_is_cached_briefly(monkeypatch, tmp_path):
+    """Repeated sidebar polls should not re-query state.db for identical rows."""
+    import api.models as models
+
+    calls = []
+    db = tmp_path / "state.db"
+    db.write_text("placeholder", encoding="utf-8")
+    monkeypatch.setattr(models, "_active_state_db_path", lambda: db)
+    monkeypatch.setattr(models, "_SIDEBAR_LINEAGE_METADATA_CACHE", None)
+
+    def fake_read(db_path, session_ids):
+        calls.append((db_path, tuple(sorted(session_ids))))
+        return {"child": {"parent_session_id": "parent"}}
+
+    monkeypatch.setattr(models, "read_session_lineage_metadata", fake_read)
+    rows_a = [{"session_id": "child"}, {"session_id": "parent"}]
+    rows_b = [{"session_id": "child"}, {"session_id": "parent"}]
+
+    models._enrich_sidebar_lineage_metadata(rows_a)
+    models._enrich_sidebar_lineage_metadata(rows_b)
+
+    assert calls == [(db, ("child", "parent"))]
+    assert rows_a[0]["parent_session_id"] == "parent"
+    assert rows_b[0]["parent_session_id"] == "parent"
+
+
 def test_orphan_parent_reference_not_exposed_in_metadata(tmp_path):
     """If a session row references a parent that doesn't exist in state.db
     (orphan), the API output must NOT include `parent_session_id` — because

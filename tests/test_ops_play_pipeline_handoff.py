@@ -570,6 +570,62 @@ def test_start_play_pipeline_replaces_existing_ready_pipeline(monkeypatch, tmp_p
     assert status["runId"] == "new-run"
 
 
+def test_start_play_pipeline_reconciles_stale_runtime_without_memory_state(monkeypatch, tmp_path):
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+    monkeypatch.setattr(
+        play_pipeline,
+        "get_project_play_config",
+        lambda project_id: {
+            "project": {"id": project_id, "name": "Demo", "path": str(project_path), "coreBranch": "main"},
+            "projectPath": project_path,
+            "path": str(project_path / ".hermes" / "play.json"),
+            "branch": "main",
+            "config": {
+                "version": 2,
+                "buildOnly": True,
+                "build": {"command": "true", "cwd": ".", "env": {}, "timeoutMs": 1000},
+                "start": {"command": "", "cwd": ".", "env": {}, "port": {"mode": "fixed"}},
+                "inspect": {"mode": "direct", "url": "", "readyTimeoutMs": 5000},
+            },
+        },
+    )
+    monkeypatch.setattr(
+        play_pipeline,
+        "get_project_play_config_file_info",
+        lambda project_id: {
+            "configured": True,
+            "valid": True,
+            "exists": True,
+            "path": str(project_path / ".hermes" / "play.json"),
+            "branch": "main",
+            "buildOnly": True,
+        },
+    )
+    monkeypatch.setattr(play_pipeline, "_pipeline_worker", lambda play_config, state: None)
+    cleanup_calls = []
+    monkeypatch.setattr(
+        play_pipeline,
+        "_stop_stale_play_runtime_processes",
+        lambda project_id, path, **kwargs: cleanup_calls.append((project_id, Path(path), kwargs)) or [301],
+    )
+    with play_pipeline._LOCK:
+        play_pipeline._PIPELINES.pop("project-1", None)
+
+    try:
+        status = play_pipeline.start_project_play_pipeline(
+            "project-1",
+            {"runId": "new-run", "taskId": "task-1", "sessionId": "session-1"},
+        )
+    finally:
+        with play_pipeline._LOCK:
+            play_pipeline._PIPELINES.pop("project-1", None)
+
+    assert cleanup_calls == [("project-1", project_path, {})]
+    assert status["status"] == "building"
+    assert status["runId"] == "new-run"
+
+
 def test_play_notification_includes_task_and_terminal_target(monkeypatch):
     monkeypatch.setattr(
         ops_notifications.ops_projects,
