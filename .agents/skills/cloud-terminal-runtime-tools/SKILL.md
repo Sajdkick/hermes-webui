@@ -28,19 +28,12 @@ Use `ct-runtime` for Cloud Terminal Play and inspect workflows. Do not guess the
    - `ct-runtime inspect session close <session-id>`
 4. If Play fails or never becomes ready:
    - `ct-runtime play logs --limit 200`
-5. If `ct-runtime` is unavailable because the shell is not inside a Cloud Terminal project session, use the project’s documented manual Play fallback instead of skipping startup verification:
-   - Read the project build/start docs and `project_play.json`.
-   - Pick an unused port from the configured range.
-   - Run the Play start command with the same env from `project_play.json` plus `PORT=<unused-port>`.
-   - Verify the served app route (commonly `/app`) returns `HTTP/1.1 200 OK`; if `/health` falls through to SPA HTML, report that and use the app route/listening socket as the startup proof.
-   - Stop the manual server/background process before finishing.
-6. If screenshot capture is unavailable or you need human feedback:
+5. If screenshot capture is unavailable or you need human feedback:
    - `ct-runtime inspect request-review "Please inspect the running app and share feedback."`
 
 ## Guidance
 
 - Prefer `ct-runtime play start --wait` before trying to inspect or capture screenshots.
-- For browser runtime dependency failures where a WASM/worker/model asset may be falling through to an HTML fallback, use `references/browser-runtime-wasm-assets.md`: verify exact dev and built asset URLs by status, content type, and first bytes before claiming the runtime path is fixed.
 - Use `ct-runtime inspect screenshot --url <url>` only when you need a specific in-app route after Play is ready.
 - Use `ct-runtime inspect screenshot --session <id>` when the app state lives only inside an already-mutated browser session.
 - If the project enables inspect auth (for example `inspect.auth.strategy=debug-login` or `AUTH_DEBUG_LOGIN=true` in Play config), `ct-runtime inspect screenshot` will automatically prime a temporary authenticated browser profile before capture.
